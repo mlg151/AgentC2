@@ -65,6 +65,6 @@ Before declaring a release validated on a desktop, record the OS version, archit
 - On GNOME and KDE, test launcher/taskbar association, minimize/restore, tray Open/Quit where available, clipboard with another application, and real notification banners. Test without a visible tray host.
 - On each Mac architecture, launch from Finder with the expected SSH agent and Tailscale installation, use native menu Copy/Paste in terminal and settings fields, close/reopen via the Dock, and Quit from the app/menu bar.
 - Perform physical sleep/wake with a live phone on cellular Tailscale; verify observer reconnection, explicit control handoff, fresh resource readings, and no duplicate lifecycle action.
-- Check native notification permission/Focus/Do Not Disturb behavior and clicking a real notification. CI tests dispatch but does not validate OS notification permission prompts or delivery.
+- Check native notification permission/Focus/Do Not Disturb behavior and clicking a real notification. CI simulates notification availability and display to test dispatch/click routing; it does not validate OS notification permission prompts or delivery.
 
 These physical-desktop, signing, and real-tailnet checks cannot be established by headless CI alone. CI results must be consulted for Windows/macOS execution; a local Linux build is not evidence that those platforms passed.

@@ -140,6 +140,9 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
     const config = saved.settings;
     await app.evaluate(({ Notification }) => {
       globalThis.qaNotifications = [];
+      // Headless Linux has no notification daemon. Exercise dispatch/click
+      // routing deterministically; real OS delivery is a separate manual check.
+      Notification.isSupported = () => true;
       Notification.prototype.show = function() { globalThis.qaNotifications.push(this); };
     });
     config.notifications = true;
