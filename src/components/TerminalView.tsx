@@ -1,3 +1,4 @@
+import { isMac, primaryModifier } from '../platform';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowDownToLine, ClipboardPaste, Copy, Search } from 'lucide-react';
 import { Terminal } from '@xterm/xterm';
@@ -136,7 +137,7 @@ export function TerminalView({ terminalId, visible }: { terminalId: string | nul
         if (key === 'f' && event.type === 'keydown') setSearchOpen(true);
         return false;
       }
-      const copy = modifier && (key === 'c' && (event.shiftKey || terminal.hasSelection()) || key === 'insert');
+      const copy = event.metaKey && key === 'c' || event.ctrlKey && (key === 'c' && (event.shiftKey || !isMac && terminal.hasSelection()) || key === 'insert');
       const paste = modifier && key === 'v' || event.shiftKey && key === 'insert';
       const history = event.shiftKey && (key === 'pageup' || key === 'pagedown');
       if (!copy && !paste && !history) return true;
@@ -252,10 +253,10 @@ export function TerminalView({ terminalId, visible }: { terminalId: string | nul
     <div className="terminal-utilities">
       {terminalId && control ? <><span className="control-owner">{control.canControl ? 'You control' : `${control.controller?.name || 'No device'} controls`}</span>{!control.canControl ? <button onClick={() => void window.agentHQ?.takeTerminal(terminalId).then((state) => { setControl(state); controlRef.current = true; fitRef.current?.fit(); const terminal = terminalRef.current; if (terminal) { terminal.options.disableStdin = false; void window.agentHQ?.resizeTerminal(terminalId, terminal.cols, terminal.rows).catch(showError); terminal.focus(); } }).catch(showError)}>Take control</button> : null}</> : null}
       <span className="terminal-hint" role="status">{feedback || 'Scroll for history · Drag to select'}</span>
-      <button title="Search retained history (Ctrl+F)" onClick={() => setSearchOpen(true)}><Search size={14} /> Find</button>
+      <button title={`Search retained history (${primaryModifier}+F)`} onClick={() => setSearchOpen(true)}><Search size={14} /> Find</button>
       <button title="Return to the latest output" onClick={() => void latest().catch(showError)}><ArrowDownToLine size={14} /> Latest</button>
-      <button title="Copy selection (Ctrl+Shift+C)" disabled={!hasSelection} onClick={() => void copySelection()}><Copy size={14} /> Copy</button>
-      <button title="Paste clipboard (Ctrl+V or Ctrl+Shift+V)" onClick={() => void pasteClipboard()}><ClipboardPaste size={14} /> Paste</button>
+      <button title={`Copy selection (${isMac ? '⌘+C' : 'Ctrl+Shift+C'})`} disabled={!hasSelection} onClick={() => void copySelection()}><Copy size={14} /> Copy</button>
+      <button title={`Paste clipboard (${primaryModifier}+V)`} onClick={() => void pasteClipboard()}><ClipboardPaste size={14} /> Paste</button>
     </div>
     <div className="terminal-wrap" ref={elementRef} aria-label="Remote terminal" />
     {searchOpen && terminalId ? <HistorySearch terminalId={terminalId} onClose={closeSearch} /> : null}

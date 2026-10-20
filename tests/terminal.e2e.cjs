@@ -13,7 +13,7 @@ const labels = ['A', 'B', 'KEYS', 'MOUSE'];
 const names = labels.map(() => `hq-${crypto.randomBytes(6).toString('hex')}`);
 const host = process.env.AGENTC2_HOST || process.env.AGENT_HQ_HOST;
 if (!host) throw new Error('Set AGENTC2_HOST to an explicitly configured SSH test host');
-const ssh = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'OpenSSH', 'ssh.exe');
+const ssh = require('../electron/platform.cjs').sshBinary();
 
 function remote(action) {
   const payload = Buffer.from(JSON.stringify({ action, names,
@@ -131,16 +131,23 @@ async function poll(check, message) {
     await page.mouse.up();
     await page.getByRole('button', { name: 'Copy', exact: true }).waitFor();
     await poll(() => page.getByRole('button', { name: 'Copy', exact: true }).isEnabled(), 'Mouse drag did not select text');
-    await page.keyboard.press('Control+Shift+C');
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+c' : 'Control+Shift+C');
     await poll(async () => (await page.evaluate(() => window.agentHQ.readClipboard())).includes('HQ_HISTORY_A'), 'Copy shortcut did not copy rendered output');
     await page.evaluate(() => window.agentHQ.writeClipboard('clipboard reset'));
-    await page.keyboard.press('Control+c');
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+c' : 'Control+c');
     await poll(async () => (await page.evaluate(() => window.agentHQ.readClipboard())).includes('HQ_HISTORY_A'), 'Ctrl+C did not copy the selection');
     await page.evaluate(() => window.agentHQ.writeClipboard('clipboard reset'));
     await page.getByRole('button', { name: 'Copy', exact: true }).click();
     await poll(async () => (await page.evaluate(() => window.agentHQ.readClipboard())).includes('HQ_HISTORY_A'), 'Copy button did not copy the selection');
-    console.log('PASS mouse selection, Ctrl+C, Ctrl+Shift+C, and Copy button');
-    for (const [shortcut, marker] of [['Control+v', 'HQ_PASTE_CTRL_V'], ['Control+Shift+v', 'HQ_PASTE_CTRL_SHIFT_V'], ['Shift+Insert', 'HQ_PASTE_SHIFT_INSERT']]) {
+    if (process.platform === 'darwin') {
+      await page.evaluate(() => window.agentHQ.writeClipboard('interrupt must preserve clipboard'));
+      await page.locator('.session-pane:visible .xterm-helper-textarea').focus();
+      await page.keyboard.press('Control+c');
+      await poll(async () => (await remote('state'))[0].text.includes('^C'), 'macOS Ctrl+C did not reach the shell');
+      assert.equal(await page.evaluate(() => window.agentHQ.readClipboard()), 'interrupt must preserve clipboard');
+    }
+    console.log(`PASS mouse selection, platform copy shortcuts, and Copy button${process.platform === 'darwin' ? '; Ctrl+C interrupts without changing the clipboard' : ''}`);
+    for (const [shortcut, marker] of [[process.platform === 'darwin' ? 'Meta+v' : 'Control+v', 'HQ_PASTE_CTRL_V'], ['Control+Shift+v', 'HQ_PASTE_CTRL_SHIFT_V'], ['Shift+Insert', 'HQ_PASTE_SHIFT_INSERT']]) {
       await page.evaluate((text) => window.agentHQ.writeClipboard(text), marker);
       await page.locator('.session-pane:visible .xterm-helper-textarea').focus();
       await page.keyboard.press('Control+u');

@@ -59,6 +59,7 @@ export interface CreateInput {
 }
 
 export interface AgentHQApi {
+  readonly platform: string;
   getState(): Promise<{ settings: Settings; workspace: Workspace; attention: AttentionItem[] }>;
   saveSettings(settings: Settings): Promise<Settings>;
   saveWorkspace(workspace: Workspace): Promise<Workspace>;

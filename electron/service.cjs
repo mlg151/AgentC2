@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const { sshBinary } = require('./platform.cjs');
 const { EventEmitter } = require('node:events');
 const pty = require('node-pty');
 const { Store, validateSettings, validateWorkspace } = require('./config.cjs');
@@ -11,9 +12,7 @@ const { scrollTerminal } = require('./terminal-scroll.cjs');
 
 function createService({ directory, home }) {
   const events = new EventEmitter();
-  const SSH_BINARY = process.platform === 'win32'
-    ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'OpenSSH', 'ssh.exe')
-    : 'ssh';
+  const SSH_BINARY = sshBinary();
   const SSH_ARGS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'StrictHostKeyChecking=yes'];
   const TMUX_NAME = /^hq-[a-f0-9]{12}$/;
   const OTHER_TMUX_NAME = /^[A-Za-z0-9_.:-]{1,80}$/;

@@ -1,3 +1,4 @@
+import { isMac } from '../platform';
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 import type { RemoteStatus } from '../types';
@@ -18,7 +19,7 @@ export function RemoteAccess() {
     void Promise.all([window.agentHQ!.remoteStatus(), window.agentHQ!.tailscaleStatus()]).then(([remote, ts]) => {
       if (cancelled) return;
       setStatus(remote); setEnabled(remote.enabled); setPort(remote.port); setUrl(remote.url || ts.url); setTransport(remote.transport || 'https');
-      setTailscale(ts.state === 'Running' ? 'Tailscale is connected.' : `Tailscale: ${ts.state}. Sign in on your PC and phone.`);
+      setTailscale(ts.state === 'Running' ? 'Tailscale is connected.' : `Tailscale: ${ts.state}. Sign in on your computer and phone.`);
     }).catch((cause) => { if (!cancelled) setError(String(cause)); });
     const off = window.agentHQ?.onRemoteStatus((remote) => { setStatus(remote); setEnabled(remote.enabled); setPairing(null); });
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -40,13 +41,13 @@ export function RemoteAccess() {
     } catch (cause) { setError(String(cause)); } finally { setBusy(false); }
   }
   return <div className="remote-access dialog-form">
-    <p className="field-note">Control sessions from your phone through your private Tailscale network. AgentC2 keeps running in the tray when you close its window. The PC must stay awake.</p>
+    <p className="field-note">Control sessions from your phone through your private Tailscale network. Keep this computer awake. When remote access is enabled, closing minimizes the window on Linux and keeps AgentC2 in the tray or Dock on other desktops.</p>
     <p role="status">{status?.running ? 'Gateway running' : 'Gateway stopped'} · {tailscale}</p>
     {status?.error ? <p role="alert" className="form-error">{status.error}</p> : null}
     <label className="checkbox-label"><input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> Enable remote access and tray operation</label>
     <label>Connection method<select value={transport} onChange={(e) => setTransport(e.target.value as typeof transport)}><option value="https">Tailscale HTTPS name</option><option value="tailnet-http">Private Tailscale IP (DNS disabled)</option></select></label>
     <div className="form-grid"><label>Companion origin<input placeholder={transport === 'tailnet-http' ? 'http://100.x.x.x:8080' : 'https://pc.tailnet.ts.net'} value={url} onChange={(e) => setUrl(e.target.value)} /></label><label>Local gateway port<input type="number" min={1024} max={65535} value={port} onChange={(e) => setPort(Number(e.target.value))} /></label></div>
-    {transport === 'tailnet-http' ? <p className="field-note">Sign in to Tailscale on both devices. Forward port 8080 through the private tailnet:<br /><code>tailscale serve --bg --tcp=8080 tcp://127.0.0.1:{port}</code><br />Use http:// followed by this PC’s Tailscale IPv4 address and :8080. Tailscale encrypts the connection; DNS is not required. Allow this port only on the Tailscale interface. Do not enable Funnel.</p> : <p className="field-note">Sign in to Tailscale on both devices. In an Administrator PowerShell window, forward private HTTPS traffic to AgentC2:<br /><code>tailscale serve --bg http://127.0.0.1:{port}</code><br />Use the HTTPS origin shown by that command. Existing Serve configurations may need a different HTTPS port. Do not enable Funnel.</p>}
+    {transport === 'tailnet-http' ? <p className="field-note">Sign in to Tailscale on both devices. Forward port 8080 through the private tailnet:<br /><code>tailscale serve --bg --tcp=8080 tcp://127.0.0.1:{port}</code><br />Use http:// followed by this computer’s Tailscale IPv4 address and :8080. Tailscale encrypts the connection; DNS is not required. Allow this port only on the Tailscale interface. Do not enable Funnel.</p> : <p className="field-note">Sign in to Tailscale on both devices. {window.agentHQ?.platform === 'win32' ? 'In an Administrator PowerShell window' : isMac ? 'In Terminal (enable the Tailscale CLI first)' : 'In a terminal'}, forward private HTTPS traffic to AgentC2:<br /><code>tailscale serve --bg http://127.0.0.1:{port}</code><br />Use the HTTPS origin shown by that command. Existing Serve configurations may need a different HTTPS port. Do not enable Funnel.</p>}
     <button className="button-primary" disabled={busy} onClick={() => void save()}>{busy ? 'Working…' : 'Apply remote access'}</button>
     {status?.running ? <>
       <label>Companion address<input readOnly value={`${status.url}/companion.html`} /></label>

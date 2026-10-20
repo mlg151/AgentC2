@@ -1,0 +1,155 @@
+name: Desktop CI and releases
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  desktop:
+    name: ${{ matrix.platform }}-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2022
+            platform: win
+            arch: x64
+          - runner: ubuntu-22.04
+            platform: linux
+            arch: x64
+          - runner: macos-15-intel
+            platform: mac
+            arch: x64
+          - runner: macos-15
+            platform: mac
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          architecture: ${{ matrix.arch }}
+          cache: npm
+      - name: Verify version and native runner architecture
+        shell: bash
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          node scripts/check-version.cjs
+          node -e "if(process.arch !== process.env.TARGET_ARCH) throw Error('Native runner architecture mismatch')"
+      - name: Linux packaging and display prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libarchive-tools libfuse2 xvfb
+      - run: npm ci
+      - run: npm run test:ci
+      - name: Desktop regression checks
+        if: runner.os != 'Linux'
+        run: npm run test:desktop
+      - name: Desktop regression checks (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:desktop
+      - name: Package native application
+        shell: bash
+        env:
+          # Secrets are never exposed to pull requests or ordinary branch builds.
+          CSC_LINK: ${{ startsWith(github.ref, 'refs/tags/v') && (matrix.platform == 'win' && secrets.WIN_CSC_LINK || matrix.platform == 'mac' && secrets.MAC_CSC_LINK) || '' }}
+          CSC_KEY_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/v') && (matrix.platform == 'win' && secrets.WIN_CSC_KEY_PASSWORD || matrix.platform == 'mac' && secrets.MAC_CSC_KEY_PASSWORD) || '' }}
+          APPLE_ID: ${{ startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'mac' && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'mac' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'mac' && secrets.APPLE_TEAM_ID || '' }}
+          TARGET_PLATFORM: ${{ matrix.platform }}
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          npx electron-builder --"$TARGET_PLATFORM" --"$TARGET_ARCH" --publish never
+          node scripts/record-package.cjs
+      - name: Packaged startup and native PTY smoke
+        if: runner.os != 'Linux'
+        run: npm run test:package
+      - name: Packaged startup and native PTY smoke (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:package
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: AgentC2-${{ matrix.platform }}-${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            release/*.exe
+            release/*.AppImage
+            release/*.deb
+            release/*.dmg
+            release/*.zip
+            release/*.blockmap
+            release/*-signing.txt
+
+  linux-ssh:
+    name: Isolated Linux SSH regressions
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    env:
+      AGENTC2_HOST: agentc2-ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Provision an isolated SSH account on the disposable runner
+        run: bash .github/scripts/setup-linux-ssh.sh
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright-core install chromium
+      - name: Terminal, workspace, and companion regressions
+        run: xvfb-run -a bash .github/scripts/test-linux-ssh.sh
+
+  release:
+    name: Publish version-tag release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [desktop, linux-ssh]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node scripts/check-version.cjs
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: AgentC2-*
+          path: release-assets
+          merge-multiple: true
+      - name: Publish checked packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node scripts/prepare-release.cjs release-assets
+          cat > "$RUNNER_TEMP/release-notes.md" <<'EOF'
+          Windows x64, Linux x64, and macOS Intel/Apple Silicon packages are attached.
+          See each *-signing.txt asset for the verified signing/notarization status.
+          Installation and unsigned-package limitations: docs/platforms.md in this tag.
+          SHA256SUMS.txt covers all attached package and signing files.
+          EOF
+          release_flags=()
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            release_flags+=(--prerelease)
+          fi
+          gh release create "$RELEASE_TAG" release-assets/* --verify-tag --draft --title "AgentC2 $RELEASE_TAG" --generate-notes --notes-file "$RUNNER_TEMP/release-notes.md" "${release_flags[@]}"
+          gh release edit "$RELEASE_TAG" --draft=false

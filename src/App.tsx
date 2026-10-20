@@ -7,6 +7,7 @@ import { SettingsDialog } from './components/SettingsDialog';
 import { QuickSwitcher } from './components/QuickSwitcher';
 import { ProviderMark } from './components/ProviderMark';
 import { HostMonitor } from './components/HostMonitor';
+import { primaryModifier } from './platform';
 import { emptyMetadata, projectFor } from './workspace';
 import type { AttentionItem, CreateInput, Inventory, Session, Settings, Workspace } from './types';
 
@@ -134,7 +135,7 @@ export default function App() {
   const closeSwitcher = useCallback(() => setShowSwitcher(false), []);
 
   return <div className="app-shell">
-    <header className="topbar"><div className="brand"><TerminalSquare size={24} /><span>AgentC2</span></div><div className="topbar-actions"><button className="quick-trigger" onClick={() => setShowSwitcher(true)}><Search size={14} />Quick switch <kbd>Ctrl K</kbd></button><label className="host-picker">Host<select aria-label="Filter SSH host" value={hostFilter} onChange={(e) => setHostFilter(e.target.value)}><option value="all">All hosts</option>{settings?.hosts.filter((h) => h.enabled).map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}</select></label><button className="icon-button" aria-label="Settings" title="Settings" onClick={() => setShowSettings(true)}><SettingsIcon size={19} /></button></div></header>
+    <header className="topbar"><div className="brand"><TerminalSquare size={24} /><span>AgentC2</span></div><div className="topbar-actions"><button className="quick-trigger" onClick={() => setShowSwitcher(true)}><Search size={14} />Quick switch <kbd>{primaryModifier} K</kbd></button><label className="host-picker">Host<select aria-label="Filter SSH host" value={hostFilter} onChange={(e) => setHostFilter(e.target.value)}><option value="all">All hosts</option>{settings?.hosts.filter((h) => h.enabled).map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}</select></label><button className="icon-button" aria-label="Settings" title="Settings" onClick={() => setShowSettings(true)}><SettingsIcon size={19} /></button></div></header>
     <div className="workspace">
       <nav className="sidebar" aria-label="Workspace navigation">
         <button className={`sidebar-item${inbox ? ' active' : ''}`} onClick={() => setInbox(true)}><Bell size={18} /><span>Attention inbox</span><b>{unread.length}</b></button>

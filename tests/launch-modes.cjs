@@ -78,10 +78,10 @@ for provider,executable in [('codex','codex'),('claude','claude'),('antigravity'
   if name: scope['managed_action']({'name':name},'stop')
 print(json.dumps(results))
 `;
-const ssh = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'OpenSSH', 'ssh.exe');
+const ssh = require('../electron/platform.cjs').sshBinary();
 const host = process.env.AGENTC2_HOST || process.env.AGENT_HQ_HOST;
 if (!host) throw new Error('Set AGENTC2_HOST to an explicitly configured SSH test host');
-const child = spawn(ssh, ['-o', 'BatchMode=yes', host, 'python3', '-'], { windowsHide: true });
+const child = spawn(ssh, ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', host, 'python3', '-'], { windowsHide: true });
 child.stdout.pipe(process.stdout);
 child.stderr.pipe(process.stderr);
 child.on('error', (error) => { console.error(error); process.exitCode = 1; });

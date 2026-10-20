@@ -1,7 +1,7 @@
-const { app, BrowserWindow, clipboard, ipcMain, Menu, Notification, Tray, powerMonitor, shell } = require('electron');
+const { app, BrowserWindow, clipboard, ipcMain, Menu, Notification, Tray, nativeImage, powerMonitor, shell } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
-const { execFile } = require('node:child_process');
+const { tailscaleStatus, closeAction } = require('./platform.cjs');
 const { createService } = require('./service.cjs');
 const { Gateway } = require('./gateway.cjs');
 
@@ -9,11 +9,11 @@ const desktop = { id: 'desktop', name: 'Desktop' };
 let mainWindow, service, gateway, tray, monitor, healthMonitor;
 let quitting = false;
 let startupError = '';
-const icon = path.join(__dirname, '..', 'assets', 'app-icon.ico');
+const icon = path.join(__dirname, '..', 'assets', process.platform === 'win32' ? 'app-icon.ico' : 'app-icon.png');
 function send(event, ...args) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(event, ...args);
 }
-function showWindow() { if (!mainWindow) createWindow(); mainWindow.show(); mainWindow.focus(); }
+function showWindow() { if (!mainWindow || mainWindow.isDestroyed()) createWindow(); if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); }
 function assertSender(event) {
   if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('Untrusted window');
   if (startupError) throw new Error(startupError);
@@ -30,37 +30,64 @@ function createWindow() {
     } catch { /* Reject malformed URLs from terminal output. */ }
     return { action: 'deny' };
   });
+  // Let Chromium and xterm handle editing shortcuts instead of menu accelerators.
+  mainWindow.webContents.on('before-input-event', (_event, input) => {
+    mainWindow.webContents.setIgnoreMenuShortcuts(Boolean((input.meta || input.control) && ['c', 'v', 'f', 'k'].includes(input.key.toLowerCase())));
+  });
   mainWindow.webContents.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => { if (isMainFrame) service?.terminals.disconnect('desktop'); });
   if (process.env.NODE_ENV === 'development') mainWindow.loadURL('http://127.0.0.1:5173');
   else mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   mainWindow.on('close', (event) => {
-    if (!quitting && gateway?.data.enabled && tray) { event.preventDefault(); mainWindow.hide(); }
+    const action = closeAction({ quitting, remoteEnabled: gateway?.data.enabled, hasTray: Boolean(tray) });
+    if (action !== 'close') { event.preventDefault(); if (action === 'minimize') mainWindow.minimize(); else mainWindow.hide(); }
   });
   mainWindow.on('closed', () => { mainWindow = null; service?.terminals.disconnect('desktop'); });
 }
 function updateTray() {
   if (!gateway?.data.enabled) { tray?.destroy(); tray = null; return; }
-  if (!tray) { tray = new Tray(icon); tray.setToolTip('AgentC2 — remote access enabled'); tray.on('double-click', showWindow); }
+  if (!tray) {
+    try {
+      const image = nativeImage.createFromPath(process.platform === 'darwin' ? path.join(__dirname, '..', 'assets', 'trayTemplate.png') : icon);
+      if (process.platform === 'darwin') image.setTemplateImage(true);
+      tray = new Tray(process.platform === 'linux' ? image.resize({ width: 22, height: 22 }) : image);
+      tray.setToolTip('AgentC2 — remote access enabled');
+      if (process.platform !== 'darwin') { tray.on('click', showWindow); tray.on('double-click', showWindow); }
+    } catch (error) {
+      tray?.destroy(); tray = null;
+      console.warn('Tray unavailable; use the taskbar or Dock to reopen AgentC2:', error.message);
+      return;
+    }
+  }
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open AgentC2', click: showWindow },
     { label: 'Disable remote access', click: () => { void gateway.configure({ ...gateway.data, enabled: false }).then(() => { updateTray(); showWindow(); send('remote:updated', gateway.status()); }).catch((error) => { gateway.error = error.message; showWindow(); }); } },
     { type: 'separator' }, { label: 'Quit AgentC2', click: () => app.quit() },
   ]));
 }
-function tailscaleStatus() {
-  const binary = process.platform === 'win32' ? path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Tailscale', 'tailscale.exe') : 'tailscale';
-  return new Promise((resolve) => {
-    execFile(binary, ['status', '--json'], { windowsHide: true, timeout: 8000, maxBuffer: 2_000_000 }, (error, stdout) => {
-      try {
-        const state = JSON.parse(stdout);
-        resolve({ installed: true, state: state.BackendState, url: state.Self?.DNSName ? `https://${state.Self.DNSName.replace(/\.$/, '')}` : '', error: error ? 'Tailscale needs attention' : '' });
-      } catch { resolve({ installed: error?.code !== 'ENOENT', state: 'Unavailable', url: '', error: 'Install Tailscale and sign in on your PC and phone.' }); }
-    });
-  });
+function installMenu() {
+  const mac = process.platform === 'darwin';
+  const shortcut = (key) => {
+    showWindow();
+    for (const type of ['keyDown', 'keyUp']) mainWindow.webContents.sendInputEvent({ type, keyCode: key, modifiers: [mac ? 'meta' : 'control'] });
+  };
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    ...(mac ? [{ role: 'appMenu' }] : []),
+    { label: 'File', submenu: [
+      { label: 'Open AgentC2', click: showWindow },
+      { label: 'Quick switch', accelerator: 'CommandOrControl+K', click: () => shortcut('K') },
+      { label: 'Find in terminal history', accelerator: 'CommandOrControl+F', click: () => shortcut('F') },
+      { type: 'separator' }, { role: mac ? 'close' : 'quit' },
+    ] },
+    { role: 'editMenu' },
+    { label: 'View', submenu: [{ role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }] },
+    { role: 'windowMenu' },
+  ]));
 }
 
 app.whenReady().then(async () => {
   if (process.platform === 'win32') app.setAppUserModelId('com.agentc2.desktop');
+  installMenu();
+  if (process.platform === 'darwin') app.dock?.setMenu(Menu.buildFromTemplate([{ label: 'Open AgentC2', click: showWindow }]));
   // Keep existing desktop settings and paired devices after the product rename.
   const legacyDirectories = ['agent-hq', 'Agent HQ'].map((name) => path.join(app.getPath('appData'), name));
   const legacyDirectory = legacyDirectories.find((candidate) => fs.existsSync(path.join(candidate, 'workspace.json')));
@@ -138,4 +165,4 @@ app.on('before-quit', () => {
   clearInterval(monitor); clearInterval(healthMonitor);
   void gateway?.dispose(); service?.terminals.closeAll(); tray?.destroy(); tray = null;
 });
-app.on('window-all-closed', () => { if (process.platform !== 'darwin' && !gateway?.data.enabled) app.quit(); });
+app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
