@@ -72,6 +72,14 @@ async function poll(check, message) {
   throw new Error(message);
 }
 
+async function waitForInput(pane) {
+  // A handle is allocated before the snapshot/control handshake and SSH
+  // output arrive. This also applies when reattaching an existing shell.
+  await pane.locator('.terminal-panel.is-attached').waitFor({ timeout: 30000 });
+  await pane.locator('.control-owner').filter({ hasText: 'You control' }).waitFor({ timeout: 30000 });
+  await pane.locator('.xterm-rows').filter({ hasText: /\S/ }).waitFor({ timeout: 30000 });
+}
+
 (async () => {
   let app, page, clipboardBefore;
   const dataDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-hq-terminal-test-'));
@@ -94,7 +102,7 @@ async function poll(check, message) {
     await page.getByRole('textbox', { name: 'Search sessions' }).fill('AgentC2 terminal regression');
     async function select(label) {
       await page.locator('.session-row').filter({ hasText: `AgentC2 terminal regression ${label}` }).click();
-      await page.locator('.session-pane:visible .terminal-panel.is-attached').waitFor({ timeout: 30000 });
+      await waitForInput(page.locator('.session-pane:visible'));
       assert.equal(await page.locator('.session-pane:visible .detail-footer code').innerText(), names[labels.indexOf(label)]);
     }
     await select('A');
@@ -246,11 +254,7 @@ async function poll(check, message) {
     assert.equal(shell.provider, 'terminal'); assert.equal(shell.cwd, '/tmp');
     assert.ok(shell.canAttach && shell.canStop && shell.canInterrupt && shell.managed);
     const pane = page.locator('.session-pane:visible');
-    await pane.locator('.terminal-panel.is-attached').waitFor({ timeout: 30000 });
-    // The handle exists before the snapshot/control handshake and SSH shell
-    // prompt arrive. Do not type into a terminal that is still initializing.
-    await pane.locator('.control-owner').filter({ hasText: 'You control' }).waitFor({ timeout: 30000 });
-    await page.waitForFunction(() => document.querySelector('.session-pane:not(.pane-hidden) .xterm-rows')?.textContent?.trim(), undefined, { timeout: 30000 });
+    await waitForInput(pane);
     // Keep the test shell isolated and print links at known terminal cells.
     await pane.locator('.xterm-helper-textarea').focus();
     await page.keyboard.type("export HQ_REATTACH=retained; printf '\\033[2J\\033[Hhttps://example.com/agent-hq?from=desktop\\n'");
@@ -271,7 +275,7 @@ async function poll(check, message) {
     await pane.locator('.terminal-panel.is-attached').waitFor({ state: 'hidden' });
     assert.ok((await page.evaluate(() => window.agentHQ.inventory())).sessions.some((s) => s.id === shell.id && s.state === 'live'));
     await pane.getByRole('button', { name: 'Attach', exact: true }).click();
-    await pane.locator('.terminal-panel.is-attached').waitFor();
+    await waitForInput(pane);
     await pane.locator('.xterm-helper-textarea').focus();
     await page.keyboard.type('printf "REATTACH_%s\\n" "$HQ_REATTACH"');
     await page.keyboard.press('Enter');
