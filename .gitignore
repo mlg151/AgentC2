@@ -1,0 +1,23 @@
+node_modules/
+dist/
+release/
+.vite/
+*.log
+*.tsbuildinfo
+__pycache__/
+
+# Local visual references may contain private infrastructure details.
+design/
+
+# Local settings, credentials, and keys must never be published.
+.env
+.env.*
+!.env.example
+.ssh/
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+workspace.json
+remote-access.json
+companion-invitation.json
