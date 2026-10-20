@@ -247,6 +247,10 @@ async function poll(check, message) {
     assert.ok(shell.canAttach && shell.canStop && shell.canInterrupt && shell.managed);
     const pane = page.locator('.session-pane:visible');
     await pane.locator('.terminal-panel.is-attached').waitFor({ timeout: 30000 });
+    // The handle exists before the snapshot/control handshake and SSH shell
+    // prompt arrive. Do not type into a terminal that is still initializing.
+    await pane.locator('.control-owner').filter({ hasText: 'You control' }).waitFor({ timeout: 30000 });
+    await page.waitForFunction(() => document.querySelector('.session-pane:not(.pane-hidden) .xterm-rows')?.textContent?.trim(), undefined, { timeout: 30000 });
     // Keep the test shell isolated and print links at known terminal cells.
     await pane.locator('.xterm-helper-textarea').focus();
     await page.keyboard.type("export HQ_REATTACH=retained; printf '\\033[2J\\033[Hhttps://example.com/agent-hq?from=desktop\\n'");
