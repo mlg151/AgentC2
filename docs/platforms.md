@@ -57,7 +57,7 @@ For a missing/wrong-architecture native module, use the package matching your pr
 
 ## Validation coverage and manual release checks
 
-The ordinary workflow builds and smoke-tests each target natively, and runs isolated Linux SSH terminal/workspace/companion regressions. The optional SSH QA workflow runs those live checks on Windows and both macOS architectures against a configured Linux account. Terminal fixtures cover wheel/history, resizing, keyboard input, clipboard, browser-link routing, lifecycle protections, persistence, and attention notification dispatch/click routing. Companion tests cover phone layouts, control handoff, window-close background access, gateway reconnect, and simulated suspend/resume. No model prompts are sent.
+The Linux helper regressions check recorded exit evidence, native status precedence, and rejection of stale or unknown outcomes. Managed launchers retain a child exit result tied to the pane process ID when tmux omits its wait status. The ordinary workflow builds and smoke-tests each target natively, and runs isolated Linux SSH terminal/workspace/companion regressions. The optional SSH QA workflow runs those live checks on Windows and both macOS architectures against a configured Linux account. Terminal fixtures cover wheel/history, resizing, keyboard input, clipboard, browser-link routing, lifecycle protections, persistence, and attention notification dispatch/click routing. Companion tests cover phone layouts, control handoff, window-close background access, gateway reconnect, and simulated suspend/resume. No model prompts are sent.
 
 Before declaring a release validated on a desktop, record the OS version, architecture, session type, and results for these checks:
 
