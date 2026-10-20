@@ -39,7 +39,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb openbox
+          sudo apt-get install -y xvfb openbox libnotify4 dunst dbus-x11 libglib2.0-bin
       - run: npm ci
       - run: npm run build
       - run: npx playwright-core install chromium
@@ -57,7 +57,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           xvfb-run -a npm run test:desktop
-          xvfb-run -a bash .github/scripts/test-linux-ssh.sh
+          xvfb-run -a dbus-run-session -- bash .github/scripts/test-linux-ssh.sh
       - name: Provider argv and adapter checks (explicit opt-in)
         if: inputs.providers
         run: npm run test:launch-modes

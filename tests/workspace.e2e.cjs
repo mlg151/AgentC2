@@ -140,9 +140,8 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
     const config = saved.settings;
     await app.evaluate(({ Notification }) => {
       globalThis.qaNotifications = [];
-      // Headless Linux has no notification daemon. Exercise dispatch/click
-      // routing deterministically; real OS delivery is a separate manual check.
-      Notification.isSupported = () => true;
+      if (!Notification.isSupported()) throw new Error('Notification QA requires libnotify and a desktop notification service (CI uses Dunst in a private D-Bus session)');
+      // Keep native availability/construction, but record display and clicks.
       Notification.prototype.show = function() { globalThis.qaNotifications.push(this); };
     });
     config.notifications = true;
@@ -221,6 +220,10 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
     console.log(`Screenshots: ${path.join(os.tmpdir(), 'agent-hq-workspace.png')}, ${path.join(os.tmpdir(), 'agent-hq-workspace-narrow.png')}, ${path.join(os.tmpdir(), 'agent-hq-attention.png')}`);
   } catch (error) {
     if (page) await page.screenshot({ path: path.join(os.tmpdir(), 'agent-hq-workspace-failure.png') }).catch(() => {});
+    if (page) {
+      const snapshot = await page.evaluate(() => window.agentHQ.inventory()).catch(() => null);
+      if (snapshot) console.error('Workspace fixture diagnostics:', snapshot.hosts, snapshot.sessions.filter((session) => names.includes(session.id) || created.includes(session.id)).map(({ id, hostId, state, exitCode, outputTail }) => ({ id, hostId, state, exitCode, outputTail })), snapshot.attention.map(({ sessionKey, kind, confidence }) => ({ sessionKey, kind, confidence })));
+    }
     throw error;
   } finally {
     if (page && clipboardBefore !== undefined) await page.evaluate((text) => window.agentHQ.writeClipboard(text), clipboardBefore).catch(() => {});

@@ -3,7 +3,7 @@ set -euo pipefail
 # This script creates an account and configures SSH only on a disposable CI runner.
 test "${GITHUB_ACTIONS:-}" = true
 sudo apt-get update
-sudo apt-get install -y openssh-server tmux xvfb openbox
+sudo apt-get install -y openssh-server tmux xvfb openbox libnotify4 dunst dbus-x11 libglib2.0-bin
 sudo useradd --create-home --shell /bin/bash agentc2-qa
 sudo usermod --password '*' agentc2-qa
 ssh-keygen -q -t ed25519 -N '' -f "$RUNNER_TEMP/agentc2-ci-key"
