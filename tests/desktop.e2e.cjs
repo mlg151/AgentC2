@@ -89,14 +89,17 @@ const { packagePath } = require('../scripts/package-path.cjs');
     await page.waitForFunction(() => document.visibilityState === 'visible');
     await page.evaluate(() => window.agentHQ.saveRemote({ enabled: false, port: 43127, url: '' }));
     if (process.platform === 'darwin') {
-      stage = 'macOS Dock activation';
-      const closed = page.waitForEvent('close');
+      stage = 'macOS last-window close';
+      const closed = page.waitForEvent('close', { timeout: 30000 });
       await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
       await closed;
       assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 0);
-      const next = app.waitForEvent('window');
+      stage = 'macOS Dock activation';
       await app.evaluate(({ app }) => app.emit('activate'));
-      page = await next;
+      // Activation may also arrive from the OS during the preceding close.
+      // Resolve an existing window as well as one still being announced.
+      page = await app.firstWindow({ timeout: 30000 });
+      stage = 'macOS restored renderer';
       await page.getByRole('textbox', { name: 'Search sessions' }).waitFor();
       assert.equal((await page.evaluate(() => window.agentHQ.getState())).settings.hosts[0].name, 'Offline smoke fixture');
     }
