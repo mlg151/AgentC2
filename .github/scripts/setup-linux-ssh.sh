@@ -5,14 +5,15 @@ test "${GITHUB_ACTIONS:-}" = true
 sudo apt-get update
 sudo apt-get install -y openssh-server tmux xvfb openbox
 sudo useradd --create-home --shell /bin/bash agentc2-qa
+sudo usermod --password '*' agentc2-qa
 ssh-keygen -q -t ed25519 -N '' -f "$RUNNER_TEMP/agentc2-ci-key"
 sudo install -d -m 700 -o agentc2-qa -g agentc2-qa /home/agentc2-qa/.ssh
 sudo install -m 600 -o agentc2-qa -g agentc2-qa "$RUNNER_TEMP/agentc2-ci-key.pub" /home/agentc2-qa/.ssh/authorized_keys
 mkdir -p "$HOME/.ssh"
 chmod 700 "$HOME/.ssh"
-sudo ssh-keygen -A
+ssh-keygen -q -t ed25519 -N '' -f "$RUNNER_TEMP/agentc2-ci-host"
 # Trust the exact local host key, without keyscan or disabling verification.
-sudo awk '{ print "agentc2-ci " $1 " " $2 }' /etc/ssh/ssh_host_ed25519_key.pub > "$RUNNER_TEMP/agentc2-ci-known-hosts"
+awk '{ print "agentc2-ci " $1 " " $2 }' "$RUNNER_TEMP/agentc2-ci-host.pub" > "$RUNNER_TEMP/agentc2-ci-known-hosts"
 cat >> "$HOME/.ssh/config" <<EOF
 
 Host agentc2-ci
@@ -25,5 +26,22 @@ Host agentc2-ci
   StrictHostKeyChecking yes
 EOF
 chmod 600 "$HOME/.ssh/config"
-sudo systemctl restart ssh
+# Use a loopback-only daemon with no PAM login-session teardown. The fixture's
+# detached tmux processes must survive between independent SSH requests.
+cat > "$RUNNER_TEMP/agentc2-ci-sshd.conf" <<EOF
+Port 22
+ListenAddress 127.0.0.1
+HostKey $RUNNER_TEMP/agentc2-ci-host
+PidFile $RUNNER_TEMP/agentc2-ci-sshd.pid
+AuthorizedKeysFile .ssh/authorized_keys
+AllowUsers agentc2-qa
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+UsePAM no
+StrictModes yes
+EOF
+sudo systemctl stop ssh
+sudo /usr/sbin/sshd -f "$RUNNER_TEMP/agentc2-ci-sshd.conf"
 ssh -o BatchMode=yes agentc2-ci 'python3 --version && tmux -V'
+ssh -o BatchMode=yes agentc2-ci "tmux new-session -d -s agentc2-ci-probe 'sleep 60'"
+ssh -o BatchMode=yes agentc2-ci 'tmux has-session -t agentc2-ci-probe && tmux kill-session -t agentc2-ci-probe'

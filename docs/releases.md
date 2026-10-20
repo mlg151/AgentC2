@@ -17,6 +17,8 @@ Open the successful **Desktop CI and releases** Actions run and download `AgentC
 
 Each artifact also contains `AgentC2-<version>-<platform>-<arch>-signing.txt`, reporting whether a publisher signature was verified and, on macOS, whether a stapled notarization ticket was verified. AppImage/Debian filename architectures use the target format's conventional names. Supplementary blockmaps may also be attached. No automatic-update feed is configured.
 
+Separate `Desktop-QA-<platform>-<arch>` artifacts contain screenshots of the rendered desktop and packaged app for review. They are not attached to releases.
+
 ## Publish a version
 
 1. Update `package.json` and the lockfile together (`npm version <version> --no-git-tag-version`). Commit and merge the change. Complete the [manual platform checks](platforms.md#validation-coverage-and-manual-release-checks) for the release candidate.

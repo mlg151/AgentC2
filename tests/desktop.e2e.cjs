@@ -18,12 +18,16 @@ const { packagePath } = require('../scripts/package-path.cjs');
   store.save('settings', { ...store.data.settings, hosts: [{ id: 'default', name: 'Offline smoke fixture', target: '127.0.0.1', port: 1, enabled: true }] });
   let app, clipboardBefore;
   const errors = [];
+  let stage = 'Electron launch';
+  const deadline = setTimeout(() => { console.error(`Desktop smoke timed out during ${stage}`); process.exit(1); }, 180000);
+  deadline.unref();
   try {
     app = await _electron.launch({
       executablePath: packaged ? packagePath(root) : require('electron'),
       args: [...(packaged ? [] : ['.']), `--user-data-dir=${path.join(directory, 'browser')}`], cwd: root,
       env: { ...process.env, NODE_ENV: 'production', AGENTC2_DATA_DIR: directory }, timeout: 60000,
     });
+    stage = 'initial renderer';
     let page = await app.firstWindow();
     page.on('pageerror', (error) => errors.push(error.message));
     page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
@@ -35,6 +39,7 @@ const { packagePath } = require('../scripts/package-path.cjs');
     clipboardBefore = await page.evaluate(() => window.agentHQ.readClipboard());
     await page.evaluate(() => window.agentHQ.writeClipboard('AgentC2 clipboard λ'));
     assert.equal(await page.evaluate(() => window.agentHQ.readClipboard()), 'AgentC2 clipboard λ');
+    stage = 'native PTY';
     const native = await app.evaluate(async ({ app }) => {
       const load = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json');
       const pty = load('node-pty');
@@ -56,6 +61,7 @@ const { packagePath } = require('../scripts/package-path.cjs');
     });
     assert.equal(native.packaged, packaged); assert.equal(native.output, true);
     console.log(`PASS ${packaged ? 'packaged' : 'development'} Electron startup, isolated preload, node-pty spawn/input/resize/exit (${native.platform}/${native.arch})`);
+    stage = 'shortcuts and settings';
     const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
     await page.keyboard.press(`${modifier}+k`);
     await page.getByRole('textbox', { name: 'Quick switcher search' }).waitFor();
@@ -65,8 +71,11 @@ const { packagePath } = require('../scripts/package-path.cjs');
     await page.getByText('Enable remote access and tray operation', { exact: true }).waitFor();
     assert.ok(!(await page.locator('.remote-access').innerText()).includes('Windows PC'));
     await page.getByRole('textbox', { name: 'Companion origin', exact: true }).fill('https://agentc2-smoke.example.ts.net');
-    await page.screenshot({ path: path.join(os.tmpdir(), `agentc2-${process.platform}-${process.arch}-${packaged ? 'package' : 'desktop'}.png`) });
+    const screenshots = process.env.AGENTC2_QA_SCREENSHOT_DIR || os.tmpdir();
+    fs.mkdirSync(screenshots, { recursive: true });
+    await page.screenshot({ path: path.join(screenshots, `agentc2-${process.platform}-${process.arch}-${packaged ? 'package' : 'desktop'}.png`) });
     await page.getByRole('button', { name: 'Close settings', exact: true }).click();
+    stage = 'remote-access close/reopen';
     const server = net.createServer(); server.listen(0, '127.0.0.1'); await once(server, 'listening');
     const port = server.address().port; await new Promise((resolve) => server.close(resolve));
     await page.evaluate((port) => window.agentHQ.saveRemote({ enabled: true, port, url: 'https://agentc2-smoke.example.ts.net' }), port);
@@ -80,7 +89,10 @@ const { packagePath } = require('../scripts/package-path.cjs');
     await page.waitForFunction(() => document.visibilityState === 'visible');
     await page.evaluate(() => window.agentHQ.saveRemote({ enabled: false, port: 43127, url: '' }));
     if (process.platform === 'darwin') {
+      stage = 'macOS Dock activation';
+      const closed = page.waitForEvent('close');
       await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
+      await closed;
       assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 0);
       const next = app.waitForEvent('window');
       await app.evaluate(({ app }) => app.emit('activate'));
@@ -91,9 +103,14 @@ const { packagePath } = require('../scripts/package-path.cjs');
     assert.deepEqual(errors, []);
     await page.evaluate((text) => window.agentHQ.writeClipboard(text), clipboardBefore); clipboardBefore = undefined;
     console.log('PASS native clipboard, primary switcher shortcut, settings rendering, remote-access window lifecycle, native Open menu, and renderer health');
+  } catch (error) {
+    console.error(`Desktop smoke failed during ${stage}:`, error);
+    throw error;
   } finally {
+    stage = 'Electron shutdown';
     if (clipboardBefore !== undefined && app?.windows()[0]) await app.windows()[0].evaluate((text) => window.agentHQ.writeClipboard(text), clipboardBefore).catch(() => {});
     await app?.close();
     fs.rmSync(directory, { recursive: true, force: true });
+    clearTimeout(deadline);
   }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

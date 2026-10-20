@@ -81,6 +81,7 @@ async function poll(check, message) {
     const firstKey = `default/tmux:${names[0]}`;
     new Store(dataDirectory).save('workspace', { tabs: [firstKey], selectedKey: firstKey, splitKey: null, metadata: {} });
     await remote('setup');
+    assert.equal((await remote('state')).length, names.length, 'SSH fixtures did not survive disconnect');
     const packaged = process.env.AGENT_HQ_QA_EXECUTABLE;
     app = await _electron.launch({ executablePath: packaged || require('electron'), args: [...(packaged ? [] : ['.']), `--user-data-dir=${path.join(dataDirectory, 'browser')}`], cwd: root, env: { ...process.env, NODE_ENV: 'production', AGENTC2_HOST: host, AGENT_HQ_DATA_DIR: dataDirectory } });
     page = await app.firstWindow();

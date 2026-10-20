@@ -36,8 +36,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: '22'
           architecture: ${{ matrix.arch }}
@@ -47,6 +47,7 @@ jobs:
         env:
           TARGET_ARCH: ${{ matrix.arch }}
         run: |
+          echo "AGENTC2_QA_SCREENSHOT_DIR=$RUNNER_TEMP/agentc2-screenshots" >> "$GITHUB_ENV"
           node scripts/check-version.cjs
           node -e "if(process.arch !== process.env.TARGET_ARCH) throw Error('Native runner architecture mismatch')"
       - name: Linux packaging and display prerequisites
@@ -83,7 +84,7 @@ jobs:
         if: runner.os == 'Linux'
         run: xvfb-run -a npm run test:package
       - name: Upload packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: AgentC2-${{ matrix.platform }}-${{ matrix.arch }}
           if-no-files-found: error
@@ -96,6 +97,14 @@ jobs:
             release/*.zip
             release/*.blockmap
             release/*-signing.txt
+      - name: Upload desktop screenshots
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: Desktop-QA-${{ matrix.platform }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/agentc2-screenshots/*.png
+          if-no-files-found: ignore
+          retention-days: 14
 
   linux-ssh:
     name: Isolated Linux SSH regressions
@@ -104,8 +113,8 @@ jobs:
     env:
       AGENTC2_HOST: agentc2-ci
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: '22'
           cache: npm
@@ -125,12 +134,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: '22'
       - run: node scripts/check-version.cjs
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.2
         with:
           pattern: AgentC2-*
           path: release-assets
