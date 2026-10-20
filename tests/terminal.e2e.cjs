@@ -285,6 +285,10 @@ async function poll(check, message) {
     console.log(`Screenshot: ${screenshot}`);
   } catch (error) {
     if (page) await page.screenshot({ path: path.join(os.tmpdir(), 'agent-hq-terminal-failure.png') }).catch(() => {});
+    if (page) {
+      const snapshot = await page.evaluate(() => window.agentHQ.inventory()).catch(() => null);
+      if (snapshot) console.error('Fixture connection diagnostics:', snapshot.hosts, snapshot.sessions.filter((session) => names.includes(session.id)).map((session) => session.id));
+    }
     throw error;
   } finally {
     if (page && clipboardBefore !== undefined) await page.evaluate((text) => window.agentHQ.writeClipboard(text), clipboardBefore).catch(() => {});

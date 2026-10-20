@@ -41,6 +41,7 @@ UsePAM no
 StrictModes yes
 EOF
 sudo systemctl stop ssh
+sudo install -d -m 755 /run/sshd
 sudo /usr/sbin/sshd -f "$RUNNER_TEMP/agentc2-ci-sshd.conf"
 ssh -o BatchMode=yes agentc2-ci 'python3 --version && tmux -V'
 ssh -o BatchMode=yes agentc2-ci "tmux new-session -d -s agentc2-ci-probe 'sleep 60'"
