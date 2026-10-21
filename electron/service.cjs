@@ -4,7 +4,7 @@ const { spawn } = require('node:child_process');
 const { sshBinary } = require('./platform.cjs');
 const { EventEmitter } = require('node:events');
 const pty = require('node-pty');
-const { Store, validateSettings, validateSessionPin } = require('./config.cjs');
+const { Store, validateSettings, resolveRoeProfile, validateRoeLaunch, validateSessionPin } = require('./config.cjs');
 const { Attention } = require('./attention.cjs');
 const { TmuxControl } = require('./tmux-control.cjs');
 const { Terminals } = require('./terminals.cjs');
@@ -197,7 +197,10 @@ function createService({ directory, home }) {
     if (isTerminal && (input.presetId || input.conversationId || input.agentId || input.instructions)) throw new Error('Terminal sessions do not accept agent launch options');
     const preset = input.presetId ? store.data.settings.presets.find((p) => p.id === input.presetId && p.provider === provider) : null;
     if ((input.presetId || (requirePreset && !isTerminal)) && !preset) throw new Error('Launch preset is unavailable');
-    getHost(input.hostId);
+    const host = getHost(input.hostId);
+    if (input.agentId && input.roeProfile) throw new Error('An existing background agent keeps its original permission mode');
+    const roeProfile = resolveRoeProfile(store.data.settings, host.id, preset, input.roeProfile);
+    validateRoeLaunch(provider, preset, roeProfile);
     const isolated = input.worktree;
     if (isolated && (isTerminal || input.conversationId || input.agentId || !/^[a-f0-9]{32}$/.test(isolated.operationId || '') || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(isolated.slug || '') || typeof isolated.repository !== 'string' || isolated.repository.length > 4096 || typeof isolated.baseRef !== 'string' || isolated.baseRef.length > 200)) throw new Error('Invalid isolated task');
     const created = await runRemote({
@@ -205,7 +208,7 @@ function createService({ directory, home }) {
       cwd: String(input.cwd || '').slice(0, 4096), title: String(input.title || '').slice(0, 100),
       conversationId: input.conversationId ? String(input.conversationId) : null,
       agentId: input.agentId ? String(input.agentId) : null,
-      preset, hookSource, instructions: String(input.instructions || '').slice(0, 20000),
+      preset, roeProfile, hookSource, instructions: String(input.instructions || '').slice(0, 20000),
       ...(isolated ? { operationId: isolated.operationId, repository: isolated.repository, baseRef: isolated.baseRef, slug: isolated.slug } : {}),
     }, input.hostId);
     void inventory().catch(() => {});

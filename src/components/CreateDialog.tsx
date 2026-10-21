@@ -13,6 +13,7 @@ export function CreateDialog({ resume, settings, hostId, onClose, onSubmit, busy
   const [cwd, setCwd] = useState(resume?.cwd || initial?.cwd || '');
   const [title, setTitle] = useState(resume?.title || '');
   const [instructions, setInstructions] = useState(resume ? '' : initial?.instructions || '');
+  const [roeOverride, setRoeOverride] = useState<CreateInput['roeProfile'] | ''>('');
   const [sessionType, setSessionType] = useState<'agent' | 'terminal'>('agent');
   const [isolated, setIsolated] = useState(false);
   const [baseRef, setBaseRef] = useState('HEAD');
@@ -24,6 +25,8 @@ export function CreateDialog({ resume, settings, hostId, onClose, onSubmit, busy
   const [worktreeBusy, setWorktreeBusy] = useState(false);
   const isTerminal = sessionType === 'terminal';
   const preset = settings.presets.find((p) => p.id === presetId);
+  const effectiveRoe = roeOverride || preset?.roeProfile || settings.roe?.hostDefaults[target] || (preset?.fullPermissions === false ? 'provider-default' : 'full');
+  const gatedUnavailable = !isTerminal && !resume?.agentId && effectiveRoe === 'gated' && (provider === 'antigravity' || Boolean(preset && (preset.command !== provider || /--(?:dangerously|sandbox|ask-for-approval|permission-mode|settings|allowedTools|allowed-tools)/.test(preset.args))));
   const visibleWorktrees = worktrees.filter((item) => item.state !== 'archived').slice(-8);
   useEffect(() => {
     if (!isolated || !target) return;
@@ -52,7 +55,7 @@ export function CreateDialog({ resume, settings, hostId, onClose, onSubmit, busy
     finally { setWorktreeBusy(false); }
   }
   return <Modal title={resume ? 'Resume conversation' : 'New session'} onClose={onClose}>
-    <form className="dialog-form" onSubmit={(event) => { event.preventDefault(); onSubmit(isTerminal ? { provider: 'terminal', cwd, title, hostId: target } : { provider, cwd, title, hostId: target, presetId: presetId || undefined, instructions, ...(resume ? { conversationId: resume.id } : {}), ...(resume?.agentId ? { agentId: resume.agentId } : {}), ...(isolated ? { worktree: { operationId, repository: cwd, baseRef, slug } } : {}) }); }}>
+    <form className="dialog-form" onSubmit={(event) => { event.preventDefault(); onSubmit(isTerminal ? { provider: 'terminal', cwd, title, hostId: target } : { provider, cwd, title, hostId: target, presetId: presetId || undefined, instructions, ...(roeOverride ? { roeProfile: roeOverride } : {}), ...(resume ? { conversationId: resume.id } : {}), ...(resume?.agentId ? { agentId: resume.agentId } : {}), ...(isolated ? { worktree: { operationId, repository: cwd, baseRef, slug } } : {}) }); }}>
       <div className="dialog-heading"><div><h2>{resume ? 'Resume conversation' : 'New session'}</h2><p>{isTerminal ? 'Start a remote shell that keeps running when detached.' : 'Start a managed agent using your saved launch configuration.'}</p></div><button type="button" aria-label="Close" className="icon-button" onClick={onClose} disabled={busy}>×</button></div>
       {!resume ? <label>Session type<select value={sessionType} disabled={busy} onChange={(e) => setSessionType(e.target.value as typeof sessionType)}><option value="agent">Agent</option><option value="terminal">Terminal</option></select></label> : null}
       {!isTerminal ? <label>Launch preset<select value={presetId} disabled={busy} onChange={(e) => {
@@ -68,7 +71,7 @@ export function CreateDialog({ resume, settings, hostId, onClose, onSubmit, busy
           <label>Base ref<input value={baseRef} onChange={(event) => setBaseRef(event.target.value)} maxLength={200} required disabled={busy} /></label>
           <label>Task slug<input value={slug} onChange={(event) => setSlug(event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'))} maxLength={40} required disabled={busy} /></label>
         </div>
-        <p className="field-note">Creates a separate branch and working directory from the selected ref. Git worktrees isolate files and indexes; provider permissions follow the launch preset. Retry keeps this task’s operation ID while this dialog stays open.</p>
+        <p className="field-note">Creates a separate branch and working directory from the selected ref. Git worktrees isolate files and indexes; provider permissions follow the effective launch profile. Retry keeps this task’s operation ID while this dialog stays open.</p>
         <div className="worktree-list">
           <strong>Owned worktrees on this host</strong>
           {worktreeLoading ? <small>Checking owned worktrees…</small> : visibleWorktrees.length ? visibleWorktrees.map((item) =>
@@ -83,9 +86,10 @@ export function CreateDialog({ resume, settings, hostId, onClose, onSubmit, busy
       </> : null}
       <label>Session name<input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={isTerminal ? 'Terminal session' : `${provider} session`} disabled={busy} maxLength={100} /></label>
       {!isTerminal && !resume?.agentId ? <label>Starting instructions<textarea rows={3} value={instructions} onChange={(e) => setInstructions(e.target.value)} disabled={busy} /></label> : null}
-      {isTerminal ? <p className="field-note">Uses your remote account’s login shell. Detach leaves it running; Stop ends the shell and its tmux session.</p> : <p className="field-note">Command: <code>{preset?.command || (provider === 'antigravity' ? 'agy' : provider)} {preset?.args}</code><br />{resume?.agentId ? 'Attaches to the existing background agent.' : preset?.fullPermissions === false ? 'Uses the command’s configured permission defaults.' : 'Starts with full permissions.'}</p>}
+      {!isTerminal && !resume?.agentId ? <label>Rules of Engagement for this launch<select value={roeOverride} onChange={(e) => setRoeOverride(e.target.value as typeof roeOverride)}><option value="">Inherit saved policy</option><option value="full">Full permissions</option><option value="gated" disabled={provider === 'antigravity'}>Gated: ask for protected operations</option><option value="provider-default">Provider defaults (unverified)</option></select></label> : null}
+      {isTerminal ? <p className="field-note">Uses your remote account’s login shell. Detach leaves it running; Stop ends the shell and its tmux session.</p> : <p className="field-note">Command: <code>{preset?.command || (provider === 'antigravity' ? 'agy' : provider)} {preset?.args}</code><br />{resume?.agentId ? 'Attaches to the existing background agent; its permission mode is unknown.' : `Effective permissions: ${effectiveRoe}.`}{gatedUnavailable ? ' This preset cannot enforce gated mode; select the standard provider command or another profile.' : ''}</p>}
       {resume ? <div className="resume-id">Conversation ID <code>{resume.id}</code></div> : null}
-      <div className="dialog-actions"><button type="button" className="button-secondary" onClick={onClose} disabled={busy}>Cancel</button><button type="submit" className="button-primary" disabled={busy || !target || (isolated && (!cwd || !baseRef || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(slug))) || (!isTerminal && presetsOnly && !presetId)}>{busy ? 'Starting…' : resume ? 'Resume' : isTerminal ? 'Start terminal' : 'Start session'}</button></div>
+      <div className="dialog-actions"><button type="button" className="button-secondary" onClick={onClose} disabled={busy}>Cancel</button><button type="submit" className="button-primary" disabled={busy || gatedUnavailable || !target || (isolated && (!cwd || !baseRef || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(slug))) || (!isTerminal && presetsOnly && !presetId)}>{busy ? 'Starting…' : resume ? 'Resume' : isTerminal ? 'Start terminal' : 'Start session'}</button></div>
     </form>
   </Modal>;
 }

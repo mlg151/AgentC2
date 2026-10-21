@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { Store, defaults, validateSettings, validateWorkspace, validateSessionPin } = require('../electron/config.cjs');
+const { Store, defaults, validateSettings, resolveRoeProfile, validateRoeLaunch, validateWorkspace, validateSessionPin } = require('../electron/config.cjs');
 const { Attention, classify } = require('../electron/attention.cjs');
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-hq-state-test-'));
 try {
@@ -16,6 +16,25 @@ try {
   assert.equal(new Store(directory).data.settings.presets.at(-1).command, 'claude3');
   assert.equal(new Store(directory).data.settings.hosts[0].autoForward, true);
   assert.equal(new Store(directory).data.settings.hosts[1].autoForward, false);
+  const migrated = validateSettings({ ...config, roe: undefined, presets: config.presets.map(({ roeProfile: _removed, ...preset }) => preset) });
+  assert.deepEqual(migrated.roe, { version: 1, hostDefaults: {} });
+  assert.equal(migrated.presets[0].roeProfile, '');
+  const gated = validateSettings({ ...config, roe: { version: 1, hostDefaults: { secondary: 'gated' } }, presets: config.presets.map((preset) => preset.id === 'codex' ? { ...preset, roeProfile: 'gated' } : preset) });
+  assert.equal(gated.roe.hostDefaults.secondary, 'gated');
+  assert.equal(gated.presets[0].roeProfile, 'gated');
+  assert.equal(resolveRoeProfile(gated, 'secondary', gated.presets[0]), 'gated');
+  assert.equal(resolveRoeProfile(gated, 'secondary', config.presets[1]), 'gated');
+  assert.equal(resolveRoeProfile(gated, 'secondary', config.presets[1], 'full'), 'full');
+  assert.equal(resolveRoeProfile(migrated, 'default', { fullPermissions: false }), 'provider-default');
+  assert.equal(resolveRoeProfile(migrated, 'default', { fullPermissions: true }), 'full');
+  assert.throws(() => resolveRoeProfile(gated, 'secondary', null, 'unsafe'), /Invalid Rules/);
+  assert.throws(() => validateRoeLaunch('antigravity', null, 'gated'), /verified session-scoped/);
+  assert.throws(() => validateRoeLaunch('claude', { command: 'claude3', args: '' }, 'gated'), /standard provider/);
+  assert.throws(() => validateRoeLaunch('codex', { command: 'codex', args: '--dangerously-bypass-approvals-and-sandbox' }, 'gated'), /conflicting permission/);
+  assert.doesNotThrow(() => validateRoeLaunch('claude', { command: 'claude', args: '--model sonnet' }, 'gated'));
+  assert.throws(() => validateSettings({ ...config, roe: { version: 2, hostDefaults: {} } }), /Unsupported Rules/);
+  assert.throws(() => validateSettings({ ...config, roe: { version: 1, hostDefaults: { missing: 'gated' } } }), /Invalid host Rules/);
+  assert.throws(() => validateSettings({ ...config, presets: config.presets.map((preset) => preset.provider === 'antigravity' ? { ...preset, roeProfile: 'gated' } : preset) }), /Antigravity/);
   for (const target of ['-oProxyCommand=bad', 'host with spaces', 'host;echo', 'host\nother']) {
     assert.throws(() => validateSettings({ ...config, hosts: [{ ...config.hosts[0], target }] }));
   }

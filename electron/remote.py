@@ -63,8 +63,9 @@ def session_events(name):
 def hook_arguments(provider, name, payload):
     preset = payload.get("preset")
     enabled = preset.get("attentionHooks", False) if preset else True
+    gated_claude = provider == "claude" and payload.get("roeProfile") == "gated" and not payload.get("agentId")
     if not enabled or provider not in ("codex", "claude") or payload.get("agentId") or not payload.get("hookSource"):
-        return []
+        return ["--settings", json.dumps({"permissions": {"ask": ["Bash", "Edit", "Write", "NotebookEdit"]}})] if gated_claude else []
     directory = HOOK_ROOT / name
     directory.mkdir(parents=True, mode=0o700, exist_ok=True)
     directory.chmod(0o700)
@@ -82,7 +83,10 @@ def hook_arguments(provider, name, payload):
     hooks = {event: [{"hooks": [{"type": "command", "command": command, "timeout": 5}]}] for event in ("Stop", "StopFailure", "PermissionRequest", "UserPromptSubmit")}
     hooks["Notification"] = [{"matcher": "permission_prompt|elicitation_dialog", "hooks": [{"type": "command", "command": command, "timeout": 5}]}]
     hooks["PreToolUse"] = [{"matcher": "AskUserQuestion", "hooks": [{"type": "command", "command": command, "timeout": 5}]}]
-    return ["--settings", json.dumps({"hooks": hooks})]
+    settings = {"hooks": hooks}
+    if gated_claude:
+        settings["permissions"] = {"ask": ["Bash", "Edit", "Write", "NotebookEdit"]}
+    return ["--settings", json.dumps(settings)]
 
 
 def run(args, timeout=15):
@@ -291,6 +295,7 @@ def tmux_sessions():
             "canInterrupt": managed and not dead, "canStop": managed,
             "exitCode": exit_code, "outputTail": output.stdout[-12000:],
             "presetName": tmux_option(name, "@hq_preset") if managed else "",
+            "roeProfile": (tmux_option(name, "@hq_roe") or "unknown") if managed else "unknown",
             "worktreeOperation": tmux_option(name, "@hq_worktree") if managed else "",
             "events": events,
             "telemetry": provider_telemetry(provider, provider_session, HOME),
@@ -346,6 +351,8 @@ def inventory():
     for session in sessions:
         if "telemetry" not in session:
             session["telemetry"] = provider_telemetry(session.get("provider"), None, HOME)
+        if "roeProfile" not in session:
+            session["roeProfile"] = "unknown"
         cwd = session.get("cwd")
         if not cwd or session.get("kind") == "conversation":
             continue
@@ -377,7 +384,7 @@ def health():
     return {"cpuTotal": sum(cpu), "cpuIdle": cpu[3] + cpu[4], "memoryTotal": total, "memoryUsed": max(0, total - available), "disks": disks, "sampledAt": time.time() * 1000}
 
 
-def agent_command(provider, conversation_id=None, agent_id=None, preset=None, instructions=""):
+def agent_command(provider, conversation_id=None, agent_id=None, preset=None, instructions="", roe_profile=None):
     command = [PROVIDERS[provider]] if not preset else shlex.split(preset.get("args", ""))
     # Custom command prefixes are evaluated by the user's login shell; arguments
     # and conversation IDs are always shell quoted separately by create().
@@ -385,8 +392,18 @@ def agent_command(provider, conversation_id=None, agent_id=None, preset=None, in
         # Attach opens an already-running agent; its launch settings belong to
         # that process. No new agent is started by this command.
         return command + ["attach", agent_id]
-    if not preset or preset.get("fullPermissions", True):
+    mode = roe_profile or ("provider-default" if preset and preset.get("fullPermissions") is False else "full")
+    if mode == "full":
         command.append(PERMISSION_FLAGS[provider])
+    elif mode == "gated":
+        if provider == "codex":
+            command += ["--sandbox", "read-only", "--ask-for-approval", "on-request"]
+        elif provider == "claude":
+            command += ["--permission-mode", "default"]
+        else:
+            raise ValueError("Provider does not support a verified gated mode")
+    elif mode != "provider-default":
+        raise ValueError("Invalid Rules of Engagement profile")
     if conversation_id:
         if provider == "codex":
             command += ["resume", conversation_id]
@@ -416,6 +433,11 @@ def create(payload):
     if agent_id and not ID_RE.fullmatch(agent_id):
         raise ValueError("Invalid background agent ID")
     preset = payload.get("preset")
+    roe_profile = payload.get("roeProfile")
+    if not is_terminal and roe_profile not in (None, "full", "gated", "provider-default"):
+        raise ValueError("Invalid Rules of Engagement profile")
+    if roe_profile == "gated" and (provider == "antigravity" or (preset and (preset.get("command") != provider or any(flag in preset.get("args", "") for flag in ("--dangerously", "--sandbox", "--ask-for-approval", "--permission-mode", "--settings", "--allowedTools", "--allowed-tools"))))):
+        raise ValueError("Gated mode requires a supported, unmodified provider command")
     title = " ".join(str(payload.get("title") or "").split())[:100]
     if not title:
         title = f"{provider.title()} session"
@@ -426,11 +448,11 @@ def create(payload):
         shell = pwd.getpwuid(os.getuid()).pw_shell or "/bin/bash"
         launch = shlex.join([shell, "-l", "-i"])
     else:
-        command = agent_command(provider, conversation_id, agent_id, preset, payload.get("instructions", ""))
+        command = agent_command(provider, conversation_id, agent_id, preset, payload.get("instructions", ""), roe_profile)
         extra = hook_arguments(provider, name, payload)
         # Put provider options before the resume subcommand and positional prompt.
         command = extra + command if preset else command[:1] + extra + command[1:]
-        launch = (preset["command"] + " " + shlex.join(command)) if preset else shlex.join(command)
+        launch = ("builtin command " + provider + " " + shlex.join(command if preset else command[1:])) if roe_profile == "gated" else (preset["command"] + " " + shlex.join(command)) if preset else shlex.join(command)
         # bash -lic supports aliases/functions such as the user's claude3.
         launch = shlex.join(["bash", "-lic", launch])
     launch = ('tmux set-window-option -t "$TMUX_PANE" remain-on-exit on; '
@@ -446,7 +468,7 @@ def create(payload):
             shutil.rmtree(HOOK_ROOT / name)
         raise RuntimeError(launched.stderr.strip() or "Could not start tmux session")
     try:
-        for key, value in (("provider", provider), ("title", title), ("cwd", str(cwd)), ("preset", preset.get("name", "") if preset else ""), ("worktree", payload.get("worktreeOperation") or "")):
+        for key, value in (("provider", provider), ("title", title), ("cwd", str(cwd)), ("preset", preset.get("name", "") if preset else ""), ("worktree", payload.get("worktreeOperation") or ""), ("roe", "unknown" if agent_id else roe_profile or ("provider-default" if preset and preset.get("fullPermissions") is False else "full"))):
             checked(["tmux", "set-option", "-t", name, f"@hq_{key}", value])
         configure_session({"name": name})
         checked(["tmux", "set-window-option", "-t", name, "remain-on-exit", "on"])

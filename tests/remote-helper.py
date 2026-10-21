@@ -30,6 +30,7 @@ class ExitEvidence(unittest.TestCase):
 
     def test_recorded_child_failure_and_success(self):
         self.assertEqual(self.session()["exitCode"], 7)
+        self.assertEqual(self.session()["roeProfile"], "unknown")
         self.assertEqual(self.session(record="1234:0")["exitCode"], 0)
 
     def test_native_wait_status_has_priority(self):
@@ -39,6 +40,21 @@ class ExitEvidence(unittest.TestCase):
         for values in [{"pid": "5678"}, {"record": ""}, {"record": "bad"}, {"record": "1234:256"}, {"dead": "0"}, {"managed": False}]:
             with self.subTest(values=values):
                 self.assertIsNone(self.session(**values)["exitCode"])
+
+
+class RulesOfEngagement(unittest.TestCase):
+    def test_provider_flags_and_resume_order(self):
+        command = scope["agent_command"]("codex", "12345678-1234-4234-8234-123456789012", roe_profile="gated")
+        self.assertEqual(command[:5], ["codex", "--sandbox", "read-only", "--ask-for-approval", "on-request"])
+        self.assertEqual(command[-2:], ["resume", "12345678-1234-4234-8234-123456789012"])
+        claude = scope["agent_command"]("claude", preset={"args": "--model sonnet"}, roe_profile="gated")
+        self.assertEqual(claude, ["--model", "sonnet", "--permission-mode", "default"])
+        settings = scope["hook_arguments"]("claude", "hq-123456abcdef", {"preset": {"attentionHooks": False}, "roeProfile": "gated"})
+        self.assertEqual(json.loads(settings[1])["permissions"]["ask"], ["Bash", "Edit", "Write", "NotebookEdit"])
+        self.assertIn(scope["PERMISSION_FLAGS"]["codex"], scope["agent_command"]("codex"))
+        self.assertNotIn(scope["PERMISSION_FLAGS"]["claude"], scope["agent_command"]("claude", preset={"args": "", "fullPermissions": False}))
+        with self.assertRaisesRegex(ValueError, "verified gated mode"):
+            scope["agent_command"]("antigravity", roe_profile="gated")
 
 
 class Cleanup(unittest.TestCase):

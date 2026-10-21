@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const PROVIDERS = ['codex', 'claude', 'antigravity'];
+const ROE_PROFILES = ['', 'full', 'gated', 'provider-default'];
 const ID = /^[a-zA-Z0-9_-]{1,80}$/;
 function text(value, max = 4096) {
   if (typeof value !== 'string' || value.length > max || value.includes('\0')) throw new Error('Invalid configuration text');
@@ -14,6 +15,7 @@ function defaults() {
     hosts: [{ id: 'default', name: 'Primary server', target: process.env.AGENTC2_HOST || process.env.AGENT_HQ_HOST || 'your-ssh-host', port: 22, enabled: true }],
     presets,
     notifications: false,
+    roe: { version: 1, hostDefaults: {} },
   };
 }
 function validateSettings(input) {
@@ -36,7 +38,10 @@ function validateSettings(input) {
     const command = text(p.command).trim();
     if (!command || /[\r\n]/.test(command)) throw new Error('Preset command must be a single line');
     if (p.hostId && !hosts.some((h) => h.id === p.hostId)) throw new Error('Preset host does not exist');
-    return { id: p.id, name: text(p.name, 100).trim() || command, provider: p.provider, command, args: text(p.args), cwd: text(p.cwd), instructions: text(p.instructions, 20000), fullPermissions: Boolean(p.fullPermissions), attentionHooks: Boolean(p.attentionHooks), hostId: p.hostId || '' };
+    const roeProfile = p.roeProfile === undefined ? '' : p.roeProfile;
+    if (!ROE_PROFILES.includes(roeProfile)) throw new Error('Invalid preset Rules of Engagement profile');
+    if (roeProfile === 'gated' && p.provider === 'antigravity') throw new Error('Antigravity has no verified session-scoped gated mode');
+    return { id: p.id, name: text(p.name, 100).trim() || command, provider: p.provider, command, args: text(p.args), cwd: text(p.cwd), instructions: text(p.instructions, 20000), fullPermissions: Boolean(p.fullPermissions), roeProfile, attentionHooks: Boolean(p.attentionHooks), hostId: p.hostId || '' };
   });
   const cleanup = input.cleanup || [];
   if (!Array.isArray(cleanup) || cleanup.length > 90) throw new Error('Invalid cleanup policies');
@@ -47,7 +52,23 @@ function validateSettings(input) {
     scopes.add(key);
     return { hostId: policy.hostId, provider: policy.provider, enabled: policy.enabled, days: policy.days };
   });
-  return { hosts, presets, notifications: Boolean(input.notifications), cleanup: policies };
+  const roe = input.roe || { version: 1, hostDefaults: {} };
+  if (roe.version !== 1 || !roe.hostDefaults || typeof roe.hostDefaults !== 'object' || Array.isArray(roe.hostDefaults)) throw new Error('Unsupported Rules of Engagement settings');
+  const hostDefaults = {};
+  for (const [hostId, profile] of Object.entries(roe.hostDefaults)) {
+    if (!hosts.some((host) => host.id === hostId) || !ROE_PROFILES.slice(1).includes(profile)) throw new Error('Invalid host Rules of Engagement profile');
+    hostDefaults[hostId] = profile;
+  }
+  return { hosts, presets, notifications: Boolean(input.notifications), cleanup: policies, roe: { version: 1, hostDefaults } };
+}
+function resolveRoeProfile(settings, hostId, preset, override) {
+  if (override !== undefined && !ROE_PROFILES.slice(1).includes(override)) throw new Error('Invalid Rules of Engagement override');
+  return override || preset?.roeProfile || settings.roe?.hostDefaults?.[hostId] || (preset?.fullPermissions === false ? 'provider-default' : 'full');
+}
+function validateRoeLaunch(provider, preset, profile) {
+  if (profile !== 'gated') return;
+  if (!['codex', 'claude'].includes(provider)) throw new Error('Provider has no verified session-scoped gated mode');
+  if (preset && (preset.command !== provider || /--(?:dangerously|sandbox|ask-for-approval|permission-mode|settings|allowedTools|allowed-tools)/.test(preset.args))) throw new Error('Gated mode requires the standard provider command without conflicting permission arguments');
 }
 function validateWorkspace(w) {
   if (!w || !Array.isArray(w.tabs) || w.tabs.length > 40 || !w.metadata || typeof w.metadata !== 'object') throw new Error('Invalid workspace');
@@ -109,7 +130,7 @@ function validateCachedUnits(value) {
       const id = text(unit.id, 200);
       if (!unit.key.endsWith(`:${id}`)) throw new Error('Cached unit identity changed');
       const updatedAt = unit.updatedAt && Number.isFinite(Date.parse(unit.updatedAt)) ? text(unit.updatedAt, 80) : null;
-      return { key: unit.key, id, provider: unit.provider, kind: unit.kind, title: text(unit.title || '', 150), cwd: text(unit.cwd || '', 500), updatedAt, state: text(unit.state || '', 40), managed: Boolean(unit.managed), canAttach: Boolean(unit.canAttach), canResume: Boolean(unit.canResume), canInterrupt: Boolean(unit.canInterrupt), canStop: Boolean(unit.canStop), exitCode: Number.isInteger(unit.exitCode) ? unit.exitCode : null, presetName: text(unit.presetName || '', 100), branch: text(unit.branch || '', 200), repository: text(unit.repository || '', 500), worktreeOperation: text(unit.worktreeOperation || '', 32) };
+      return { key: unit.key, id, provider: unit.provider, kind: unit.kind, title: text(unit.title || '', 150), cwd: text(unit.cwd || '', 500), updatedAt, state: text(unit.state || '', 40), managed: Boolean(unit.managed), canAttach: Boolean(unit.canAttach), canResume: Boolean(unit.canResume), canInterrupt: Boolean(unit.canInterrupt), canStop: Boolean(unit.canStop), exitCode: Number.isInteger(unit.exitCode) ? unit.exitCode : null, presetName: text(unit.presetName || '', 100), roeProfile: ['full', 'gated', 'provider-default'].includes(unit.roeProfile) ? unit.roeProfile : 'unknown', branch: text(unit.branch || '', 200), repository: text(unit.repository || '', 500), worktreeOperation: text(unit.worktreeOperation || '', 32) };
     });
   }
   return cached;
@@ -177,7 +198,7 @@ class Store {
       updatedAt: unit.updatedAt, state: String(unit.state || '').slice(0, 40),
       managed: unit.managed, canAttach: unit.canAttach, canResume: unit.canResume,
       canInterrupt: unit.canInterrupt, canStop: unit.canStop, exitCode: unit.exitCode,
-      presetName: String(unit.presetName || '').slice(0, 100),
+      presetName: String(unit.presetName || '').slice(0, 100), roeProfile: unit.roeProfile || 'unknown',
       branch: String(unit.branch || '').slice(0, 200), repository: String(unit.repository || '').slice(0, 500), worktreeOperation: String(unit.worktreeOperation || '').slice(0, 32),
     }));
     const next = validateCachedUnits({ ...this.data.cachedUnits, [hostId]: summary });
@@ -202,4 +223,4 @@ class Store {
     this.update({ deletedSessions: [...deleted].slice(-10000), workspace: validateWorkspace(workspace), attention: this.data.attention.filter((item) => !deleted.has(item.sessionKey)), attentionCursors, cachedUnits });
   }
 }
-module.exports = { Store, defaults, validateSettings, validateWorkspace, validateSessionPin };
+module.exports = { Store, defaults, validateSettings, resolveRoeProfile, validateRoeLaunch, validateWorkspace, validateSessionPin };

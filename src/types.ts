@@ -32,6 +32,7 @@ export interface Session {
   activity?: 'engaged' | 'idle' | 'halted' | 'fault';
   contextPercent?: number | null;
   telemetry?: ProviderTelemetry;
+  roeProfile?: RoeProfile | 'unknown';
 }
 
 export interface Inventory {
@@ -41,11 +42,12 @@ export interface Inventory {
 }
 
 export interface HostConfig { id: string; name: string; target: string; port: number; enabled: boolean; autoForward?: boolean }
+export type RoeProfile = 'full' | 'gated' | 'provider-default';
 export interface DevUrl { url: string; hostId: string; port: number; status: 'available' | 'opening' | 'ready' | 'failed'; localUrl: string | null; error: string | null }
 export interface HostHealth { hostId: string; name: string; connected: boolean; cpuPercent?: number | null; memoryTotal?: number; memoryUsed?: number; disks?: { path: string; total: number; used: number; free: number }[]; sampledAt?: number; error?: string }
-export interface LaunchPreset { id: string; name: string; provider: Provider; command: string; args: string; cwd: string; instructions: string; fullPermissions: boolean; attentionHooks: boolean; hostId: string }
+export interface LaunchPreset { id: string; name: string; provider: Provider; command: string; args: string; cwd: string; instructions: string; fullPermissions: boolean; roeProfile?: RoeProfile | ''; attentionHooks: boolean; hostId: string }
 export interface CleanupPolicy { hostId: string; provider: Exclude<Provider, 'terminal'>; enabled: boolean; days: number }
-export interface Settings { hosts: HostConfig[]; presets: LaunchPreset[]; notifications: boolean; cleanup?: CleanupPolicy[] }
+export interface Settings { hosts: HostConfig[]; presets: LaunchPreset[]; notifications: boolean; cleanup?: CleanupPolicy[]; roe?: { version: 1; hostDefaults: Record<string, RoeProfile> } }
 export interface CleanupInput { hostId: string; provider: Exclude<Provider, 'terminal'>; days: number; ids?: string[]; allowPinned?: boolean }
 export interface CleanupItem { key: string; id: string; provider: Provider; title: string; eligible: boolean; reason: string; bytes: number | null; updatedAt: string | null; files: string[]; estimated: boolean; missing?: boolean }
 export interface CleanupPreview { token: string; hostId: string; provider: Provider; items: CleanupItem[]; expiresAt: number; truncated: boolean }
@@ -73,6 +75,7 @@ export interface CreateInput {
   agentId?: string;
   hostId?: string;
   presetId?: string;
+  roeProfile?: RoeProfile;
   instructions?: string;
   worktree?: { operationId: string; repository: string; baseRef: string; slug: string };
 }
