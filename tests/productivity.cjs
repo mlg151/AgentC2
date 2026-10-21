@@ -78,6 +78,9 @@ try {
   attention.acknowledge('all');
   assert.equal(new Attention(new Store(directory)).update([eventSession]).length, 0);
   assert.equal(attention.update([{ ...eventSession, events: [...eventSession.events, { id: 'event-2', kind: 'input' }, { id: 'event-3', kind: 'completed' }] }]).length, 2);
+  const oldEvent = { id: 'late-old-turn', kind: 'completed', at: new Date(Date.now() - 60000).toISOString() };
+  assert.equal(attention.update([{ ...eventSession, events: [...eventSession.events, { id: 'event-2', kind: 'input' }, { id: 'event-3', kind: 'completed' }, oldEvent] }]).length, 0);
+  assert.equal(new Attention(new Store(directory)).update([{ ...eventSession, events: [...eventSession.events, { id: 'event-2', kind: 'input' }, { id: 'event-3', kind: 'completed' }, oldEvent] }]).length, 0);
   console.log('PASS settings, host validation, workspace persistence, attention confidence, transitions, acknowledgement, restart deduplication, and host isolation');
 } finally {
   fs.rmSync(directory, { recursive: true, force: true });

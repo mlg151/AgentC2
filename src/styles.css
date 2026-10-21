@@ -188,6 +188,9 @@ kbd{font:10px Consolas,monospace;background:#29404e;padding:3px 5px;border-radiu
 .detail-footer code{font-size:10px}
 .terminal-empty{gap:10px}
 .pane-error{font-size:11px;color:#f6aaa1;margin:0 0 8px;overflow-wrap:anywhere}
+.telemetry-strip{display:flex;flex-wrap:wrap;gap:6px 12px;padding:1px 3px 7px;font:10px/1.3 ui-monospace,SFMono-Regular,Consolas,monospace;color:#afc3cf}
+.telemetry-strip span{white-space:nowrap}.telemetry-strip small{color:#78909f;font:inherit}.telemetry-unknown{font-size:9px;color:#8197a5}
+.telemetry-strip .warning-text{color:#f1b85b}.telemetry-strip .danger-text{color:#ff738c}
 .host-errors{flex:none;display:flex;gap:8px;align-items:center;background:#382b21;color:#ecc69e;padding:7px 13px;font-size:11px;max-height:70px;overflow:auto}
 .host-errors span{overflow-wrap:anywhere}
 .notes-panel{flex:none;border-top:1px solid #304b59;padding:10px 14px;background:#11212b}

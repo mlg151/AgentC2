@@ -66,6 +66,12 @@ export function SessionPane({ session, visible, primary, focused, slot, callsign
       {session.worktreeOperation ? <button className="toolbar-button" aria-pressed={diffOpen} onClick={onToggleDiff}>{diffOpen ? 'Hide diff' : 'Diff'}</button> : null}
       {devUrls.map((item) => <button key={item.url} className="toolbar-button" title={`${item.url}${item.error ? ` — ${item.error}` : ''}`} disabled={!terminalId || session.stale || item.status === 'opening'} onClick={() => void window.agentHQ?.openDevUrl(terminalId!, item.url).catch(showError)}><ExternalLink size={13} />{item.status === 'ready' ? 'Open' : item.status === 'opening' ? 'Opening' : item.status === 'failed' ? 'Retry' : 'Tunnel'} :{item.port}</button>)}
     </div>
+    {session.provider !== 'terminal' ? <div className="telemetry-strip" aria-label="Provider telemetry">
+      <span className={session.telemetry?.status === 'reported' && session.telemetry.context?.percent && session.telemetry.context.percent >= 90 ? 'danger-text' : session.telemetry?.status === 'reported' && session.telemetry.context?.percent && session.telemetry.context.percent >= 75 ? 'warning-text' : ''}>Context {session.telemetry?.status === 'reported' && session.telemetry.context ? `${session.telemetry.context.percent}%${session.telemetry.context.percent >= 90 ? ' critical' : session.telemetry.context.percent >= 75 ? ' warning' : ''}` : session.telemetry?.status || 'unknown'}</span>
+      <span>Tokens {session.telemetry?.status === 'reported' && session.telemetry.tokensPerMinute != null ? `${session.telemetry.tokensPerMinute}/min` : session.telemetry?.status === 'stale' ? 'stale' : session.telemetry?.status === 'unsupported' ? 'unsupported' : 'unknown'}</span>
+      <span>Cost {session.telemetry?.status === 'reported' && session.telemetry.costUsd != null ? `$${session.telemetry.costUsd.toFixed(2)} USD · session estimate` : session.telemetry?.status === 'stale' ? 'stale' : session.telemetry?.status === 'unsupported' ? 'unsupported' : 'unknown'}</span>
+      <small title={session.telemetry?.sampledAt || ''}>{session.telemetry?.source || 'No provider measurement'}{session.telemetry?.status === 'stale' ? ' · last sample is stale' : ''}</small>
+    </div> : null}
     {error ? <p role="alert" className="pane-error">{error}</p> : null}
     <div className={`terminal-panel${terminalId ? ' is-attached' : ''}`}>
       <TerminalView terminalId={terminalId} visible={visible && Boolean(terminalId)} focused={focused} />

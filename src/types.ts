@@ -1,4 +1,5 @@
 export type Provider = 'codex' | 'claude' | 'antigravity' | 'terminal';
+export interface ProviderTelemetry { status: 'reported' | 'stale' | 'unknown' | 'unsupported'; sampledAt: string | null; source: string | null; context: { usedTokens: number; capacityTokens: number; percent: number } | null; totalTokens: number | null; tokensPerMinute: number | null; costUsd: number | null; costBasis: string | null }
 
 export interface Session {
   key: string;
@@ -30,6 +31,7 @@ export interface Session {
   outputActivity?: number[];
   activity?: 'engaged' | 'idle' | 'halted' | 'fault';
   contextPercent?: number | null;
+  telemetry?: ProviderTelemetry;
 }
 
 export interface Inventory {

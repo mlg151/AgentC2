@@ -1,5 +1,6 @@
 """Per-session event adapter. No message, tool input, or credentials are logged."""
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -29,16 +30,30 @@ def main():
         if payload.get("hook_event_name") == "PreToolUse" and payload.get("tool_name") == "AskUserQuestion":
             kind = "input"
     if kind:
-        event = {"id": uuid.uuid4().hex, "kind": kind, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "source": provider}
+        session_id = payload.get("thread-id") if provider == "codex" else payload.get("session_id")
+        turn_id = payload.get("turn-id") if provider == "codex" else payload.get("prompt_id")
+        stable = isinstance(session_id, str) and isinstance(turn_id, str) and (kind != "input" or isinstance(payload.get("tool_use_id"), str))
+        identity = f"{provider}:{session_id}:{turn_id}:{kind}:{payload.get('tool_use_id', '')}"
+        event = {"id": hashlib.sha256(identity.encode()).hexdigest()[:32] if stable else uuid.uuid4().hex,
+                 "kind": kind, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "source": provider,
+                 "session": session_id if isinstance(session_id, str) and len(session_id) <= 100 else None,
+                 "turn": turn_id if isinstance(turn_id, str) and len(turn_id) <= 100 else None}
         log = Path(__file__).with_name("events.jsonl")
         with log.open("a+", encoding="utf-8") as stream:
             fcntl.flock(stream, fcntl.LOCK_EX)
             stream.seek(0)
             recent = stream.readlines()[-127:]
-            stream.seek(0)
-            stream.truncate()
-            stream.writelines(recent)
-            stream.write(json.dumps(event) + "\n")
+            seen = set()
+            for line in recent:
+                try:
+                    seen.add(json.loads(line).get("id"))
+                except ValueError:
+                    pass
+            if event["id"] not in seen:
+                stream.seek(0)
+                stream.truncate()
+                stream.writelines(recent)
+                stream.write(json.dumps(event) + "\n")
     if mode == "notify":
         # Preserve the user's normal notify command when adding this session's
         # adapter. Never expose configuration values to the renderer or log.

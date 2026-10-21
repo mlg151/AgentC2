@@ -25,7 +25,7 @@ class Worktrees(unittest.TestCase):
         git("commit", "-qm", "Base")
         source = (Path(__file__).resolve().parents[1] / "electron")
         self.scope = {"__name__": "worktree_fixture"}
-        exec((source / "worktrees.py").read_text() + "\n" + (source / "remote.py").read_text(), self.scope)
+        exec((source / "worktrees.py").read_text() + "\n" + (source / "provider_telemetry.py").read_text() + "\n" + (source / "remote.py").read_text(), self.scope)
         self.scope["WORKTREE_ROOT"] = self.root / "owned"
         self.created = Mock(side_effect=lambda payload: {"name": payload["managedName"]})
         self.scope["create"] = self.created

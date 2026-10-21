@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 
 scope = {"__name__": "agentc2_helper_test"}
+exec((Path(__file__).resolve().parents[1] / "electron" / "provider_telemetry.py").read_text(), scope)
 exec((Path(__file__).resolve().parents[1] / "electron" / "remote.py").read_text(), scope)
 
 
@@ -47,7 +48,7 @@ class Cleanup(unittest.TestCase):
         self.home = Path(self.temporary.name)
         self.helper = {"__name__": "cleanup_test"}
         root = Path(__file__).resolve().parents[1] / "electron"
-        exec((root / "session-cleanup.py").read_text() + "\n" + (root / "remote.py").read_text(), self.helper)
+        exec((root / "session-cleanup.py").read_text() + "\n" + (root / "provider_telemetry.py").read_text() + "\n" + (root / "remote.py").read_text(), self.helper)
         self.helper["HOME"] = self.home
         environment = patch.dict(os.environ, {"CODEX_HOME": str(self.home / '.codex'), "CODEX_SQLITE_HOME": str(self.home / '.codex')})
         environment.start()

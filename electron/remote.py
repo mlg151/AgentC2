@@ -278,6 +278,9 @@ def tmux_sessions():
             if recorded and recorded[1] == fields[8] and 0 <= int(recorded[2]) <= 255:
                 exit_code = int(recorded[2])
         output = run(["tmux", "capture-pane", "-p", "-J", "-t", name, "-S", "-40"], timeout=3)
+        events = session_events(name) if managed else []
+        provider_session = next((event.get("session") for event in reversed(events)
+                                 if event.get("source") == provider and isinstance(event.get("session"), str)), None)
         result.append({
             "key": f"tmux:{name}", "provider": provider, "id": name,
             "title": title or name,
@@ -289,7 +292,8 @@ def tmux_sessions():
             "exitCode": exit_code, "outputTail": output.stdout[-12000:],
             "presetName": tmux_option(name, "@hq_preset") if managed else "",
             "worktreeOperation": tmux_option(name, "@hq_worktree") if managed else "",
-            "events": session_events(name) if managed else [],
+            "events": events,
+            "telemetry": provider_telemetry(provider, provider_session, HOME),
         })
     return result
 
@@ -340,6 +344,8 @@ def inventory():
     sessions.sort(key=lambda s: str(s.get("updatedAt") or ""), reverse=True)
     repositories = {}
     for session in sessions:
+        if "telemetry" not in session:
+            session["telemetry"] = provider_telemetry(session.get("provider"), None, HOME)
         cwd = session.get("cwd")
         if not cwd or session.get("kind") == "conversation":
             continue
