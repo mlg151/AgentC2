@@ -136,7 +136,7 @@ function remote(action) {
     await page.screenshot({ path: path.join(screenshotDirectory, 'agentc2-sitrep-preview.png') });
     await page.getByRole('button', { name: 'Send and launch recipient' }).click();
     await page.getByRole('dialog', { name: 'SitRep handoff' }).waitFor({ state: 'hidden', timeout: 30000 });
-    await page.locator('.session-row').filter({ hasText: 'Handoff: Source QA' }).first().waitFor({ timeout: 15000 });
+    await page.locator('.session-pane.is-focused:not(.pane-hidden)[aria-label="Session Handoff: Source QA"]').waitFor({ timeout: 15000 });
     console.log('PASS Electron SitRep review, target selection, and recipient launch');
   } finally {
     if (app) await app.close();
