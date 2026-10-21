@@ -79,7 +79,12 @@ async function launch() {
   page = await app.firstWindow(); page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
   await page.getByRole('textbox', { name: 'Search sessions' }).waitFor();
-  await page.locator('.session-row').first().waitFor({ timeout: 60000 });
+  try { await page.locator('.session-row').first().waitFor({ timeout: 60000 }); }
+  catch (error) {
+    const rendered = await page.evaluate(() => ({ shell: document.querySelector('.app-shell')?.className, rows: document.querySelectorAll('.session-row').length, roster: document.querySelector('.session-list')?.textContent?.slice(0, 300), alert: document.querySelector('[role="alert"]')?.textContent?.slice(0, 300) })).catch(() => null);
+    console.error('Workspace startup rendering:', rendered);
+    throw error;
+  }
 }
 async function poll(check, message) {
   for (let i = 0; i < 40; i++) { if (await check()) return; await new Promise((resolve) => setTimeout(resolve, 250)); }
@@ -444,7 +449,7 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
     if (page) await page.screenshot({ path: path.join(os.tmpdir(), 'agent-hq-workspace-failure.png') }).catch(() => {});
     if (page) {
       const snapshot = await page.evaluate(() => window.agentHQ.inventory()).catch(() => null);
-      if (snapshot) console.error('Workspace fixture diagnostics:', snapshot.hosts, snapshot.sessions.filter((session) => names.includes(session.id) || created.includes(session.id)).map(({ id, hostId, state, exitCode, outputTail }) => ({ id, hostId, state, exitCode, outputTail })), snapshot.attention.map(({ sessionKey, kind, confidence }) => ({ sessionKey, kind, confidence })));
+      if (snapshot) console.error('Workspace fixture diagnostics:', snapshot.hosts, snapshot.sessions.filter((session) => names.includes(session.id) || created.includes(session.id)).map(({ id, hostId, state, exitCode, outputTail }) => ({ id, hostId, state, exitCode, outputTail: outputTail?.slice(-300) })), snapshot.attention.map(({ sessionKey, kind, confidence }) => ({ sessionKey, kind, confidence })));
     }
     throw error;
   } finally {
