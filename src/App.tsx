@@ -5,6 +5,7 @@ import { SessionPane } from './components/SessionPane';
 import { CreateDialog } from './components/CreateDialog';
 import { SettingsDialog } from './components/SettingsDialog';
 import { SitRepDialog } from './components/SitRepDialog';
+import { ExerciseDialog } from './components/ExerciseDialog';
 import { SessionCleanupDialog } from './components/SessionCleanupDialog';
 import { QuickSwitcher } from './components/QuickSwitcher';
 import { SituationHeader } from './components/SituationHeader';
@@ -44,6 +45,7 @@ export default function App() {
   const [showAcknowledged, setShowAcknowledged] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [sitrepSource, setSitrepSource] = useState<Session | null>(null);
+  const [showExercises, setShowExercises] = useState(false);
   const [cleanupTarget, setCleanupTarget] = useState<Session | null | undefined>(undefined);
   const [showSwitcher, setShowSwitcher] = useState(false);
   const [showOverwatch, setShowOverwatch] = useState(false);
@@ -217,7 +219,7 @@ export default function App() {
     deny: { run: () => {}, available: false, reason: 'No verified actionable permission request' },
     jumpRequest: { run: () => {}, available: false, reason: 'No verified actionable permission request' },
     diff: { run: () => { if (selected) toggleDiff(selected.key); }, available: Boolean(selected?.worktreeOperation && selected.kind === 'managed'), reason: 'Select an owned worktree unit' },
-    exercise: { run: () => {}, available: false, reason: 'Joint Exercise setup is unavailable' },
+    exercise: { run: () => setShowExercises(true) },
     handoff: { run: () => { if (selected) setSitrepSource(selected); }, available: Boolean(selected?.worktreeOperation && selected.kind === 'managed' && !selected.stale), reason: 'Select a connected owned worktree unit' },
     faultStop: { run: () => {}, available: false, reason: 'No verified runaway managed units' },
   };
@@ -251,6 +253,7 @@ export default function App() {
     {settings && dialog !== undefined ? <CreateDialog resume={dialog} settings={settings} hostId={hostFilter === 'all' ? settings.hosts.find((h) => h.enabled)?.id || '' : hostFilter} onClose={closeCreate} onSubmit={(input) => void create(input)} busy={busy} /> : null}
     {settings && showSettings ? <SettingsDialog settings={settings} onSave={saveSettings} onExternalSettings={(updated) => { setSettings(updated); void refresh(); }} onClose={closeSettings} /> : null}
     {settings && sitrepSource ? <SitRepDialog source={sitrepSource} settings={settings} initialSummary={workspace.metadata[sitrepSource.key]?.notes || ''} onLaunched={async (name, hostId) => { if (!window.agentHQ) throw new Error('Desktop bridge unavailable'); for (let attempt = 0; attempt < 6; attempt++) { const next = await window.agentHQ.inventory(); acceptInventory(next); const unit = next.sessions.find((item) => item.id === name && item.hostId === hostId); if (unit) { openSession(unit); return; } await new Promise((resolve) => setTimeout(resolve, 350)); } throw new Error('Recipient launched but has not appeared in inventory; refresh to find it.'); }} onClose={() => setSitrepSource(null)} /> : null}
+    {settings && showExercises ? <ExerciseDialog settings={settings} hostId={hostFilter === 'all' ? settings.hosts.find((host) => host.enabled)?.id || '' : hostFilter} onLaunched={() => void refresh()} onClose={() => setShowExercises(false)} /> : null}
     {settings && cleanupTarget !== undefined ? <SessionCleanupDialog settings={settings} target={cleanupTarget} onSave={saveSettings} onClose={closeCleanup} /> : null}
     {showSwitcher ? <QuickSwitcher sessions={sessions.map((s) => ({ ...s, cwd: `${s.cwd} ${projectFor(s, workspace.metadata)}` }))} callsigns={situation.callsigns} actions={commands} overrides={situation.shortcuts} onSelect={(s) => { openSession(known[s.key] || s); requestFocus(s.key); }} onSettings={() => setShowSettings(true)} onInbox={() => setInbox(true)} onClose={closeSwitcher} /> : null}
     {showKeyboardHelp ? <KeyboardHelp overrides={situation.shortcuts} actions={commands} onSave={(shortcuts) => changeSituation({ shortcuts })} onClose={closeKeyboardHelp} /> : null}

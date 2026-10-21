@@ -13,6 +13,7 @@ const { scrollTerminal } = require('./terminal-scroll.cjs');
 const { createCleanup } = require('./cleanup.cjs');
 const { uploadPng } = require('./image-upload.cjs');
 const { Tunnels } = require('./tunnels.cjs');
+const { createExercises } = require('./exercises.cjs');
 
 function createService({ directory, home }) {
   const events = new EventEmitter();
@@ -20,13 +21,14 @@ function createService({ directory, home }) {
   const SSH_ARGS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'StrictHostKeyChecking=yes'];
   const TMUX_NAME = /^hq-[a-f0-9]{12}$/;
   const OTHER_TMUX_NAME = /^[A-Za-z0-9_.:-]{1,80}$/;
-  const helperSource = fs.readFileSync(path.join(__dirname, 'session-cleanup.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktrees.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktree-diff.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'sitrep.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'provider_telemetry.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'oporders.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'remote.py'), 'utf8');
+  const helperSource = fs.readFileSync(path.join(__dirname, 'session-cleanup.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktrees.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktree-diff.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'sitrep.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'exercises.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'provider_telemetry.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'oporders.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'remote.py'), 'utf8');
   const hookSource = fs.readFileSync(path.join(__dirname, 'session-hook.py'), 'utf8');
 
 
   const store = new Store(directory);
   const attention = new Attention(store);
   const cleanup = createCleanup({ store, events, inventory, runRemote, hostId: (id) => getHost(id).id });
+  const exercises = createExercises({ store, getHost, runRemote, createSession, beginLaunch: (hostId) => cleanup.beginLaunch(hostId), emit: (...args) => events.emit(...args) });
   let inventoryFlight, healthFlight;
   const opOrderSynced = new Map();
   const opOrderAttempts = new Map();
@@ -417,6 +419,6 @@ function createService({ directory, home }) {
     }
     return { matches, searched: selected.length, total: sessions.length, truncated, errors };
   }
-  return { store, events, terminals, tunnels, cleanup, inventory, health, create, worktrees, archiveWorktree, diffRequest, previewSitrep, launchSitrep, action, uploadClipboardImage, devUrls, openDevUrl, saveSettings, previewOpOrder, enrollOpOrder, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
+  return { store, events, terminals, tunnels, cleanup, exercises, inventory, health, create, worktrees, archiveWorktree, diffRequest, previewSitrep, launchSitrep, action, uploadClipboardImage, devUrls, openDevUrl, saveSettings, previewOpOrder, enrollOpOrder, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
 }
 module.exports = { createService };

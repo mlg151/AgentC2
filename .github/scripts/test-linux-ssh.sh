@@ -14,7 +14,7 @@ if command -v dunst >/dev/null 2>&1; then
   gdbus wait --session --timeout 10 org.freedesktop.Notifications
 fi
 qa_status=0
-for qa_suite in tunnels.e2e.cjs oporders.e2e.cjs oporders.ui.e2e.cjs sitrep.e2e.cjs terminal.e2e.cjs workspace.e2e.cjs companion.e2e.cjs; do
+for qa_suite in tunnels.e2e.cjs oporders.e2e.cjs oporders.ui.e2e.cjs sitrep.e2e.cjs exercises.e2e.cjs terminal.e2e.cjs workspace.e2e.cjs companion.e2e.cjs; do
   if ! node "tests/$qa_suite"; then qa_status=1; fi
 done
 exit "$qa_status"

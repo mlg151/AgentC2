@@ -13,6 +13,7 @@
     "test:launch-modes": "node tests/launch-modes.cjs",
     "test:oporders": "npm run build && python3 tests/oporders.py && node tests/oporders.e2e.cjs && node tests/oporders.ui.e2e.cjs",
     "test:sitrep": "npm run build && python3 tests/sitrep.py && node tests/sitrep.e2e.cjs",
+    "test:exercises": "npm run build && node tests/exercises.cjs && python3 tests/exercises.py && node tests/exercises.e2e.cjs",
     "test:productivity": "node tests/productivity.cjs",
     "test:workspace": "npm run build && node tests/workspace.e2e.cjs",
     "test:remote": "npm run build && node tests/remote-control.cjs",
@@ -25,7 +26,7 @@
     "test:platform": "node tests/platform.cjs",
     "test:desktop": "node tests/desktop.e2e.cjs",
     "test:package": "node tests/desktop.e2e.cjs --packaged",
-    "test:ci": "npm run build && npm run test:productivity && node tests/cleanup.cjs && node tests/situation.cjs && node tests/reconnect.cjs && node tests/remote-control.cjs && node tests/image-upload.cjs && node tests/tunnels.cjs && npm run test:platform && node tests/packaging.cjs && node tests/native-pty.cjs"
+    "test:ci": "npm run build && npm run test:productivity && node tests/exercises.cjs && node tests/cleanup.cjs && node tests/situation.cjs && node tests/reconnect.cjs && node tests/remote-control.cjs && node tests/image-upload.cjs && node tests/tunnels.cjs && npm run test:platform && node tests/packaging.cjs && node tests/native-pty.cjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",

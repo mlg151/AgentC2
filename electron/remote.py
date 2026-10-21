@@ -584,6 +584,17 @@ def main():
         result = sitrep_source_preview(payload)
     elif action == "sitrep_target_preview":
         result = sitrep_target_preview(payload)
+    elif action == "exercise_base":
+        result = exercise_base(payload)
+    elif action == "exercise_capabilities":
+        result = exercise_capabilities(payload)
+    elif action == "exercise_inspect":
+        result = exercise_inspect(payload)
+    elif action == "exercise_target_preview":
+        result = exercise_target(payload)
+    elif action == "exercise_promote":
+        with cleanup_lock():
+            result = exercise_target(payload, True)
     elif action == "diff_files":
         result = diff_files(payload)
     elif action == "diff_detail":

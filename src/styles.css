@@ -279,3 +279,15 @@ kbd{font:10px Consolas,monospace;background:#29404e;padding:3px 5px;border-radiu
 @media(max-width:1100px){.situation-header .host-picker select{width:94px;max-width:94px;min-width:0}.situation-header .topbar-actions>.icon-button{flex:0 0 28px}}
 
 @media(max-width:1200px){.session-pane{position:relative}.diff-drawer{position:absolute;z-index:4;left:0;right:0;bottom:18px;height:calc(100% - 40px);max-height:none;min-height:0;box-shadow:0 -8px 28px #03080dbb}.diff-drawer .diff-summary{display:none}}
+.exercise-dialog .exercise-results { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 12px; }
+.exercise-dialog .exercise-result, .exercise-dialog .exercise-promotion { min-width: 0; padding: 12px; border: 1px solid var(--border, #40464d); border-radius: 8px; }
+.exercise-dialog .exercise-result h3 { margin: 0 0 8px; }
+.exercise-dialog .exercise-result h3 small { font-weight: normal; }
+.exercise-dialog pre { overflow: auto; max-height: 190px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.exercise-dialog .exercise-diff { white-space: pre; font-size: 11px; }
+.exercise-dialog .exercise-choice { border-bottom: 1px solid var(--border, #40464d); padding-bottom: 8px; }
+.exercise-dialog .inline-actions { flex-wrap: wrap; }
+.exercise-dialog button:not(.icon-button):not(.button-primary):not(.button-secondary) { min-height: 32px; padding: 5px 10px; border: 1px solid #3c4d59; border-radius: 5px; background: #17232d; color: #cad7dd; font-size: 12px; font-weight: 600; }
+.exercise-dialog button:not(.icon-button):not(.button-primary):not(.button-secondary):hover:not(:disabled) { background: #213440; border-color: #52707c; }
+.exercise-dialog button:disabled { opacity: .48; cursor: not-allowed; }
+.exercise-dialog .exercise-result pre { background: #0d1921; border: 1px solid #293e4c; border-radius: 4px; padding: 8px; }

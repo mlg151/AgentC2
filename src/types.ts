@@ -53,6 +53,12 @@ export interface SitrepPreviewInput { sourceHostId: string; name: string; operat
 export interface SitrepTest { command: string; exitCode: number | null; timedOut: boolean; output: string; outputTruncated: boolean; durationMs: number; ranAt: number }
 export interface SitrepPreview { version: 1; id: string; source: { operationId: string; name: string; repository: string; branch: string; baseCommit: string; headCommit: string; path: string }; target: { ready: boolean; reason: string; repository: string }; revision: string; patchPreview: string; patchPreviewTruncated: boolean; patchBytes: number; untracked: string[]; warnings: string[]; test: SitrepTest | null; ready: boolean }
 export interface SitrepLaunchInput { id: string; operationId: string; objective: string; summary: string; nextSteps: string; title: string; slug: string; provider: Exclude<Provider, 'terminal'>; presetId?: string; roeProfile?: RoeProfile }
+export interface ExerciseInput { title: string; hostId: string; repository: string; baseRef: string; prompt: string; testCommand: string; contestants: { provider: Exclude<Provider, 'terminal'>; presetId?: string; roeProfile?: RoeProfile }[] }
+export interface ExerciseTest { command: string; exitCode: number | null; timedOut: boolean; output: string; outputTruncated: boolean; durationMs: number; ranAt: number }
+export interface ExerciseContestant { id: string; provider: Exclude<Provider, 'terminal'>; presetId: string; roeProfile: string; slug: string; state: string; name: string; error: string; markedComplete: boolean; evidence: { revision: string; test: ExerciseTest | null; verifiedAt: number; explicitCompletion: boolean } | null }
+export interface ExerciseRecord { version: 1; id: string; title: string; hostId: string; repository: string; baseCommit: string; prompt: string; testCommand: string; contestants: ExerciseContestant[]; state: string; createdAt: number; promotion: { contestantId: string; revision: string; target: string; branch: string; patchBytes: number; at: number } | null }
+export interface ExerciseInspection { operationId: string; baseCommit: string; branch: string; path: string; active: boolean; headCommit: string; revision: string; patchBytes: number; patch: string; patchTruncated: boolean; untracked: string[]; warnings: string[]; test: ExerciseTest | null; evidence: ExerciseContestant['evidence'] }
+export interface ExercisePromotionPreview { contestantId: string; target: string; branch: string; headCommit: string; revision: string; patchBytes: number; paths: number; ready: boolean; test: ExerciseTest | null }
 export interface CleanupPolicy { hostId: string; provider: Exclude<Provider, 'terminal'>; enabled: boolean; days: number }
 export interface Settings { hosts: HostConfig[]; presets: LaunchPreset[]; notifications: boolean; cleanup?: CleanupPolicy[]; roe?: { version: 1; hostDefaults: Record<string, RoeProfile> }; opOrders?: OpOrder[] }
 export interface CleanupInput { hostId: string; provider: Exclude<Provider, 'terminal'>; days: number; ids?: string[]; allowPinned?: boolean }
@@ -102,6 +108,15 @@ export interface AgentHQApi {
   enrollOpOrder(order: OpOrder, revision: string): Promise<Settings>;
   previewSitrep(input: SitrepPreviewInput): Promise<SitrepPreview>;
   launchSitrep(input: SitrepLaunchInput): Promise<{ name: string; hostId: string }>;
+  listExercises(): Promise<ExerciseRecord[]>;
+  exerciseCapabilities(hostId: string): Promise<Record<Exclude<Provider, 'terminal'>, boolean>>;
+  createExercise(input: ExerciseInput): Promise<ExerciseRecord>;
+  retryExercise(id: string): Promise<ExerciseRecord>;
+  cancelExercise(id: string): Promise<ExerciseRecord>;
+  markExerciseComplete(id: string, contestantId: string): Promise<ExerciseRecord>;
+  inspectExercise(id: string, contestantId: string, verify: boolean): Promise<ExerciseInspection>;
+  previewExercisePromotion(id: string, contestantId: string): Promise<ExercisePromotionPreview>;
+  promoteExercise(id: string, contestantId: string, revision: string): Promise<ExerciseRecord>;
   saveWorkspace(workspace: Workspace): Promise<Workspace>;
   setSessionPinned(key: string, pinned: boolean): Promise<boolean>;
   onSessionPinned(callback: (key: string, pinned: boolean) => void): () => void;
