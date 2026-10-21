@@ -57,7 +57,7 @@ export function TerminalView({ terminalId, visible, focused = true }: { terminal
     if (!id || !text || !window.agentHQ) return;
     try {
       await latest();
-      if (activeIdRef.current !== id) return;
+      if (activeIdRef.current !== id || !controlRef.current) return;
       // xterm.paste preserves the CLI's bracketed-paste handling.
       terminalRef.current?.paste(text);
       terminalRef.current?.focus();
@@ -66,8 +66,13 @@ export function TerminalView({ terminalId, visible, focused = true }: { terminal
   }, [latest, showError]);
 
   const pasteClipboard = useCallback(async () => {
-    if (!window.agentHQ) return;
-    try { await pasteText(await window.agentHQ.readClipboard()); }
+    const id = activeIdRef.current;
+    if (!window.agentHQ || !id || !controlRef.current) return;
+    try {
+      const value = await window.agentHQ.readClipboardForTerminal(id);
+      if (activeIdRef.current !== id || !controlRef.current) return;
+      await pasteText(value.kind === 'image' ? `'${value.path.replaceAll("'", "'\\''")}'` : value.text);
+    }
     catch (cause) { showError(cause); }
   }, [pasteText, showError]);
 
@@ -152,8 +157,11 @@ export function TerminalView({ terminalId, visible, focused = true }: { terminal
     const onPaste = (event: ClipboardEvent) => {
       event.preventDefault();
       event.stopImmediatePropagation();
-      const text = event.clipboardData?.getData('text/plain');
-      if (text) void pasteText(text);
+      if ([...(event.clipboardData?.items || [])].some((item) => item.type === 'image/png' || item.type === 'image/jpeg')) void pasteClipboard();
+      else {
+        const text = event.clipboardData?.getData('text/plain');
+        if (text) void pasteText(text);
+      }
     };
     const suppressRemoteContextMenu = (event: MouseEvent) => {
       if (event.button === 2) { event.preventDefault(); event.stopImmediatePropagation(); }

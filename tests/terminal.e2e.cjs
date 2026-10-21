@@ -46,6 +46,10 @@ elif p['action'].startswith('fallback-'):
  print(json.dumps(scope['scroll_session']({'name':names[2],'direction':direction,'lines':12})))
 elif p['action']=='legacy-copy':
  run('tmux','copy-mode','-t',names[2]); print('{}')
+elif p['action']=='image-state':
+ import os,stat,pathlib,re
+ root=pathlib.Path.home()/'.cache'/'agent-hq'/'uploads'
+ print(json.dumps([{'name':f.name,'size':f.stat().st_size,'mode':stat.S_IMODE(f.stat().st_mode),'magic':f.open('rb').read(8).hex()} for f in root.iterdir() if re.fullmatch(r'agentc2-[a-f0-9]{32}\.png',f.name)] if root.is_dir() else []))
 elif p['action']=='cleanup':
  for n in names: subprocess.run(['tmux','kill-session','-t',n],capture_output=True)
  print('{}')
@@ -99,6 +103,10 @@ async function waitForInput(pane) {
     assert.ok(page.url().startsWith('file:'));
     await page.locator('.session-row').filter({ hasText: 'AgentC2 terminal regression A' }).waitFor({ timeout: 60000 });
     clipboardBefore = await page.evaluate(() => window.agentHQ.readClipboard());
+    await app.evaluate(async ({ clipboard }) => {
+      const image = (await clipboard.read()).find((item) => item.types.includes('image/png'));
+      globalThis.__agentc2ClipboardBefore = { text: await clipboard.readText(), png: image ? await image.getType('image/png') : null };
+    });
     await page.getByRole('textbox', { name: 'Search sessions' }).fill('AgentC2 terminal regression');
     async function select(label) {
       await page.locator('.session-row').filter({ hasText: `AgentC2 terminal regression ${label}` }).click();
@@ -173,6 +181,26 @@ async function waitForInput(pane) {
     await poll(async () => (await remote('state'))[0].text.includes('HQ_PASTE_BUTTON_λ'), 'Paste button did not paste Unicode');
     assert.equal((await remote('state'))[0].mode, '0', 'Paste must return to live input');
     console.log('PASS Ctrl+V, Ctrl+Shift+V, Shift+Insert, and Paste button');
+    const imagesBefore = new Set((await remote('image-state')).map((image) => image.name));
+    await app.evaluate(async ({ clipboard, ClipboardItem, nativeImage }) => {
+      const image = nativeImage.createFromBitmap(Buffer.from([255, 0, 0, 255]), { width: 1, height: 1 });
+      await clipboard.write([new ClipboardItem({ 'image/png': new Blob([image.toPNG()], { type: 'image/png' }) })]);
+    });
+    await page.locator('.session-pane.is-focused .xterm-helper-textarea').focus();
+    await page.keyboard.press('Control+u');
+    await page.locator('.session-pane.is-focused').getByRole('button', { name: 'Paste', exact: true }).click();
+    let uploadedImage;
+    await poll(async () => {
+      uploadedImage = (await remote('image-state')).find((image) => !imagesBefore.has(image.name));
+      return Boolean(uploadedImage);
+    }, 'Image paste did not upload a remote PNG');
+    assert.equal(uploadedImage.mode, 0o600);
+    assert.equal(uploadedImage.magic, '89504e470d0a1a0a');
+    await poll(async () => (await remote('state'))[0].text.includes(uploadedImage.name), 'Image paste did not insert the uploaded path');
+    assert.equal((await remote('state'))[0].text.split(uploadedImage.name).length - 1, 1, 'Image path pasted more than once');
+    console.log('PASS clipboard image upload and one quoted remote path');
+    await page.locator('.session-pane.is-focused .xterm-helper-textarea').focus();
+    await page.keyboard.press('Control+u');
     // Select the real native menu's Paste action without OS menu automation.
     await app.evaluate(({ Menu }) => {
       const original = Menu.prototype.popup;
@@ -299,7 +327,12 @@ async function waitForInput(pane) {
     }
     throw error;
   } finally {
-    if (page && clipboardBefore !== undefined) await page.evaluate((text) => window.agentHQ.writeClipboard(text), clipboardBefore).catch(() => {});
+    if (app && clipboardBefore !== undefined) await app.evaluate(async ({ clipboard, ClipboardItem }) => {
+      const before = globalThis.__agentc2ClipboardBefore;
+      if (before.png) await clipboard.write([new ClipboardItem({ 'image/png': before.png, 'text/plain': before.text })]);
+      else await clipboard.writeText(before.text);
+      delete globalThis.__agentc2ClipboardBefore;
+    }).catch(() => {});
     if (app) await app.close();
     await remote('cleanup');
     fs.rmSync(dataDirectory, { recursive: true, force: true });

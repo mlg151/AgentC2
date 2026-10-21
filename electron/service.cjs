@@ -10,6 +10,7 @@ const { TmuxControl } = require('./tmux-control.cjs');
 const { Terminals } = require('./terminals.cjs');
 const { scrollTerminal } = require('./terminal-scroll.cjs');
 const { createCleanup } = require('./cleanup.cjs');
+const { uploadPng } = require('./image-upload.cjs');
 
 function createService({ directory, home }) {
   const events = new EventEmitter();
@@ -227,6 +228,15 @@ function createService({ directory, home }) {
     terminals.assertSessionOwner(client, name, host.id);
     return runRemote({ action, name }, host.id);
   }
+  async function uploadClipboardImage(client, id, png) {
+    const { record } = terminals.get(client, id);
+    terminals.assertOwner(client, record);
+    const host = getHost(record.hostId);
+    const remotePath = await uploadPng({ binary: SSH_BINARY, args: sshArgs(host), target: host.target, png });
+    if (terminals.get(client, id).record !== record) throw new Error('Terminal changed during image upload');
+    terminals.assertOwner(client, record);
+    return remotePath;
+  }
   function acknowledge(id) {
     const items = attention.acknowledge(id);
     events.emit('state:updated');
@@ -292,6 +302,6 @@ function createService({ directory, home }) {
     }
     return { matches, searched: selected.length, total: sessions.length, truncated, errors };
   }
-  return { store, events, terminals, cleanup, inventory, health, create, worktrees, archiveWorktree, diffRequest, action, saveSettings, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
+  return { store, events, terminals, cleanup, inventory, health, create, worktrees, archiveWorktree, diffRequest, action, uploadClipboardImage, saveSettings, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
 }
 module.exports = { createService };

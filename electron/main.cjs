@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const { tailscaleStatus, closeAction } = require('./platform.cjs');
 const { createService } = require('./service.cjs');
 const { Gateway } = require('./gateway.cjs');
+const { readClipboardPng } = require('./clipboard-image.cjs');
 
 const desktop = { id: 'desktop', name: 'Desktop' };
 let mainWindow, service, gateway, tray, monitor, healthMonitor, cleanupMonitor;
@@ -150,7 +151,14 @@ app.whenReady().then(async () => {
   handle('terminal:history', (id) => service.terminals.retained(desktop, id));
   handle('terminal:scroll', (id, direction, lines) => service.terminals.scrollRemote(desktop, id, direction, lines));
   handle('clipboard:read', () => clipboard.readText());
-  handle('clipboard:write', (text) => { if (typeof text !== 'string' || text.length > 1_000_000) throw new Error('Invalid clipboard text'); clipboard.writeText(text); });
+  handle('clipboard:for-terminal', async (id) => {
+    const { record } = service.terminals.get(desktop, id);
+    service.terminals.assertOwner(desktop, record);
+    const png = await readClipboardPng(clipboard, nativeImage);
+    if (png) return { kind: 'image', path: await service.uploadClipboardImage(desktop, id, png) };
+    return { kind: 'text', text: await clipboard.readText() };
+  });
+  handle('clipboard:write', (text) => { if (typeof text !== 'string' || text.length > 1_000_000) throw new Error('Invalid clipboard text'); return clipboard.writeText(text); });
   handle('terminal:menu', (hasSelection) => new Promise((resolve) => {
     Menu.buildFromTemplate([
       { label: 'Copy', accelerator: 'CommandOrControl+Shift+C', enabled: Boolean(hasSelection), click: () => resolve('copy') },

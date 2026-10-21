@@ -117,6 +117,7 @@ export interface AgentHQApi {
   closeTerminal(id: string): Promise<void>;
   scrollTerminal(id: string, direction: 'up' | 'down' | 'latest', lines?: number): Promise<void>;
   readClipboard(): Promise<string>;
+  readClipboardForTerminal(id: string): Promise<{ kind: 'text'; text: string } | { kind: 'image'; path: string }>;
   writeClipboard(text: string): Promise<void>;
   terminalMenu(hasSelection: boolean): Promise<'copy' | 'paste' | 'latest' | null>;
   onTerminalData(callback: (id: string, data: string, sequence: number) => void): () => void;

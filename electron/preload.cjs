@@ -62,6 +62,7 @@ contextBridge.exposeInMainWorld('agentHQ', {
   closeTerminal: (id) => ipcRenderer.invoke('terminal:close', id),
   scrollTerminal: (id, direction, lines) => ipcRenderer.invoke('terminal:scroll', id, direction, lines),
   readClipboard: () => ipcRenderer.invoke('clipboard:read'),
+  readClipboardForTerminal: (id) => ipcRenderer.invoke('clipboard:for-terminal', id),
   writeClipboard: (text) => ipcRenderer.invoke('clipboard:write', text),
   terminalMenu: (hasSelection) => ipcRenderer.invoke('terminal:menu', hasSelection),
   onInventory: (callback) => {
