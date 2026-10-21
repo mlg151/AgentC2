@@ -255,8 +255,9 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
     await page.getByRole('textbox', { name: 'Quick switcher search' }).fill(`${marker} 1`);
     await page.keyboard.press('Enter');
     await poll(async () => (await page.locator('.session-pane.is-focused .detail-footer code').innerText()) === names[1], 'Quick switcher did not focus the selected target');
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+k' : 'Control+k');
+    await page.getByRole('button', { name: 'Search units, hosts, and repositories' }).click();
     await page.getByRole('textbox', { name: 'Quick switcher search' }).fill('HQ_SEARCH_00001');
+    await poll(async () => await page.getByRole('button', { name: 'Search retained terminal history', exact: true }).isEnabled(), 'Retained-history search was not enabled after entering a query');
     await page.getByRole('button', { name: 'Search retained terminal history', exact: true }).click();
     await page.getByRole('region', { name: 'History search results' }).waitFor({ timeout: 30000 });
     assert.ok((await page.getByRole('region', { name: 'History search results' }).innerText()).includes('HQ_SEARCH_00001'));
