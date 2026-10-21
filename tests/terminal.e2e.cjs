@@ -40,6 +40,8 @@ if p['action']=='setup':
  print(json.dumps({'ok':True}))
 elif p['action']=='state':
  print(json.dumps([{'name':n,'mode':run('tmux','display-message','-p','-t',n,'#{pane_in_mode}'),'position':run('tmux','display-message','-p','-t',n,'#{scroll_position}'),'mouse':run('tmux','show-option','-v','-t',n,'mouse'),'text':run('tmux','capture-pane','-p','-t',n)} for n in names]))
+elif p['action']=='image-input':
+ print(json.dumps(run('tmux','capture-pane','-p','-J','-t',names[0])))
 elif p['action'].startswith('fallback-'):
  scope={'__name__':'hq_test'}; exec(compile(p['helper'],'remote.py','exec'),scope)
  direction=p['action'].split('-',1)[1]
@@ -68,8 +70,8 @@ elif p['action']=='cleanup':
   });
 }
 
-async function poll(check, message) {
-  for (let attempt = 0; attempt < 25; attempt++) {
+async function poll(check, message, attempts = 25) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
     if (await check()) return;
     await new Promise((resolve) => setTimeout(resolve, 150));
   }
@@ -196,8 +198,8 @@ async function waitForInput(pane) {
     }, 'Image paste did not upload a remote PNG');
     assert.equal(uploadedImage.mode, 0o600);
     assert.equal(uploadedImage.magic, '89504e470d0a1a0a');
-    await poll(async () => (await remote('state'))[0].text.includes(uploadedImage.name), 'Image paste did not insert the uploaded path');
-    assert.equal((await remote('state'))[0].text.split(uploadedImage.name).length - 1, 1, 'Image path pasted more than once');
+    await poll(async () => (await remote('image-input')).includes(uploadedImage.name), 'Image paste did not insert the uploaded path', 60);
+    assert.equal((await remote('image-input')).split(uploadedImage.name).length - 1, 1, 'Image path pasted more than once');
     console.log('PASS clipboard image upload and one quoted remote path');
     await page.locator('.session-pane.is-focused .xterm-helper-textarea').focus();
     await page.keyboard.press('Control+u');
@@ -216,6 +218,13 @@ async function waitForInput(pane) {
     await poll(async () => (await remote('state'))[0].text.includes('_CONTEXT_MENU'), 'Right-click Paste did not reach the terminal');
     assert.ok((await app.evaluate(() => globalThis.qaMenuLabels)).includes('Copy'));
     console.log('PASS right-click Copy/Paste menu plumbing');
+    const hintedPort = 41000 + Math.floor(Math.random() * 1000);
+    await page.locator('.session-pane.is-focused .xterm-helper-textarea').focus();
+    await page.keyboard.press('Control+u');
+    await page.keyboard.type(`printf 'http://localhost:${hintedPort}/preview?q=1\\n'`);
+    await page.keyboard.press('Enter');
+    await page.locator('.session-pane.is-focused .toolbar-button').filter({ hasText: `Tunnel :${hintedPort}` }).first().waitFor();
+    console.log('PASS remote loopback URL discovery appears as a manual tunnel action');
     // Verify rendered movement, not just tmux's mode flag. Fullscreen agents
     // retain their transcript internally and have no tmux scrollback to browse.
     for (const label of ['KEYS', 'MOUSE']) {

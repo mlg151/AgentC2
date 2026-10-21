@@ -26,7 +26,7 @@ function validateSettings(input) {
     if (!/^[a-zA-Z0-9_][a-zA-Z0-9_.@:\[\]-]*$/.test(target)) throw new Error('Use an SSH config alias or user@hostname for the host target');
     const port = Number(h.port);
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('SSH port must be between 1 and 65535');
-    return { id: h.id, name: text(h.name, 100).trim() || target, target, port, enabled: Boolean(h.enabled) };
+    return { id: h.id, name: text(h.name, 100).trim() || target, target, port, enabled: Boolean(h.enabled), autoForward: Boolean(h.autoForward) };
   });
   if (!hosts.some((h) => h.enabled)) throw new Error('Enable at least one host');
   ids.clear();

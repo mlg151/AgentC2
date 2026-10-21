@@ -6,8 +6,8 @@ const dimensions = (cols, rows) => ({ cols: Math.floor(Math.max(20, Math.min(Num
 
 // One SSH PTY per remote session; handles belong to individual UI connections.
 class Terminals {
-  constructor({ spawn, configure, history, scroll, emit }) {
-    Object.assign(this, { spawn, configure, history, scroll, emit });
+  constructor({ spawn, configure, history, scroll, emit, onOutput, onDispose }) {
+    Object.assign(this, { spawn, configure, history, scroll, emit, onOutput, onDispose });
     this.sessions = new Map();
     this.handles = new Map();
     this.opening = new Map();
@@ -54,6 +54,7 @@ class Terminals {
   bind(record, terminal) {
     terminal.onData((data) => {
       if (record.disposed || record.terminal !== terminal) return;
+      this.onOutput?.(record, data);
       if (record.connection !== 'connected') {
         record.connection = 'connected'; record.reconnectAttempts = 0;
         this.publish(record);
@@ -241,6 +242,7 @@ class Terminals {
   disposeRecord(record) {
     this.sessions.delete(record.key);
     record.disposed = true;
+    this.onDispose?.(record);
     if (record.reconnectTimer) clearTimeout(record.reconnectTimer);
     record.control?.close();
     if (record.exitCode === null) record.terminal.kill();

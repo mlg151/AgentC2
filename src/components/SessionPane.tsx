@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Anchor, ChevronLeft, ChevronRight, Link2Off, Play, Square, TerminalSquare, Trash2, Zap } from 'lucide-react';
+import { Anchor, ChevronLeft, ChevronRight, ExternalLink, Link2Off, Play, Square, TerminalSquare, Trash2, Zap } from 'lucide-react';
 import { TerminalView } from './TerminalView';
 import { DiffDrawer } from './DiffDrawer';
-import type { Session } from '../types';
+import type { DevUrl, Session } from '../types';
 
 export function SessionPane({ session, visible, primary, focused, slot, callsign, diffOpen, onToggleDiff, onFocus, onAnchor, onCycle, onResume, onRefresh, onDeleteHistory }: { session: Session; visible: boolean; primary: boolean; focused: boolean; slot: 'anchor' | 'target'; callsign?: string; diffOpen: boolean; onToggleDiff: () => void; onFocus: () => void; onAnchor: () => void; onCycle: (direction: number) => void; onResume: (s: Session) => void; onRefresh: () => void; onDeleteHistory: (session: Session) => void }) {
   const [terminalId, setTerminalId] = useState<string | null>(null);
@@ -11,6 +11,7 @@ export function SessionPane({ session, visible, primary, focused, slot, callsign
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [devUrls, setDevUrls] = useState<DevUrl[]>([]);
   const idRef = useRef<string | null>(null);
   useEffect(() => {
     if (!wanted || !session.canAttach || !window.agentHQ) return;
@@ -39,6 +40,12 @@ export function SessionPane({ session, visible, primary, focused, slot, callsign
     void window.agentHQ?.closeTerminal(id);
     setError(`Terminal connection closed (${code}). Reattach to reconnect.`);
   }), []);
+  useEffect(() => {
+    let cancelled = false;
+    void window.agentHQ?.devUrls(session.key).then((urls) => { if (!cancelled) setDevUrls(urls); }).catch(() => {});
+    const off = window.agentHQ?.onDevUrls((key, urls) => { if (key === session.key && !cancelled) setDevUrls(urls); });
+    return () => { cancelled = true; off?.(); };
+  }, [session.key]);
   const showError = useCallback((cause: unknown) => setError(String(cause)), []);
   async function stop() {
     if (!window.confirm(`Stop “${session.title}” on ${session.hostName}? This ends the session process and removes its tmux session.`)) return;
@@ -57,6 +64,7 @@ export function SessionPane({ session, visible, primary, focused, slot, callsign
       {session.canAttach ? <button className="toolbar-button" disabled={!terminalId || busy} onClick={() => setWanted(false)}><Link2Off size={15} />Detach</button> : null}
       {session.canStop ? <button className="toolbar-button danger" disabled={session.stale || busy} onClick={() => void stop()}><Square size={14} />Stop</button> : null}
       {session.worktreeOperation ? <button className="toolbar-button" aria-pressed={diffOpen} onClick={onToggleDiff}>{diffOpen ? 'Hide diff' : 'Diff'}</button> : null}
+      {devUrls.map((item) => <button key={item.url} className="toolbar-button" title={`${item.url}${item.error ? ` — ${item.error}` : ''}`} disabled={!terminalId || session.stale || item.status === 'opening'} onClick={() => void window.agentHQ?.openDevUrl(terminalId!, item.url).catch(showError)}><ExternalLink size={13} />{item.status === 'ready' ? 'Open' : item.status === 'opening' ? 'Opening' : item.status === 'failed' ? 'Retry' : 'Tunnel'} :{item.port}</button>)}
     </div>
     {error ? <p role="alert" className="pane-error">{error}</p> : null}
     <div className={`terminal-panel${terminalId ? ' is-attached' : ''}`}>

@@ -96,7 +96,10 @@ export function TerminalView({ terminalId, visible, focused = true }: { terminal
     });
     const fit = new FitAddon();
     terminal.loadAddon(fit);
-    enableTerminalLinks(terminal);
+    enableTerminalLinks(terminal, (url) => {
+      const id = activeIdRef.current;
+      if (id) void window.agentHQ?.openDevUrl(id, url).catch(showError);
+    });
     terminal.open(element);
     terminalRef.current = terminal;
     fitRef.current = fit;

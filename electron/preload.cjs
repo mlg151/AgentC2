@@ -63,6 +63,13 @@ contextBridge.exposeInMainWorld('agentHQ', {
   scrollTerminal: (id, direction, lines) => ipcRenderer.invoke('terminal:scroll', id, direction, lines),
   readClipboard: () => ipcRenderer.invoke('clipboard:read'),
   readClipboardForTerminal: (id) => ipcRenderer.invoke('clipboard:for-terminal', id),
+  devUrls: (sessionKey) => ipcRenderer.invoke('tunnel:list', sessionKey),
+  openDevUrl: (id, url) => ipcRenderer.invoke('tunnel:open', id, url),
+  onDevUrls: (callback) => {
+    const listener = (_event, sessionKey, urls) => callback(sessionKey, urls);
+    ipcRenderer.on('tunnel:updated', listener);
+    return () => ipcRenderer.removeListener('tunnel:updated', listener);
+  },
   writeClipboard: (text) => ipcRenderer.invoke('clipboard:write', text),
   terminalMenu: (hasSelection) => ipcRenderer.invoke('terminal:menu', hasSelection),
   onInventory: (callback) => {

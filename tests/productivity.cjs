@@ -9,10 +9,13 @@ const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-hq-state-test-'))
 try {
   const store = new Store(directory);
   const config = defaults();
+  config.hosts[0].autoForward = true;
   config.hosts.push({ id: 'secondary', name: 'Build server', target: 'deploy@build-server', port: 2222, enabled: true });
   config.presets.push({ ...config.presets[1], id: 'openrouter', name: 'Claude OpenRouter', command: 'claude3', hostId: 'secondary' });
   store.save('settings', validateSettings(config));
   assert.equal(new Store(directory).data.settings.presets.at(-1).command, 'claude3');
+  assert.equal(new Store(directory).data.settings.hosts[0].autoForward, true);
+  assert.equal(new Store(directory).data.settings.hosts[1].autoForward, false);
   for (const target of ['-oProxyCommand=bad', 'host with spaces', 'host;echo', 'host\nother']) {
     assert.throws(() => validateSettings({ ...config, hosts: [{ ...config.hosts[0], target }] }));
   }

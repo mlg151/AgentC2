@@ -38,7 +38,8 @@ export interface Inventory {
   attention: AttentionItem[];
 }
 
-export interface HostConfig { id: string; name: string; target: string; port: number; enabled: boolean }
+export interface HostConfig { id: string; name: string; target: string; port: number; enabled: boolean; autoForward?: boolean }
+export interface DevUrl { url: string; hostId: string; port: number; status: 'available' | 'opening' | 'ready' | 'failed'; localUrl: string | null; error: string | null }
 export interface HostHealth { hostId: string; name: string; connected: boolean; cpuPercent?: number | null; memoryTotal?: number; memoryUsed?: number; disks?: { path: string; total: number; used: number; free: number }[]; sampledAt?: number; error?: string }
 export interface LaunchPreset { id: string; name: string; provider: Provider; command: string; args: string; cwd: string; instructions: string; fullPermissions: boolean; attentionHooks: boolean; hostId: string }
 export interface CleanupPolicy { hostId: string; provider: Exclude<Provider, 'terminal'>; enabled: boolean; days: number }
@@ -118,6 +119,9 @@ export interface AgentHQApi {
   scrollTerminal(id: string, direction: 'up' | 'down' | 'latest', lines?: number): Promise<void>;
   readClipboard(): Promise<string>;
   readClipboardForTerminal(id: string): Promise<{ kind: 'text'; text: string } | { kind: 'image'; path: string }>;
+  devUrls(sessionKey: string): Promise<DevUrl[]>;
+  openDevUrl(id: string, url: string): Promise<string>;
+  onDevUrls(callback: (sessionKey: string, urls: DevUrl[]) => void): () => void;
   writeClipboard(text: string): Promise<void>;
   terminalMenu(hasSelection: boolean): Promise<'copy' | 'paste' | 'latest' | null>;
   onTerminalData(callback: (id: string, data: string, sequence: number) => void): () => void;

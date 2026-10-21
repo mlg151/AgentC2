@@ -102,6 +102,7 @@ app.whenReady().then(async () => {
       else if (event === 'terminal:exit') send(event, value.id, value.code);
       else send(event, value);
     });
+    service.events.on('tunnel:updated', ({ sessionKey, urls }) => send('tunnel:updated', sessionKey, urls));
     service.events.on('inventory:updated', (value) => {
       send('inventory:updated', value);
       const unread = value.attention.filter((item) => !item.acknowledged);
@@ -158,6 +159,12 @@ app.whenReady().then(async () => {
     if (png) return { kind: 'image', path: await service.uploadClipboardImage(desktop, id, png) };
     return { kind: 'text', text: await clipboard.readText() };
   });
+  handle('tunnel:list', (sessionKey) => service.devUrls(sessionKey));
+  handle('tunnel:open', async (id, url) => {
+    const localUrl = await service.openDevUrl(desktop, id, url);
+    await shell.openExternal(localUrl);
+    return localUrl;
+  });
   handle('clipboard:write', (text) => { if (typeof text !== 'string' || text.length > 1_000_000) throw new Error('Invalid clipboard text'); return clipboard.writeText(text); });
   handle('terminal:menu', (hasSelection) => new Promise((resolve) => {
     Menu.buildFromTemplate([
@@ -187,5 +194,6 @@ app.on('before-quit', () => {
   quitting = true;
   clearInterval(monitor); clearInterval(healthMonitor); clearInterval(cleanupMonitor);
   void gateway?.dispose(); service?.terminals.closeAll(); tray?.destroy(); tray = null;
+  service?.tunnels.closeAll();
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

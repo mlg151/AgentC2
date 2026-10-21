@@ -11,6 +11,7 @@ const { Terminals } = require('./terminals.cjs');
 const { scrollTerminal } = require('./terminal-scroll.cjs');
 const { createCleanup } = require('./cleanup.cjs');
 const { uploadPng } = require('./image-upload.cjs');
+const { Tunnels } = require('./tunnels.cjs');
 
 function createService({ directory, home }) {
   const events = new EventEmitter();
@@ -61,6 +62,7 @@ function createService({ directory, home }) {
     return host;
   }
   function sshArgs(host) { return [...SSH_ARGS, '-p', String(host.port)]; }
+  const tunnels = new Tunnels({ binary: SSH_BINARY, argsForHost: sshArgs, onUpdate: (sessionKey, urls) => events.emit('tunnel:updated', { sessionKey, urls }) });
 
   async function inventory() {
     if (inventoryFlight) return inventoryFlight;
@@ -129,6 +131,8 @@ function createService({ directory, home }) {
 
   const terminals = new Terminals({
     emit: (clientId, event, value) => events.emit('client', clientId, event, value),
+    onOutput: (record, data) => tunnels.feed(getHost(record.hostId), `${record.hostId}/tmux:${record.name}`, data),
+    onDispose: (record) => tunnels.release(`${record.hostId}/tmux:${record.name}`),
     configure: async (name, hostId) => {
       if (!OTHER_TMUX_NAME.test(name)) throw new Error('Invalid tmux session name');
       getHost(hostId);
@@ -237,6 +241,15 @@ function createService({ directory, home }) {
     terminals.assertOwner(client, record);
     return remotePath;
   }
+  function devUrls(sessionKey) {
+    if (typeof sessionKey !== 'string' || sessionKey.length > 300) throw new Error('Invalid session key');
+    return tunnels.list(sessionKey);
+  }
+  function openDevUrl(client, id, url) {
+    const { record } = terminals.get(client, id);
+    const host = getHost(record.hostId);
+    return tunnels.open(host, `${record.hostId}/tmux:${record.name}`, url);
+  }
   function acknowledge(id) {
     const items = attention.acknowledge(id);
     events.emit('state:updated');
@@ -302,6 +315,6 @@ function createService({ directory, home }) {
     }
     return { matches, searched: selected.length, total: sessions.length, truncated, errors };
   }
-  return { store, events, terminals, cleanup, inventory, health, create, worktrees, archiveWorktree, diffRequest, action, uploadClipboardImage, saveSettings, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
+  return { store, events, terminals, tunnels, cleanup, inventory, health, create, worktrees, archiveWorktree, diffRequest, action, uploadClipboardImage, devUrls, openDevUrl, saveSettings, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
 }
 module.exports = { createService };
