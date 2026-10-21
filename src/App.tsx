@@ -182,10 +182,11 @@ export default function App() {
   async function create(input: CreateInput) {
     if (!window.agentHQ) return;
     setBusy(true);
+    let started = false;
     try {
       const result = await window.agentHQ.create(input);
+      started = true;
       const key = `${input.hostId}/tmux:${result.name}`;
-      setDialog(undefined);
       let session: Session | undefined;
       for (let attempt = 0; attempt < 4; attempt++) {
         const next = await window.agentHQ.inventory();
@@ -196,7 +197,8 @@ export default function App() {
       }
       if (session) openSession(session);
       else setError('The session started but has not appeared in inventory. Refresh to find it.');
-    } catch (cause) { setError(String(cause)); } finally { setBusy(false); }
+    } catch (cause) { setError(String(cause)); }
+    finally { if (started) setDialog(undefined); setBusy(false); }
   }
   async function saveSettings(next: Settings) {
     if (!window.agentHQ) return;
