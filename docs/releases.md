@@ -6,6 +6,8 @@
 
 An isolated Linux SSH job creates a disposable account on its runner, trusts that runner's exact local host key, and runs the terminal, workspace, and companion suites under Xvfb/Openbox with an isolated D-Bus notification service. It does not use provider CLIs. A release waits for this job and all four native package jobs.
 
+`npm run test:ci` includes packaging-environment and PTY-protocol regressions. The packaging entry point removes empty optional signing variables before invoking electron-builder and signature reporting; macOS treats an empty `CSC_LINK` as a certificate path, unlike an absent variable. The native smoke uses a terminal emulator to answer VT queries and waits for shell readiness, actual command output, and a successful exit in sequence. Timeouts report the phase and captured fixture output.
+
 Open the successful **Desktop CI and releases** Actions run and download `AgentC2-win-x64`, `AgentC2-linux-x64`, `AgentC2-mac-x64`, or `AgentC2-mac-arm64`. Artifacts are retained for 14 days and contain:
 
 | Target | Package names (`<version>` is `package.json`'s version) |
