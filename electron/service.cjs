@@ -17,7 +17,7 @@ function createService({ directory, home }) {
   const SSH_ARGS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'StrictHostKeyChecking=yes'];
   const TMUX_NAME = /^hq-[a-f0-9]{12}$/;
   const OTHER_TMUX_NAME = /^[A-Za-z0-9_.:-]{1,80}$/;
-  const helperSource = fs.readFileSync(path.join(__dirname, 'session-cleanup.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktrees.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'remote.py'), 'utf8');
+  const helperSource = fs.readFileSync(path.join(__dirname, 'session-cleanup.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktrees.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktree-diff.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'remote.py'), 'utf8');
   const hookSource = fs.readFileSync(path.join(__dirname, 'session-hook.py'), 'utf8');
 
 
@@ -212,6 +212,14 @@ function createService({ directory, home }) {
     if (typeof operationId !== 'string' || !/^[a-f0-9]{32}$/.test(operationId)) throw new Error('Invalid worktree operation ID');
     return runRemote({ action: 'worktree_archive', operationId }, hostId);
   }
+  function diffRequest(client, input, action) {
+    if (!input || !TMUX_NAME.test(input.name || '') || !/^[a-f0-9]{32}$/.test(input.operationId || '') || !['diff_files', 'diff_detail', 'diff_hunk'].includes(action)) throw new Error('Invalid worktree diff request');
+    if (action !== 'diff_files' && !/^[a-f0-9]{64}$/.test(input.fileId || '')) throw new Error('Invalid changed file');
+    if (action === 'diff_hunk' && (!/^[a-f0-9]{64}$/.test(input.revision || '') || !/^[a-f0-9]{64}$/.test(input.hunkId || '') || !['stage', 'revert'].includes(input.operation))) throw new Error('Invalid hunk action');
+    const hostId = getHost(input.hostId).id;
+    if (action === 'diff_hunk') terminals.assertSessionOwner(client, input.name, hostId);
+    return runRemote({ action, name: input.name, operationId: input.operationId, ...(action === 'diff_files' ? {} : { fileId: input.fileId }), ...(action === 'diff_hunk' ? { revision: input.revision, hunkId: input.hunkId, operation: input.operation } : {}) }, hostId);
+  }
 
   function action(client, action, name, hostId) {
     const host = getHost(hostId);
@@ -284,6 +292,6 @@ function createService({ directory, home }) {
     }
     return { matches, searched: selected.length, total: sessions.length, truncated, errors };
   }
-  return { store, events, terminals, cleanup, inventory, health, create, worktrees, archiveWorktree, action, saveSettings, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
+  return { store, events, terminals, cleanup, inventory, health, create, worktrees, archiveWorktree, diffRequest, action, saveSettings, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
 }
 module.exports = { createService };

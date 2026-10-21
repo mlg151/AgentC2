@@ -53,7 +53,7 @@ def worktree_git(*args, timeout=15):
     return result.stdout.strip()
 
 
-def worktree_state(record):
+def worktree_state(record, detailed=True):
     path = Path(record["path"])
     active = run(["tmux", "has-session", "-t", record["name"]], timeout=3).returncode == 0
     token = hashlib.sha256(record["operationId"].encode()).hexdigest()
@@ -66,6 +66,8 @@ def worktree_state(record):
     owned = any(f"worktree {path}" in entry.splitlines() and f"branch refs/heads/{record['branch']}" in entry.splitlines() for entry in listed.split("\n\n"))
     if not owned or path.is_symlink() or path.resolve() != path:
         return {"exists": True, "active": active, "owned": False, "dirty": None, "merged": None}
+    if not detailed:
+        return {"exists": True, "active": active, "owned": True, "dirty": None, "merged": None}
     dirty = bool(worktree_git("-C", str(path), "status", "--porcelain=v1", "--untracked-files=all", timeout=10))
     merged = run(["git", "-C", record["repository"], "merge-base", "--is-ancestor", record["branch"], record["baseRef"]], timeout=10).returncode == 0
     return {"exists": True, "active": active, "owned": True, "dirty": dirty, "merged": merged}

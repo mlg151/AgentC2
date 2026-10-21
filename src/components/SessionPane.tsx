@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Anchor, ChevronLeft, ChevronRight, Link2Off, Play, Square, TerminalSquare, Trash2, Zap } from 'lucide-react';
 import { TerminalView } from './TerminalView';
+import { DiffDrawer } from './DiffDrawer';
 import type { Session } from '../types';
 
-export function SessionPane({ session, visible, primary, focused, slot, callsign, onFocus, onAnchor, onCycle, onResume, onRefresh, onDeleteHistory }: { session: Session; visible: boolean; primary: boolean; focused: boolean; slot: 'anchor' | 'target'; callsign?: string; onFocus: () => void; onAnchor: () => void; onCycle: (direction: number) => void; onResume: (s: Session) => void; onRefresh: () => void; onDeleteHistory: (session: Session) => void }) {
+export function SessionPane({ session, visible, primary, focused, slot, callsign, diffOpen, onToggleDiff, onFocus, onAnchor, onCycle, onResume, onRefresh, onDeleteHistory }: { session: Session; visible: boolean; primary: boolean; focused: boolean; slot: 'anchor' | 'target'; callsign?: string; diffOpen: boolean; onToggleDiff: () => void; onFocus: () => void; onAnchor: () => void; onCycle: (direction: number) => void; onResume: (s: Session) => void; onRefresh: () => void; onDeleteHistory: (session: Session) => void }) {
   const [terminalId, setTerminalId] = useState<string | null>(null);
   const [wanted, setWanted] = useState(Boolean(session.canAttach));
   const [attempt, setAttempt] = useState(0);
@@ -55,12 +56,14 @@ export function SessionPane({ session, visible, primary, focused, slot, callsign
       {session.canInterrupt ? <button className="toolbar-button" disabled={session.stale || busy} onClick={() => void window.agentHQ?.interrupt(session.id, session.hostId).catch(showError)}><Zap size={15} />Interrupt</button> : null}
       {session.canAttach ? <button className="toolbar-button" disabled={!terminalId || busy} onClick={() => setWanted(false)}><Link2Off size={15} />Detach</button> : null}
       {session.canStop ? <button className="toolbar-button danger" disabled={session.stale || busy} onClick={() => void stop()}><Square size={14} />Stop</button> : null}
+      {session.worktreeOperation ? <button className="toolbar-button" aria-pressed={diffOpen} onClick={onToggleDiff}>{diffOpen ? 'Hide diff' : 'Diff'}</button> : null}
     </div>
     {error ? <p role="alert" className="pane-error">{error}</p> : null}
     <div className={`terminal-panel${terminalId ? ' is-attached' : ''}`}>
       <TerminalView terminalId={terminalId} visible={visible && Boolean(terminalId)} focused={focused} />
       {!terminalId ? <div className="terminal-empty"><TerminalSquare size={30} /><h2>{connecting ? session.provider === 'terminal' ? 'Attaching to terminal…' : 'Attaching to chat…' : session.missing ? 'Session unavailable' : session.stale ? 'Host unavailable' : session.kind === 'unmanaged' ? 'Unmanaged process' : session.canResume ? 'Conversation saved' : 'Session ready'}</h2><p>{session.missing ? 'This session is no longer in the host’s inventory. Its notes remain saved; close the tab or refresh to check again.' : session.stale ? 'The last known session state is shown. Reconnect the host to continue.' : session.kind === 'unmanaged' ? 'This process was started outside tmux. Find its saved conversation and resume a managed copy.' : session.canResume ? 'Resume this conversation with a launch preset.' : 'Attach to continue. Remote sessions stay available after disconnecting.'}</p></div> : null}
     </div>
+    {diffOpen && session.worktreeOperation ? <DiffDrawer session={session} visible={visible} onClose={onToggleDiff} /> : null}
     <div className="detail-footer"><span>ID <code>{session.id}</code></span><span>{session.presetName || session.provider}</span></div>
   </section>;
 }

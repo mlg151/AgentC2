@@ -45,6 +45,7 @@ export default function App() {
   const [cleanupTarget, setCleanupTarget] = useState<Session | null | undefined>(undefined);
   const [showSwitcher, setShowSwitcher] = useState(false);
   const [showOverwatch, setShowOverwatch] = useState(false);
+  const [diffOpenKey, setDiffOpenKey] = useState<string | null>(null);
   const [showKeyboardHelp, setShowKeyboardHelp] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
   const [dialog, setDialog] = useState<Session | null | undefined>(undefined);
@@ -199,6 +200,10 @@ export default function App() {
     if (!candidates.length) return 'No confirmed urgent units';
     openSession(candidates[0]); return requestFocus(candidates[0].key);
   }
+  function toggleDiff(key: string) {
+    if (diffOpenKey === key) { setDiffOpenKey(null); requestFocus(key); }
+    else setDiffOpenKey(key);
+  }
   const commands: CommandActions = {
     search: { run: () => setShowSwitcher((value) => !value) }, overwatch: { run: () => setShowOverwatch((value) => !value) },
     cycleNext: { run: () => cycleTarget(1) }, cyclePrevious: { run: () => cycleTarget(-1) },
@@ -209,7 +214,7 @@ export default function App() {
     approve: { run: () => {}, available: false, reason: 'No verified actionable permission request' },
     deny: { run: () => {}, available: false, reason: 'No verified actionable permission request' },
     jumpRequest: { run: () => {}, available: false, reason: 'No verified actionable permission request' },
-    diff: { run: () => {}, available: false, reason: 'Worktree diff is unavailable' },
+    diff: { run: () => { if (selected) toggleDiff(selected.key); }, available: Boolean(selected?.worktreeOperation && selected.kind === 'managed'), reason: 'Select an owned worktree unit' },
     exercise: { run: () => {}, available: false, reason: 'Joint Exercise setup is unavailable' },
     handoff: { run: () => {}, available: false, reason: 'Structured handoff is unavailable; notes can still be copied' },
     faultStop: { run: () => {}, available: false, reason: 'No verified runaway managed units' },
@@ -232,7 +237,7 @@ export default function App() {
         </section> : null}
         {selected && !inbox ? <div className="workspace-tools"><button className="text-button" disabled={pinning.has(selected.key)} aria-pressed={Boolean(workspace.metadata[selected.key]?.pinned)} onClick={() => void togglePin(selected)}><Pin size={13} />{workspace.metadata[selected.key]?.pinned ? 'Unpin' : 'Pin'}</button><label>Project<input aria-label="Session project" list="project-names" placeholder={selected.cwd || 'Ungrouped'} value={workspace.metadata[selected.key]?.project || ''} maxLength={100} onChange={(e) => updateMetadata(selected.key, { project: e.target.value })} /><datalist id="project-names">{projects.map((p) => <option key={p}>{p}</option>)}</datalist></label><button className="text-button" onClick={() => setShowNotes((v) => !v)}>{showNotes ? 'Hide notes' : 'Notes & handoff'}</button><label className="split-selector"><Columns2 size={14} /><select aria-label="Split terminal" value={situation.targetKey || ''} onChange={(e) => changeSituation({ targetKey: e.target.value || null })}><option value="">Single pane</option>{workspace.tabs.filter((k) => k !== situation.anchorKey).map((k) => <option key={k} value={k}>{known[k]?.title || k}</option>)}</select></label></div> : null}
         <div className={`pane-grid${situation.anchorKey && situation.targetKey ? ' is-split' : ''}${inbox ? ' pane-hidden' : ''}`}>
-          {workspace.tabs.map((key) => known[key] ? <SessionPane key={key} session={known[key]} primary={key === situation.anchorKey} focused={key === workspace.selectedKey} slot={key === situation.anchorKey ? 'anchor' : 'target'} callsign={situation.callsigns[key]} visible={(key === situation.anchorKey || key === situation.targetKey) && (!situation.zen || key === workspace.selectedKey)} onFocus={() => changeSituation({ focusedPane: key === situation.anchorKey ? 'anchor' : 'target' })} onAnchor={key === situation.anchorKey ? unpinAnchor : promoteTarget} onCycle={cycleTarget} onResume={setDialog} onDeleteHistory={setCleanupTarget} onRefresh={() => void refresh()} /> : <section className={`session-pane${(key === situation.anchorKey || key === situation.targetKey) && (!situation.zen || key === workspace.selectedKey) ? '' : ' pane-hidden'}`} key={key}><div className="no-selection"><h2>Session unavailable</h2><p>Enable its host or refresh to restore this tab.</p></div></section>)}
+          {workspace.tabs.map((key) => known[key] ? <SessionPane key={key} session={known[key]} primary={key === situation.anchorKey} focused={key === workspace.selectedKey} slot={key === situation.anchorKey ? 'anchor' : 'target'} callsign={situation.callsigns[key]} diffOpen={diffOpenKey === key} onToggleDiff={() => toggleDiff(key)} visible={(key === situation.anchorKey || key === situation.targetKey) && (!situation.zen || key === workspace.selectedKey)} onFocus={() => changeSituation({ focusedPane: key === situation.anchorKey ? 'anchor' : 'target' })} onAnchor={key === situation.anchorKey ? unpinAnchor : promoteTarget} onCycle={cycleTarget} onResume={setDialog} onDeleteHistory={setCleanupTarget} onRefresh={() => void refresh()} /> : <section className={`session-pane${(key === situation.anchorKey || key === situation.targetKey) && (!situation.zen || key === workspace.selectedKey) ? '' : ' pane-hidden'}`} key={key}><div className="no-selection"><h2>Session unavailable</h2><p>Enable its host or refresh to restore this tab.</p></div></section>)}
           {!workspace.tabs.length ? <div className="no-selection"><TerminalSquare size={35} /><h1>{loading ? 'Finding sessions…' : 'Select a session'}</h1><p>Open conversations in tabs or start a new managed terminal.</p><button className="button-primary" onClick={() => setDialog(null)}>New session</button></div> : null}
         </div>
         {selected && showNotes && !inbox ? <section className="notes-panel"><label>Notes & handoff<textarea aria-label="Session notes and handoff" rows={4} maxLength={20000} placeholder="Objective, current status, next step, and relevant links…" value={workspace.metadata[selected.key]?.notes || ''} onChange={(e) => updateMetadata(selected.key, { notes: e.target.value })} /></label><div className="inline-actions"><span>Saved locally with this session.</span><button className="text-button" onClick={() => void window.agentHQ?.writeClipboard(`${selected.title}\nHost: ${selected.hostName}\nProject: ${projectFor(selected, workspace.metadata)}\nDirectory: ${selected.cwd}\n\n${workspace.metadata[selected.key]?.notes || ''}`).catch((cause) => setError(String(cause)))}>Copy handoff</button></div></section> : null}

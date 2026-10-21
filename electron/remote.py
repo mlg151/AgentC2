@@ -544,6 +544,13 @@ def main():
     elif action == "worktree_archive":
         with cleanup_lock():
             result = worktree_archive(payload)
+    elif action == "diff_files":
+        result = diff_files(payload)
+    elif action == "diff_detail":
+        result = diff_detail(payload)
+    elif action == "diff_hunk":
+        with cleanup_lock():
+            result = diff_hunk_action(payload)
     elif action == "cleanup_preview":
         result = cleanup_preview(payload)
     elif action == "cleanup_delete":

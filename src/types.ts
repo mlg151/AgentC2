@@ -75,6 +75,10 @@ export interface CreateInput {
 }
 
 export interface WorktreeRecord { operationId: string; repository?: string; baseRef?: string; baseCommit?: string; branch?: string; path?: string; name?: string; provider?: Provider; slug?: string; title?: string; presetName?: string; hasInstructions?: boolean; state: string; status: { exists?: boolean; active?: boolean; owned: boolean; dirty?: boolean | null; merged?: boolean | null } }
+export interface DiffScope { hostId: string; name: string; operationId: string }
+export interface DiffFile { id: string; path: string; staged: boolean; unstaged: boolean; untracked: boolean }
+export interface DiffHunk { id: string; text: string; actionable: boolean }
+export interface DiffDetail { revision: string; staged: DiffHunk[]; unstaged: DiffHunk[]; summary: string; binary: boolean; large: boolean }
 
 export interface AgentHQApi {
   readonly platform: string;
@@ -98,6 +102,9 @@ export interface AgentHQApi {
   create(input: CreateInput): Promise<{ name: string }>;
   listWorktrees(hostId: string): Promise<WorktreeRecord[]>;
   archiveWorktree(hostId: string, operationId: string): Promise<WorktreeRecord>;
+  diffFiles(input: DiffScope): Promise<DiffFile[]>;
+  diffDetail(input: DiffScope & { fileId: string }): Promise<DiffDetail>;
+  diffHunk(input: DiffScope & { fileId: string; revision: string; hunkId: string; operation: 'stage' | 'revert' }): Promise<{ changed: true }>;
   interrupt(name: string, hostId?: string): Promise<void>;
   stop(name: string, hostId?: string): Promise<void>;
   openTerminal(name: string, cols: number, rows: number, hostId?: string): Promise<string>;

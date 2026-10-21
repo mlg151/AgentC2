@@ -16,7 +16,7 @@ const created = [];
 const marker = `HQ_WORKSPACE_${crypto.randomBytes(4).toString('hex')}`;
 const errors = [];
 let app, page, clipboardBefore;
-function remote(action) {
+function remote(action, extra = {}) {
   const source = `
 import subprocess,sys,json,base64,shlex,shutil
 from pathlib import Path
@@ -30,6 +30,8 @@ if p['action']=='setup':
  for label in ['anchor','target']:
   repo=fixture_root/label;repo.mkdir(parents=True)
   run('git','init','-b','qa/'+label,str(repo))
+  (repo/'QA_DIFF.txt').write_text(''.join('line %d\\n'%number for number in range(1,31)))
+  run('git','-C',str(repo),'add','QA_DIFF.txt')
   run('git','-C',str(repo),'-c','user.name=AgentC2 fixture','-c','user.email=fixture@example.invalid','commit','--allow-empty','-m','Fixture')
  for i,name in enumerate(names):
   run('tmux','new-session','-d','-s',name,'-n','setup')
@@ -45,6 +47,19 @@ elif p['action']=='pane-pid':
  print(run('tmux','display-message','-p','-t',names[0],'#{pane_pid}'))
 elif p['action']=='repo-path':
  print(str(fixture_root/'anchor'))
+elif p['action'] in ('edit-worktree','worktree-state','reset-worktree'):
+ tree=Path(p['worktree']).resolve()
+ owned=(Path.home()/'.cache'/'agent-hq'/'worktrees'/'paths').resolve()
+ if not tree.is_relative_to(owned) or not str(tree).endswith(p['operationId']): raise ValueError('Outside disposable owned worktree')
+ file=tree/'QA_DIFF.txt'
+ if p['action']=='edit-worktree':
+  file.write_text(file.read_text().replace('line 2\\n','line TWO\\n').replace('line 25\\n','line TWENTYFIVE\\n'))
+  print('{}')
+ elif p['action']=='worktree-state':
+  print(json.dumps({'text':file.read_text(),'staged':run('git','-C',str(tree),'diff','--cached','--','QA_DIFF.txt')}))
+ else:
+  run('git','-C',str(tree),'reset','--hard','HEAD')
+  print('{}')
 elif p['action']=='state':
  print(json.dumps([run('tmux','capture-pane','-p','-t',name) for name in names[:2]]))
 elif p['action']=='cleanup':
@@ -53,7 +68,7 @@ elif p['action']=='cleanup':
  print('{}')
 `;
   return new Promise((resolve, reject) => {
-    const child = spawn(ssh, ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=10', host, 'python3', '-', Buffer.from(JSON.stringify({ action, names: [...names, ...created], marker })).toString('base64')], { windowsHide: true });
+    const child = spawn(ssh, ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=10', host, 'python3', '-', Buffer.from(JSON.stringify({ action, names: [...names, ...created], marker, ...extra })).toString('base64')], { windowsHide: true });
     let output = '', error = '';
     child.stdout.on('data', (chunk) => { output += chunk; }); child.stderr.on('data', (chunk) => { error += chunk; });
     child.on('error', reject); child.on('close', (code) => code ? reject(new Error(error)) : resolve(output)); child.stdin.end(source);
@@ -258,7 +273,7 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
     });
     config.notifications = true;
     config.presets.push({ id: 'fixture', name: 'Fixture launcher', provider: 'claude', command: 'python3', args: `-u -c 'import sys; print("HQ_PRESET_ARG="+sys.argv[-1],flush=True); sys.exit(7)'`, cwd: '/tmp', instructions: 'literal $(touch /tmp/never-execute-this) "quotes"', fullPermissions: false, attentionHooks: false, hostId: mirror.id });
-    config.presets.push({ id: 'worktree-fixture', name: 'Worktree fixture', provider: 'claude', command: 'python3', args: `-u -c 'import time; time.sleep(30)'`, cwd: '/tmp', instructions: '', fullPermissions: false, attentionHooks: false, hostId: mirror.id });
+    config.presets.push({ id: 'worktree-fixture', name: 'Worktree fixture', provider: 'claude', command: 'python3', args: `-u -c 'import time; time.sleep(120)'`, cwd: '/tmp', instructions: '', fullPermissions: false, attentionHooks: false, hostId: mirror.id });
     await page.evaluate((c) => window.agentHQ.saveSettings(c), config);
     // Reload reads the saved preset exactly as a restart would.
     await page.reload(); await page.locator('.session-row').first().waitFor({ timeout: 60000 });
@@ -278,11 +293,41 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
     const owned = await page.evaluate((hostId) => window.agentHQ.listWorktrees(hostId), mirror.id);
     const worktree = owned.find((item) => item.operationId === isolated.worktreeOperation);
     assert.ok(worktree?.status.owned && worktree.status.active && worktree.path === isolated.cwd);
+    await remote('edit-worktree', { worktree: worktree.path, operationId: worktree.operationId });
+    await page.locator('.session-pane.is-focused .xterm-helper-textarea').focus();
+    await page.keyboard.press('Alt+d');
+    const drawer = page.getByRole('region', { name: 'Worktree diff' });
+    await drawer.getByRole('button', { name: /QA_DIFF.txt/ }).waitFor();
+    await poll(async () => await drawer.getByRole('button', { name: 'Stage hunk' }).count() === 2, 'Two changed hunks were not shown');
+    await page.screenshot({ path: path.join(os.tmpdir(), 'agentc2-worktree-diff.png') });
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1000, 760));
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: path.join(os.tmpdir(), 'agentc2-worktree-diff-narrow.png') });
+    assert.ok(await page.evaluate(() => { const pane = document.querySelector('.session-pane.is-focused').getBoundingClientRect(); const diff = document.querySelector('.diff-drawer').getBoundingClientRect(); return diff.top >= pane.top && diff.bottom <= pane.bottom; }), 'Narrow diff drawer overflowed its pane');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1600, 1000));
+    await page.keyboard.press('s');
+    await poll(async () => await drawer.getByRole('button', { name: 'Stage hunk' }).count() === 1, 'Staged hunk was not removed from unstaged diff');
+    await page.keyboard.press('r');
+    await drawer.getByRole('button', { name: 'Confirm revert' }).click();
+    let changed;
+    await poll(async () => { changed = JSON.parse(await remote('worktree-state', { worktree: worktree.path, operationId: worktree.operationId })); return changed.text.includes('line TWO\n') && changed.text.includes('line 25\n'); }, 'Confirmed revert did not restore only the selected hunk');
+    assert.ok(changed.staged.includes('line TWO') && !changed.staged.includes('line TWENTYFIVE'));
+    await assert.rejects(page.evaluate((value) => window.agentHQ.archiveWorktree(value.hostId, value.operationId), { hostId: mirror.id, operationId: isolated.worktreeOperation }), /clean/);
+    if (process.env.AGENTC2_SSH_QA_BLOCK_FILE) {
+      fs.writeFileSync(process.env.AGENTC2_SSH_QA_BLOCK_FILE, 'blocked');
+      try { await drawer.getByText('Stale · refresh after reconnect').waitFor({ timeout: 30000 }); }
+      finally { fs.rmSync(process.env.AGENTC2_SSH_QA_BLOCK_FILE, { force: true }); }
+      await drawer.getByText('Stale · refresh after reconnect').waitFor({ state: 'hidden', timeout: 30000 });
+    }
+    await page.keyboard.press('Alt+d');
+    await drawer.waitFor({ state: 'hidden' });
+    await poll(async () => await page.locator('.session-pane.is-focused .xterm-helper-textarea').evaluate((element) => document.activeElement === element), 'Closing diff did not restore terminal focus');
+    await remote('reset-worktree', { worktree: worktree.path, operationId: worktree.operationId });
     await page.evaluate((unit) => window.agentHQ.stop(unit.id, unit.hostId), isolated);
     await poll(async () => !(await page.evaluate((hostId) => window.agentHQ.listWorktrees(hostId), mirror.id)).find((item) => item.operationId === isolated.worktreeOperation)?.status.active, 'Stopped task still owns an active worktree session');
     const archived = await page.evaluate((value) => window.agentHQ.archiveWorktree(value.hostId, value.operationId), { hostId: mirror.id, operationId: isolated.worktreeOperation });
     assert.equal(archived.state, 'archived');
-    console.log('PASS desktop worktree launch, Git branch/path association, owned preview, managed stop, and clean archive');
+    console.log('PASS desktop worktree launch, Git branch/path association, staged and reverted individual hunks, dirty archive refusal, managed stop, and clean archive');
     await page.getByRole('button', { name: 'New unit', exact: true }).click();
     await page.getByRole('combobox', { name: 'Launch preset' }).selectOption('fixture');
     await page.getByRole('textbox', { name: 'Session name', exact: true }).fill(`${marker} failed preset`);
