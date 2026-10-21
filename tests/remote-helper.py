@@ -270,6 +270,11 @@ class Cleanup(unittest.TestCase):
         self.assertNotIn(str(summary.relative_to(self.home)), item['files'])
         with patch.dict(self.helper, {'run': lambda args, **kwargs: subprocess.CompletedProcess(args, 0, '1.4.5\n', '')}):
             self.assertFalse(self.preview(provider='antigravity')[0]['eligible'])
+        with sqlite3.connect(summary) as connection:
+            connection.execute('UPDATE conversation_summaries SET workspace_uris = ? WHERE conversation_id = ?', ('[]', self.one))
+        self.assertFalse(self.preview(provider='antigravity')[0]['eligible'])
+        with sqlite3.connect(summary) as connection:
+            connection.execute('UPDATE conversation_summaries SET workspace_uris = ? WHERE conversation_id = ?', (json.dumps([self.home.as_uri()]), self.one))
         (self.home / '.system_generated/worktrees').mkdir(parents=True)
         self.assertFalse(self.preview(provider='antigravity')[0]['eligible'])
         shutil.rmtree(self.home / '.system_generated')

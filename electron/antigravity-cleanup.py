@@ -57,14 +57,14 @@ def antigravity_snapshot(session_id):
         workspaces = json.loads(item["workspace_uris"] or "[]")
     except (TypeError, ValueError):
         raise ValueError("Unsupported Antigravity workspace references")
-    if not isinstance(workspaces, list) or len(workspaces) > 8 or any(not isinstance(uri, str) for uri in workspaces):
+    if not isinstance(workspaces, list) or not workspaces or len(workspaces) > 8 or any(not isinstance(uri, str) for uri in workspaces):
         raise ValueError("Unsupported Antigravity workspace references")
     for uri in workspaces:
         parsed = urlsplit(uri)
-        if parsed.scheme != "file" or parsed.netloc not in ("", "localhost"):
+        if parsed.scheme != "file" or parsed.netloc not in ("", "localhost") or parsed.query or parsed.fragment:
             raise ValueError("Unsupported Antigravity workspace location")
         workspace = Path(unquote(parsed.path))
-        if not workspace.is_absolute() or ".system_generated" in workspace.parts or ".system_generated" in workspace.resolve().parts:
+        if not workspace.is_absolute() or not workspace.is_dir() or ".system_generated" in workspace.parts or ".system_generated" in workspace.resolve().parts:
             raise ValueError("Provider-managed internal worktree requires separate review")
         if any((workspace / relative).exists() for relative in (".system_generated/worktrees", ".gemini/.system_generated/worktrees")):
             raise ValueError("Provider-managed internal worktree requires separate review")
