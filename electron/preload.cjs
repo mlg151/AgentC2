@@ -4,6 +4,8 @@ contextBridge.exposeInMainWorld('agentHQ', {
   platform: process.platform,
   getState: () => ipcRenderer.invoke('state:get'),
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
+  previewOpOrder: (order) => ipcRenderer.invoke('oporder:preview', order),
+  enrollOpOrder: (order, revision) => ipcRenderer.invoke('oporder:enroll', order, revision),
   saveWorkspace: (workspace) => ipcRenderer.invoke('workspace:save', workspace),
   setSessionPinned: (key, pinned) => ipcRenderer.invoke('session:pin', key, pinned),
   previewCleanup: (input) => ipcRenderer.invoke('cleanup:preview', input),

@@ -2,10 +2,11 @@ import { useState } from 'react';
 import type { Settings } from '../types';
 import { Modal } from './Modal';
 import { RemoteAccess } from './RemoteAccess';
+import { OpOrdersSettings } from './OpOrdersSettings';
 
-export function SettingsDialog({ settings, onSave, onClose }: { settings: Settings; onSave: (value: Settings) => Promise<void>; onClose: () => void }) {
+export function SettingsDialog({ settings, onSave, onExternalSettings, onClose }: { settings: Settings; onSave: (value: Settings) => Promise<void>; onExternalSettings: (value: Settings) => void; onClose: () => void }) {
   const [draft, setDraft] = useState(() => structuredClone(settings));
-  const [section, setSection] = useState<'hosts' | 'presets' | 'remote'>('hosts');
+  const [section, setSection] = useState<'hosts' | 'presets' | 'oporders' | 'remote'>('hosts');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [presetId, setPresetId] = useState(settings.presets[0]?.id || '');
@@ -17,9 +18,9 @@ export function SettingsDialog({ settings, onSave, onClose }: { settings: Settin
   }
   return <Modal title="Settings" onClose={onClose} wide>
     <div className="dialog-heading"><div><h2>Settings</h2><p>Connection profiles and repeatable agent launches.</p></div><button aria-label="Close settings" onClick={onClose} className="icon-button">×</button></div>
-    <div className="segmented"><button className={section === 'hosts' ? 'active' : ''} onClick={() => setSection('hosts')}>SSH hosts</button><button className={section === 'presets' ? 'active' : ''} onClick={() => setSection('presets')}>Launch presets</button><button className={section === 'remote' ? 'active' : ''} onClick={() => setSection('remote')}>Remote access</button></div>
+    <div className="segmented"><button className={section === 'hosts' ? 'active' : ''} onClick={() => setSection('hosts')}>SSH hosts</button><button className={section === 'presets' ? 'active' : ''} onClick={() => setSection('presets')}>Launch presets</button><button className={section === 'oporders' ? 'active' : ''} onClick={() => setSection('oporders')}>OpOrders</button><button className={section === 'remote' ? 'active' : ''} onClick={() => setSection('remote')}>Remote access</button></div>
     <div className="settings-body">
-      {section === 'remote' ? <RemoteAccess /> : section === 'hosts' ? <>
+      {section === 'remote' ? <RemoteAccess /> : section === 'oporders' ? <OpOrdersSettings settings={draft} onSave={onSave} onApplied={(updated) => { setDraft(updated); onExternalSettings(updated); }} /> : section === 'hosts' ? <>
         <p className="field-note">Use an existing SSH config alias or user@hostname. Keys, ProxyJump, and known hosts come from OpenSSH. Host key verification stays enabled.</p>
         {draft.hosts.map((h) => <fieldset key={h.id} className="host-editor"><legend>{h.name || 'New host'}</legend>
           <div className="form-grid"><label>Name<input value={h.name} onChange={(e) => setDraft({ ...draft, hosts: draft.hosts.map((item) => item.id === h.id ? { ...item, name: e.target.value } : item) })} /></label><label>SSH target<input value={h.target} placeholder="user@server or ssh-alias" onChange={(e) => setDraft({ ...draft, hosts: draft.hosts.map((item) => item.id === h.id ? { ...item, target: e.target.value } : item) })} /></label><label>Port<input type="number" min="1" max="65535" value={h.port} onChange={(e) => setDraft({ ...draft, hosts: draft.hosts.map((item) => item.id === h.id ? { ...item, port: Number(e.target.value) } : item) })} /></label></div>
@@ -41,8 +42,8 @@ export function SettingsDialog({ settings, onSave, onClose }: { settings: Settin
         </div> : <p>Add a preset to save a launch command.</p>}
       </>}
     </div>
-    <label className="checkbox-label"><input type="checkbox" checked={draft.notifications} onChange={(e) => setDraft({ ...draft, notifications: e.target.checked })} /> Desktop notifications for new attention items</label>
+    {section !== 'oporders' ? <label className="checkbox-label"><input type="checkbox" checked={draft.notifications} onChange={(e) => setDraft({ ...draft, notifications: e.target.checked })} /> Desktop notifications for new attention items</label> : null}
     {error ? <p role="alert" className="form-error">{error}</p> : null}
-    <div className="dialog-actions"><button className="button-secondary" disabled={busy} onClick={onClose}>Cancel</button><button className="button-primary" disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save settings'}</button></div>
+    <div className="dialog-actions"><button className="button-secondary" disabled={busy} onClick={onClose}>{section === 'oporders' ? 'Close' : 'Cancel'}</button>{section !== 'oporders' ? <button className="button-primary" disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save settings'}</button> : null}</div>
   </Modal>;
 }

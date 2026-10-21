@@ -3,6 +3,9 @@ const path = require('node:path');
 
 const PROVIDERS = ['codex', 'claude', 'antigravity'];
 const ROE_PROFILES = ['', 'full', 'gated', 'provider-default'];
+const OPORDER_ID = /^[a-zA-Z0-9_-]{1,80}$/;
+const ENV_NAME = /^[A-Z_][A-Z0-9_]*$/;
+const HEADER_NAME = /^[A-Za-z0-9-]{1,80}$/;
 const ID = /^[a-zA-Z0-9_-]{1,80}$/;
 function text(value, max = 4096) {
   if (typeof value !== 'string' || value.length > max || value.includes('\0')) throw new Error('Invalid configuration text');
@@ -16,6 +19,7 @@ function defaults() {
     presets,
     notifications: false,
     roe: { version: 1, hostDefaults: {} },
+    opOrders: [],
   };
 }
 function validateSettings(input) {
@@ -59,7 +63,47 @@ function validateSettings(input) {
     if (!hosts.some((host) => host.id === hostId) || !ROE_PROFILES.slice(1).includes(profile)) throw new Error('Invalid host Rules of Engagement profile');
     hostDefaults[hostId] = profile;
   }
-  return { hosts, presets, notifications: Boolean(input.notifications), cleanup: policies, roe: { version: 1, hostDefaults } };
+  const opOrders = input.opOrders || [];
+  if (!Array.isArray(opOrders) || opOrders.length > 50) throw new Error('Invalid OpOrders');
+  const orderIds = new Set();
+  const locations = new Set();
+  const validatedOrders = opOrders.map((order) => {
+    if (!order || order.version !== 1 || !OPORDER_ID.test(order.id) || orderIds.has(order.id) || !hosts.some((host) => host.id === order.hostId) || typeof order.repository !== 'string' || !order.repository.startsWith('/') || order.repository.length > 4096 || order.repository.includes('\0')) throw new Error('Invalid OpOrder scope');
+    const repository = path.posix.normalize(order.repository);
+    if (repository === '/' || repository !== order.repository.replace(/\/$/, '') || repository.includes('/../')) throw new Error('Invalid OpOrder repository');
+    const location = `${order.hostId}:${repository}`;
+    if (locations.has(location)) throw new Error('Only one OpOrder may own a host repository');
+    orderIds.add(order.id); locations.add(location);
+    const instructions = text(order.instructions || '', 40000);
+    const overrides = order.overrides || {};
+    if (typeof overrides !== 'object' || Array.isArray(overrides)) throw new Error('Invalid OpOrder overrides');
+    const mcp = order.mcp || [];
+    if (!Array.isArray(mcp) || mcp.length > 30) throw new Error('Invalid OpOrder MCP servers');
+    const serverNames = new Set();
+    const servers = mcp.map((server) => {
+      if (!server || !OPORDER_ID.test(server.name) || serverNames.has(server.name) || !['stdio', 'http'].includes(server.transport)) throw new Error('Invalid OpOrder MCP server');
+      serverNames.add(server.name);
+      const providers = server.providers || ['codex', 'claude', 'antigravity'];
+      if (!Array.isArray(providers) || !providers.length || providers.some((provider) => !PROVIDERS.includes(provider)) || new Set(providers).size !== providers.length) throw new Error('Invalid OpOrder MCP providers');
+      const env = server.env || [];
+      if (!Array.isArray(env) || env.length > 30 || env.some((name) => typeof name !== 'string' || !ENV_NAME.test(name)) || new Set(env).size !== env.length) throw new Error('OpOrder MCP environment values must be variable names');
+      const headers = server.headers || {};
+      if (!headers || typeof headers !== 'object' || Array.isArray(headers) || Object.entries(headers).some(([name, variable]) => !HEADER_NAME.test(name) || typeof variable !== 'string' || !ENV_NAME.test(variable))) throw new Error('OpOrder MCP headers must reference environment variables');
+      const args = server.args || [];
+      if (!Array.isArray(args) || args.length > 40 || args.some((arg) => typeof arg !== 'string' || arg.length > 500 || arg.includes('\0'))) throw new Error('Invalid OpOrder MCP arguments');
+      const command = text(server.command || '', 500);
+      const url = text(server.url || '', 1000);
+      if (server.transport === 'stdio' ? (!command || url || Object.keys(headers).length) : (command || args.length || env.length || !/^https:\/\/[^\s@/]+(?:\/|$)/.test(url))) throw new Error('Invalid OpOrder MCP transport');
+      if (server.transport === 'http') {
+        let endpoint;
+        try { endpoint = new URL(url); } catch { throw new Error('Invalid OpOrder MCP URL'); }
+        if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password || endpoint.search || endpoint.hash || url.includes('@')) throw new Error('OpOrder MCP URLs must be HTTPS endpoints without embedded credentials or query values');
+      }
+      return { name: server.name, transport: server.transport, providers, command, args, url, env, headers };
+    });
+    return { version: 1, id: order.id, hostId: order.hostId, repository, enabled: Boolean(order.enabled), instructions, overrides: { codex: text(overrides.codex || '', 20000), claude: text(overrides.claude || '', 20000), antigravity: text(overrides.antigravity || '', 20000) }, mcp: servers };
+  });
+  return { hosts, presets, notifications: Boolean(input.notifications), cleanup: policies, roe: { version: 1, hostDefaults }, opOrders: validatedOrders };
 }
 function resolveRoeProfile(settings, hostId, preset, override) {
   if (override !== undefined && !ROE_PROFILES.slice(1).includes(override)) throw new Error('Invalid Rules of Engagement override');

@@ -215,6 +215,7 @@ kbd{font:10px Consolas,monospace;background:#29404e;padding:3px 5px;border-radiu
 .create-dialog textarea{width:100%;background:#0d1921;border:1px solid #3a5260;border-radius:5px;color:#e4eef1;padding:10px;font-size:13px;min-height:65px}
 .create-dialog>.segmented{align-self:flex-start}
 .settings-body{overflow:auto;min-height:100px;padding:3px;display:flex;flex-direction:column;gap:14px}
+.oporder-settings,.oporder-editor{display:flex;flex-direction:column;gap:12px}.oporder-settings .field-note{margin:0}.oporder-editor textarea{width:100%;min-height:56px;background:#0d1921;border:1px solid #3a5260;border-radius:5px;color:#e4eef1;padding:10px;font-size:12px;line-height:1.5}.oporder-editor .oporder-json,.oporder-preview pre{font:11px/1.5 monospace}.oporder-editor .inline-actions{flex-wrap:wrap}.oporder-preview{display:flex;flex-direction:column;gap:8px;border:1px solid #35505f;border-radius:5px;padding:12px;font-size:12px}.oporder-preview details{border-top:1px solid #294251;padding-top:8px}.oporder-preview summary{cursor:pointer;overflow-wrap:anywhere}.oporder-preview pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto;padding:8px;background:#0d1921;color:#cce0e8}
 .host-editor{border:1px solid #35505f;border-radius:5px;padding:12px;min-width:0;margin:0}
 .host-editor legend{font-size:12px;padding:0 6px;color:#a6c6d3}
 .host-editor .inline-actions{justify-content:space-between;margin-top:10px}

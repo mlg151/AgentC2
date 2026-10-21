@@ -19,7 +19,7 @@ function createService({ directory, home }) {
   const SSH_ARGS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'StrictHostKeyChecking=yes'];
   const TMUX_NAME = /^hq-[a-f0-9]{12}$/;
   const OTHER_TMUX_NAME = /^[A-Za-z0-9_.:-]{1,80}$/;
-  const helperSource = fs.readFileSync(path.join(__dirname, 'session-cleanup.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktrees.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktree-diff.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'provider_telemetry.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'remote.py'), 'utf8');
+  const helperSource = fs.readFileSync(path.join(__dirname, 'session-cleanup.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktrees.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktree-diff.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'provider_telemetry.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'oporders.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'remote.py'), 'utf8');
   const hookSource = fs.readFileSync(path.join(__dirname, 'session-hook.py'), 'utf8');
 
 
@@ -27,6 +27,8 @@ function createService({ directory, home }) {
   const attention = new Attention(store);
   const cleanup = createCleanup({ store, events, inventory, runRemote, hostId: (id) => getHost(id).id });
   let inventoryFlight, healthFlight;
+  const opOrderSynced = new Map();
+  const opOrderAttempts = new Map();
 
   const hostCache = new Map(Object.entries(store.data.cachedUnits).map(([hostId, units]) => [hostId, units.map((unit) => ({ ...unit, hostId, hostName: store.data.settings.hosts.find((host) => host.id === hostId)?.name || hostId }))]));
   const healthCache = new Map();
@@ -75,8 +77,10 @@ function createService({ directory, home }) {
           const fresh = result.value.sessions.map((s) => ({ ...s, hostId: h.id, hostName: h.name, key: `${h.id}/${s.key}` }));
           hostCache.set(h.id, fresh);
           try { store.cacheUnits(h.id, fresh); } catch (error) { console.warn(`Could not cache ${h.name} inventory: ${error.message}`); }
+          void reconcileOpOrders(h.id);
           return { id: h.id, name: h.name, target: h.target, user: result.value.user, connected: true };
         }
+        for (const order of store.data.settings.opOrders || []) if (order.hostId === h.id) { opOrderSynced.delete(order.id); opOrderAttempts.delete(order.id); }
         return { id: h.id, name: h.name, target: h.target, connected: false, error: result.reason.message };
       });
       const sessions = hosts.flatMap((h) => (hostCache.get(h.id) || []).map((s) => ({ ...s, stale: !statuses.find((status) => status.id === h.id).connected }))).filter((session) => !store.data.deletedSessions.includes(session.key));
@@ -87,6 +91,22 @@ function createService({ directory, home }) {
       return snapshot;
     })().finally(() => { inventoryFlight = null; });
     return inventoryFlight;
+  }
+
+  async function reconcileOpOrders(hostId) {
+    for (const order of store.data.settings.opOrders || []) {
+      if (!order.enabled || order.hostId !== hostId) continue;
+      const fingerprint = JSON.stringify(order);
+      if (opOrderSynced.get(order.id) === fingerprint || Date.now() - (opOrderAttempts.get(order.id) || 0) < 60000) continue;
+      opOrderAttempts.set(order.id, Date.now());
+      try {
+        await runRemote({ action: 'oporder_sync', order }, hostId);
+        opOrderSynced.set(order.id, fingerprint);
+      } catch (error) {
+        console.warn(`OpOrder ${order.id} needs review: ${error.message}`);
+        events.emit('oporder:conflict', { id: order.id, hostId, error: error.message });
+      }
+    }
   }
 
   function runRemote(payload, hostId) {
@@ -165,6 +185,11 @@ function createService({ directory, home }) {
     await healthFlight;
     if (terminals.opening.size) throw new Error('Wait for terminal connections before changing settings');
     const settings = validateSettings(input);
+    for (const order of settings.opOrders) {
+      if (!order.enabled) continue;
+      const previous = store.data.settings.opOrders?.find((item) => item.id === order.id);
+      if (!previous?.enabled || JSON.stringify(previous) !== JSON.stringify(order)) throw new Error('Preview and enroll changed OpOrders before enabling sync');
+    }
     for (const record of terminals.sessions.values()) {
       const oldHost = getHost(record.hostId);
       const nextHost = settings.hosts.find((h) => h.id === record.hostId);
@@ -181,8 +206,32 @@ function createService({ directory, home }) {
     }));
     const result = settings;
     store.update({ settings, cachedUnits: retained });
+    for (const order of store.data.settings.opOrders || []) if (!order.enabled) { opOrderSynced.delete(order.id); opOrderAttempts.delete(order.id); }
     events.emit('state:updated');
     return result;
+  }
+
+  function validatedOpOrder(input) {
+    if (!input || typeof input !== 'object') throw new Error('Invalid OpOrder');
+    const existing = store.data.settings.opOrders || [];
+    const opOrders = [...existing.filter((item) => item.id !== input?.id), input];
+    return validateSettings({ ...store.data.settings, opOrders }).opOrders.find((item) => item.id === input.id);
+  }
+  async function previewOpOrder(input) {
+    const order = { ...validatedOpOrder(input), enabled: true };
+    getHost(order.hostId);
+    return runRemote({ action: 'oporder_preview', order }, order.hostId);
+  }
+  async function enrollOpOrder(input, revision) {
+    if (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision)) throw new Error('Preview this OpOrder before enrollment');
+    const order = { ...validatedOpOrder(input), enabled: true };
+    getHost(order.hostId);
+    await runRemote({ action: 'oporder_sync', order, revision }, order.hostId);
+    const settings = validateSettings({ ...store.data.settings, opOrders: [...(store.data.settings.opOrders || []).filter((item) => item.id !== order.id), order] });
+    store.save('settings', settings);
+    opOrderSynced.set(order.id, JSON.stringify(order));
+    events.emit('state:updated');
+    return settings;
   }
 
   async function create(input, requirePreset = false) {
@@ -318,6 +367,6 @@ function createService({ directory, home }) {
     }
     return { matches, searched: selected.length, total: sessions.length, truncated, errors };
   }
-  return { store, events, terminals, tunnels, cleanup, inventory, health, create, worktrees, archiveWorktree, diffRequest, action, uploadClipboardImage, devUrls, openDevUrl, saveSettings, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
+  return { store, events, terminals, tunnels, cleanup, inventory, health, create, worktrees, archiveWorktree, diffRequest, action, uploadClipboardImage, devUrls, openDevUrl, saveSettings, previewOpOrder, enrollOpOrder, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
 }
 module.exports = { createService };

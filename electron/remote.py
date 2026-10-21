@@ -572,6 +572,11 @@ def main():
     elif action == "worktree_archive":
         with cleanup_lock():
             result = worktree_archive(payload)
+    elif action == "oporder_preview":
+        result = oporder_preview(payload)
+    elif action == "oporder_sync":
+        with cleanup_lock():
+            result = oporder_sync(payload)
     elif action == "diff_files":
         result = diff_files(payload)
     elif action == "diff_detail":

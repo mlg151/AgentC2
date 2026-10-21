@@ -41,6 +41,14 @@ try {
   }
   assert.throws(() => validateSettings({ ...config, hosts: [config.hosts[0], config.hosts[0]] }));
   assert.throws(() => validateSettings({ ...config, hosts: [{ ...config.hosts[0], enabled: false }] }));
+  const opOrder = { version: 1, id: 'project', hostId: 'default', repository: '/srv/project', enabled: false, instructions: 'Shared guidance', overrides: { claude: 'Claude guidance' }, mcp: [{ name: 'docs', transport: 'http', url: 'https://example.com/mcp', providers: ['codex', 'claude'], headers: { Authorization: 'DOCS_TOKEN' } }] };
+  const orders = validateSettings({ ...config, opOrders: [opOrder] }).opOrders;
+  assert.equal(orders[0].mcp[0].headers.Authorization, 'DOCS_TOKEN');
+  assert.equal(orders[0].overrides.codex, '');
+  assert.throws(() => validateSettings({ ...config, opOrders: [opOrder, { ...opOrder, id: 'other' }] }), /one OpOrder/);
+  assert.throws(() => validateSettings({ ...config, opOrders: [{ ...opOrder, repository: '/srv/../project' }] }), /Invalid OpOrder repository/);
+  assert.throws(() => validateSettings({ ...config, opOrders: [{ ...opOrder, mcp: [{ ...opOrder.mcp[0], headers: { Authorization: 'Bearer secret' } }] }] }), /environment variables/);
+  assert.throws(() => validateSettings({ ...config, opOrders: [{ ...opOrder, mcp: [{ ...opOrder.mcp[0], url: 'http://example.com/mcp' }] }] }), /transport/);
   const workspace = validateWorkspace({ tabs: ['default/tmux:hq-123', 'secondary/tmux:hq-123'], selectedKey: 'default/tmux:hq-123', splitKey: 'secondary/tmux:hq-123', metadata: { 'default/tmux:hq-123': { pinned: true, project: 'Release', notes: 'Check release notes.' } } });
   store.save('workspace', workspace);
   assert.deepEqual(new Store(directory).data.workspace, workspace);

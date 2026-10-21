@@ -46,8 +46,11 @@ export type RoeProfile = 'full' | 'gated' | 'provider-default';
 export interface DevUrl { url: string; hostId: string; port: number; status: 'available' | 'opening' | 'ready' | 'failed'; localUrl: string | null; error: string | null }
 export interface HostHealth { hostId: string; name: string; connected: boolean; cpuPercent?: number | null; memoryTotal?: number; memoryUsed?: number; disks?: { path: string; total: number; used: number; free: number }[]; sampledAt?: number; error?: string }
 export interface LaunchPreset { id: string; name: string; provider: Provider; command: string; args: string; cwd: string; instructions: string; fullPermissions: boolean; roeProfile?: RoeProfile | ''; attentionHooks: boolean; hostId: string }
+export interface OpOrderMcp { name: string; transport: 'stdio' | 'http'; providers: Exclude<Provider, 'terminal'>[]; command: string; args: string[]; url: string; env: string[]; headers: Record<string, string> }
+export interface OpOrder { version: 1; id: string; hostId: string; repository: string; enabled: boolean; instructions: string; overrides: { codex: string; claude: string; antigravity: string }; mcp: OpOrderMcp[] }
+export interface OpOrderPreview { revision: string; repository: string; changes: { path: string; status: 'create' | 'update' | 'remove' | 'unchanged' | 'conflict'; diff: string; reason?: string }[]; unsupported: string[]; ready: boolean }
 export interface CleanupPolicy { hostId: string; provider: Exclude<Provider, 'terminal'>; enabled: boolean; days: number }
-export interface Settings { hosts: HostConfig[]; presets: LaunchPreset[]; notifications: boolean; cleanup?: CleanupPolicy[]; roe?: { version: 1; hostDefaults: Record<string, RoeProfile> } }
+export interface Settings { hosts: HostConfig[]; presets: LaunchPreset[]; notifications: boolean; cleanup?: CleanupPolicy[]; roe?: { version: 1; hostDefaults: Record<string, RoeProfile> }; opOrders?: OpOrder[] }
 export interface CleanupInput { hostId: string; provider: Exclude<Provider, 'terminal'>; days: number; ids?: string[]; allowPinned?: boolean }
 export interface CleanupItem { key: string; id: string; provider: Provider; title: string; eligible: boolean; reason: string; bytes: number | null; updatedAt: string | null; files: string[]; estimated: boolean; missing?: boolean }
 export interface CleanupPreview { token: string; hostId: string; provider: Provider; items: CleanupItem[]; expiresAt: number; truncated: boolean }
@@ -90,6 +93,8 @@ export interface AgentHQApi {
   readonly platform: string;
   getState(): Promise<{ settings: Settings; workspace: Workspace; attention: AttentionItem[] }>;
   saveSettings(settings: Settings): Promise<Settings>;
+  previewOpOrder(order: OpOrder): Promise<OpOrderPreview>;
+  enrollOpOrder(order: OpOrder, revision: string): Promise<Settings>;
   saveWorkspace(workspace: Workspace): Promise<Workspace>;
   setSessionPinned(key: string, pinned: boolean): Promise<boolean>;
   onSessionPinned(callback: (key: string, pinned: boolean) => void): () => void;
