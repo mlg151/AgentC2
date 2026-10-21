@@ -31,7 +31,7 @@ for (const ref of ['refs/heads/main', 'refs/tags/v0.4.1', 'refs/pull/5/merge']) 
   assert.equal(source.CSC_LINK, '', 'Do not mutate the caller environment');
 }
 
-const signed = { ...process.env, CSC_LINK: 'certificate-fixture.p12', CSC_KEY_PASSWORD: 'fixture-password', APPLE_ID: 'qa@example.invalid', APPLE_APP_SPECIFIC_PASSWORD: 'fixture-token', APPLE_TEAM_ID: 'FIXTURE' };
+const signed = { ...process.env, CSC_LINK: 'certificate-fixture.p12', CSC_KEY_PASSWORD: '   ', APPLE_ID: 'qa@example.invalid', APPLE_APP_SPECIFIC_PASSWORD: 'fixture-token', APPLE_TEAM_ID: 'FIXTURE' };
 assert.equal(packageNative(['--mac'], signed, (_file, _args, options) => {
   assert.deepEqual(options.env, signed, 'Preserve configured signing and notarization');
   return { status: 0 };

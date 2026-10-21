@@ -6,7 +6,7 @@ function signingEnvironment(source) {
   // On macOS an empty CSC_LINK is a supplied certificate path, resolved to cwd.
   // Missing Actions secrets must be absent, including on non-PR builds.
   for (const key of ['CSC_LINK', 'CSC_KEY_PASSWORD', 'APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD', 'APPLE_TEAM_ID']) {
-    if (typeof env[key] === 'string' && !env[key].trim()) delete env[key];
+    if (env[key] === '') delete env[key];
   }
   return env;
 }
