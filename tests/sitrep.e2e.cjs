@@ -121,6 +121,7 @@ function remote(action) {
     assert.equal(remote('verify').state, 'launched');
     console.log('PASS ready SitRep recovery reuses the target worktree after re-entered instructions');
     await page.locator('.session-row').filter({ hasText: 'Source QA' }).first().click();
+    await page.locator('.session-pane.is-focused:not(.pane-hidden)[aria-label="Session Source QA"]').waitFor();
     await page.getByRole('button', { name: 'Notes & handoff' }).click();
     await page.getByRole('button', { name: 'SitRep handoff' }).click();
     await page.getByRole('combobox', { name: 'Target SSH host' }).selectOption('recipient');
@@ -136,18 +137,7 @@ function remote(action) {
     await page.screenshot({ path: path.join(screenshotDirectory, 'agentc2-sitrep-preview.png') });
     await page.getByRole('button', { name: 'Send and launch recipient' }).click();
     await page.getByRole('dialog', { name: 'SitRep handoff' }).waitFor({ state: 'hidden', timeout: 30000 });
-    try {
-      await page.locator('.session-pane.is-focused:not(.pane-hidden)[aria-label="Session Handoff: Source QA"]').waitFor({ timeout: 15000 });
-    } catch (error) {
-      const state = await page.evaluate(async () => ({
-        paneLabels: [...document.querySelectorAll('.session-pane')].map((pane) => ({ label: pane.getAttribute('aria-label'), className: pane.className })),
-        rowTitles: [...document.querySelectorAll('.session-row')].map((row) => row.getAttribute('title')),
-        alerts: [...document.querySelectorAll('[role="alert"]')].map((alert) => alert.textContent),
-        inventoryTitles: (await window.agentHQ.inventory()).sessions.map((session) => session.title),
-      }));
-      console.error('SitRep recipient UI diagnostic:', JSON.stringify(state));
-      throw error;
-    }
+    await page.locator('.session-pane.is-focused:not(.pane-hidden)[aria-label="Session Handoff: Source QA"]').waitFor({ timeout: 15000 });
     console.log('PASS Electron SitRep review, target selection, and recipient launch');
   } finally {
     if (app) await app.close();
