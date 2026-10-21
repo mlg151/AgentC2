@@ -59,6 +59,30 @@ class HostHealth(unittest.TestCase):
             scope["run"] = original_run
 
 
+class AntigravityInventory(unittest.TestCase):
+    def test_current_sqlite_layout_and_legacy_fallback(self):
+        with tempfile.TemporaryDirectory(prefix="agentc2-agy-inventory-") as directory:
+            home = Path(directory)
+            current = home / ".gemini" / "antigravity-cli" / "conversations"
+            legacy = home / ".gemini" / "antigravity" / "conversations"
+            current.mkdir(parents=True)
+            legacy.mkdir(parents=True)
+            modern_id = "12345678-1234-4234-8234-123456789012"
+            old_id = "87654321-1234-4234-8234-123456789012"
+            modern = current / f"{modern_id}.db"
+            with sqlite3.connect(modern) as connection:
+                connection.execute("CREATE TABLE trajectory_meta (trajectory_id TEXT)")
+            os.utime(modern, (1000, 1000))
+            (legacy / f"{modern_id}.pb").write_bytes(b"old duplicate")
+            (legacy / f"{old_id}.pb").write_bytes(b"old history")
+            (current / "bad-layout.db").write_bytes(b"not SQLite")
+            (current / "linked-history.db").symlink_to(modern)
+            with patch.dict(scope, {"HOME": home}):
+                sessions = scope["antigravity_sessions"]()
+            self.assertEqual({session["id"] for session in sessions}, {modern_id, old_id})
+            self.assertEqual(next(session for session in sessions if session["id"] == modern_id)["updatedAt"], scope["iso_from_epoch"](1000))
+
+
 class RulesOfEngagement(unittest.TestCase):
     def test_provider_flags_and_resume_order(self):
         command = scope["agent_command"]("codex", "12345678-1234-4234-8234-123456789012", roe_profile="gated")

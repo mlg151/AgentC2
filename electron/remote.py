@@ -221,30 +221,43 @@ def claude_sessions():
 
 
 def antigravity_sessions():
-    root = HOME / ".gemini" / "antigravity" / "conversations"
-    result = []
-    if not root.exists():
-        return result
-    for path in root.glob("*.pb"):
-        session_id = path.stem
-        if not ID_RE.fullmatch(session_id):
+    # CLI 1.4.x stores one SQLite trajectory per conversation. Older layouts
+    # used protobuf files under a different directory. Neither is a complete
+    # deletion contract: the picker also updates provider-managed references.
+    locations = (
+        (HOME / ".gemini" / "antigravity-cli" / "conversations", "*.db", True),
+        (HOME / ".gemini" / "antigravity" / "conversations", "*.pb", False),
+    )
+    result = {}
+    for root, pattern, sqlite_layout in locations:
+        if not root.is_dir() or root.is_symlink():
             continue
-        try:
-            modified = path.stat().st_mtime
-        except OSError:
-            continue
-        result.append({
-            "key": f"antigravity:{session_id}",
-            "provider": "antigravity",
-            "id": session_id,
-            "title": f"Antigravity conversation {session_id[:8]}",
-            "cwd": "",
-            "updatedAt": iso_from_epoch(modified),
-            "state": "saved",
-            "kind": "conversation",
-            "canResume": True,
-        })
-    return result
+        for path in root.glob(pattern):
+            session_id = path.stem
+            if session_id in result or not ID_RE.fullmatch(session_id) or path.is_symlink():
+                continue
+            try:
+                if not path.is_file():
+                    continue
+                if sqlite_layout:
+                    with path.open("rb") as stream:
+                        if stream.read(16) != b"SQLite format 3\0":
+                            continue
+                modified = path.stat().st_mtime
+            except OSError:
+                continue
+            result[session_id] = {
+                "key": f"antigravity:{session_id}",
+                "provider": "antigravity",
+                "id": session_id,
+                "title": f"Antigravity conversation {session_id[:8]}",
+                "cwd": "",
+                "updatedAt": iso_from_epoch(modified),
+                "state": "saved",
+                "kind": "conversation",
+                "canResume": True,
+            }
+    return list(result.values())
 
 
 def tmux_option(name, option):
