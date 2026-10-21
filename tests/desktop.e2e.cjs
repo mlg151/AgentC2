@@ -101,6 +101,12 @@ const { packagePath } = require('../scripts/package-path.cjs');
       await page.close();
       await closed;
       stage = 'macOS Dock activation';
+      // Playwright's page-close event can precede Electron removing the native
+      // BrowserWindow. Activating during that gap can target a closing window.
+      for (let attempt = 0; attempt < 50; attempt++) {
+        if (!await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)) break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
       if (!await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)) await app.evaluate(({ app }) => app.emit('activate'));
       // Activation may also arrive from the OS during the preceding close.
       // Resolve an existing window as well as one still being announced.
