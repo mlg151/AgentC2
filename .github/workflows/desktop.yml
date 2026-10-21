@@ -75,8 +75,7 @@ jobs:
           TARGET_PLATFORM: ${{ matrix.platform }}
           TARGET_ARCH: ${{ matrix.arch }}
         run: |
-          npx electron-builder --"$TARGET_PLATFORM" --"$TARGET_ARCH" --publish never
-          node scripts/record-package.cjs
+          node scripts/package-native.cjs --"$TARGET_PLATFORM" --"$TARGET_ARCH" --publish never
       - name: Packaged startup and native PTY smoke
         if: runner.os != 'Linux'
         run: npm run test:package

@@ -148,8 +148,17 @@ async function freePort() {
     await desktop.locator('.session-pane:visible').getByRole('button', { name: 'Take control', exact: true }).click();
     await poll(async () => (await page.locator('.phone-control').innerText()).includes('Desktop controls'), 'Phone did not show desktop reclaim');
     console.log('PASS mobile pairing, responsive session list, live terminal, composer, retained-history search, server-enforced handoff, and desktop reclaim');
-    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
-    assert.equal(await app.evaluate(({ BrowserWindow }) => process.platform === 'linux' ? BrowserWindow.getAllWindows()[0].isMinimized() : !BrowserWindow.getAllWindows()[0].isVisible()), true);
+    await app.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0];
+      if (process.platform === 'linux') {
+        // Force the asynchronous window-manager acknowledgement seen in CI.
+        // The real native minimize still runs; an immediate assertion must fail.
+        const minimize = window.minimize.bind(window);
+        window.minimize = () => { window.minimize = minimize; setTimeout(minimize, 100); };
+      }
+      window.close();
+    });
+    await poll(() => app.evaluate(({ BrowserWindow }) => process.platform === 'linux' ? BrowserWindow.getAllWindows()[0].isMinimized() : !BrowserWindow.getAllWindows()[0].isVisible()), 'Window close did not minimize/hide the native window');
     assert.equal((await desktop.evaluate(() => window.agentHQ.remoteStatus())).running, true);
     await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].restore(); BrowserWindow.getAllWindows()[0].show(); });
     await desktop.evaluate((value) => window.agentHQ.saveRemote({ ...value, enabled: false }), config);

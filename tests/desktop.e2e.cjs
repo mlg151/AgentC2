@@ -40,27 +40,17 @@ const { packagePath } = require('../scripts/package-path.cjs');
     await page.evaluate(() => window.agentHQ.writeClipboard('AgentC2 clipboard λ'));
     assert.equal(await page.evaluate(() => window.agentHQ.readClipboard()), 'AgentC2 clipboard λ');
     stage = 'native PTY';
-    const native = await app.evaluate(async ({ app }) => {
+    const native = await app.evaluate(async ({ app }, helper) => {
       const load = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json');
-      const pty = load('node-pty');
-      const marker = `NATIVE_${Date.now()}`;
-      const terminal = pty.spawn(process.platform === 'win32' ? (process.env.ComSpec || 'C:\\Windows\\System32\\cmd.exe') : '/bin/sh', process.platform === 'win32' ? ['/d', '/q'] : [], { name: 'xterm-256color', cols: 80, rows: 24, cwd: app.getPath('home'), env: { ...process.env } });
-      return await new Promise((resolve, reject) => {
-        let output = '';
-        const timeout = setTimeout(() => { terminal.kill(); reject(new Error('Native PTY smoke timed out')); }, 15000);
-        terminal.onData((data) => { output += data; });
-        terminal.onExit(({ exitCode }) => {
-          clearTimeout(timeout);
-          if (exitCode !== 0 || !output.includes(marker)) reject(new Error(`Native PTY failed (${exitCode}): ${output}`));
-          else resolve({ packaged: app.isPackaged, platform: process.platform, arch: process.arch, output: true });
-        });
-        terminal.resize(100, 32);
-        terminal.write(`echo ${marker}\r`);
-        terminal.write('exit\r');
-      });
-    });
+      const rounds = process.platform === 'win32' ? 3 : 1;
+      let result;
+      for (let round = 0; round < rounds; round++) {
+        result = await load(helper).nativePtySmoke(load('node-pty'), { platform: process.platform, env: { ...process.env }, cwd: app.getPath('home') });
+      }
+      return { ...result, rounds, packaged: app.isPackaged, platform: process.platform, arch: process.arch };
+    }, path.join(__dirname, 'helpers', 'native-pty-smoke.cjs'));
     assert.equal(native.packaged, packaged); assert.equal(native.output, true);
-    console.log(`PASS ${packaged ? 'packaged' : 'development'} Electron startup, isolated preload, node-pty spawn/input/resize/exit (${native.platform}/${native.arch})`);
+    console.log(`PASS ${packaged ? 'packaged' : 'development'} Electron startup, isolated preload, node-pty spawn/input/resize/exit (${native.platform}/${native.arch}, ${native.rounds} rounds)`);
     stage = 'shortcuts and settings';
     const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
     await page.keyboard.press(`${modifier}+k`);
