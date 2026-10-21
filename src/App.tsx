@@ -4,6 +4,7 @@ import { SessionList, type ProviderFilter, type StateFilter } from './components
 import { SessionPane } from './components/SessionPane';
 import { CreateDialog } from './components/CreateDialog';
 import { SettingsDialog } from './components/SettingsDialog';
+import { SitRepDialog } from './components/SitRepDialog';
 import { SessionCleanupDialog } from './components/SessionCleanupDialog';
 import { QuickSwitcher } from './components/QuickSwitcher';
 import { SituationHeader } from './components/SituationHeader';
@@ -42,6 +43,7 @@ export default function App() {
   const [inbox, setInbox] = useState(false);
   const [showAcknowledged, setShowAcknowledged] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [sitrepSource, setSitrepSource] = useState<Session | null>(null);
   const [cleanupTarget, setCleanupTarget] = useState<Session | null | undefined>(undefined);
   const [showSwitcher, setShowSwitcher] = useState(false);
   const [showOverwatch, setShowOverwatch] = useState(false);
@@ -216,7 +218,7 @@ export default function App() {
     jumpRequest: { run: () => {}, available: false, reason: 'No verified actionable permission request' },
     diff: { run: () => { if (selected) toggleDiff(selected.key); }, available: Boolean(selected?.worktreeOperation && selected.kind === 'managed'), reason: 'Select an owned worktree unit' },
     exercise: { run: () => {}, available: false, reason: 'Joint Exercise setup is unavailable' },
-    handoff: { run: () => {}, available: false, reason: 'Structured handoff is unavailable; notes can still be copied' },
+    handoff: { run: () => { if (selected) setSitrepSource(selected); }, available: Boolean(selected?.worktreeOperation && selected.kind === 'managed' && !selected.stale), reason: 'Select a connected owned worktree unit' },
     faultStop: { run: () => {}, available: false, reason: 'No verified runaway managed units' },
   };
   const commandKeys = useCommandKeys({ actions: commands, overrides: situation.shortcuts, overwatch: showOverwatch, onCallsign: (callsign) => {
@@ -240,7 +242,7 @@ export default function App() {
           {workspace.tabs.map((key) => known[key] ? <SessionPane key={key} session={known[key]} primary={key === situation.anchorKey} focused={key === workspace.selectedKey} slot={key === situation.anchorKey ? 'anchor' : 'target'} callsign={situation.callsigns[key]} diffOpen={diffOpenKey === key} onToggleDiff={() => toggleDiff(key)} visible={(key === situation.anchorKey || key === situation.targetKey) && (!situation.zen || key === workspace.selectedKey)} onFocus={() => changeSituation({ focusedPane: key === situation.anchorKey ? 'anchor' : 'target' })} onAnchor={key === situation.anchorKey ? unpinAnchor : promoteTarget} onCycle={cycleTarget} onResume={setDialog} onDeleteHistory={setCleanupTarget} onRefresh={() => void refresh()} /> : <section className={`session-pane${(key === situation.anchorKey || key === situation.targetKey) && (!situation.zen || key === workspace.selectedKey) ? '' : ' pane-hidden'}`} key={key}><div className="no-selection"><h2>Session unavailable</h2><p>Enable its host or refresh to restore this tab.</p></div></section>)}
           {!workspace.tabs.length ? <div className="no-selection"><TerminalSquare size={35} /><h1>{loading ? 'Finding sessions…' : 'Select a session'}</h1><p>Open conversations in tabs or start a new managed terminal.</p><button className="button-primary" onClick={() => setDialog(null)}>New session</button></div> : null}
         </div>
-        {selected && showNotes && !inbox ? <section className="notes-panel"><label>Notes & handoff<textarea aria-label="Session notes and handoff" rows={4} maxLength={20000} placeholder="Objective, current status, next step, and relevant links…" value={workspace.metadata[selected.key]?.notes || ''} onChange={(e) => updateMetadata(selected.key, { notes: e.target.value })} /></label><div className="inline-actions"><span>Saved locally with this session.</span><button className="text-button" onClick={() => void window.agentHQ?.writeClipboard(`${selected.title}\nHost: ${selected.hostName}\nProject: ${projectFor(selected, workspace.metadata)}\nDirectory: ${selected.cwd}\n\n${workspace.metadata[selected.key]?.notes || ''}`).catch((cause) => setError(String(cause)))}>Copy handoff</button></div></section> : null}
+        {selected && showNotes && !inbox ? <section className="notes-panel"><label>Notes & handoff<textarea aria-label="Session notes and handoff" rows={4} maxLength={20000} placeholder="Objective, current status, next step, and relevant links…" value={workspace.metadata[selected.key]?.notes || ''} onChange={(e) => updateMetadata(selected.key, { notes: e.target.value })} /></label><div className="inline-actions"><span>Saved locally with this session.</span><button className="text-button" onClick={() => void window.agentHQ?.writeClipboard(`${selected.title}\nHost: ${selected.hostName}\nProject: ${projectFor(selected, workspace.metadata)}\nDirectory: ${selected.cwd}\n\n${workspace.metadata[selected.key]?.notes || ''}`).catch((cause) => setError(String(cause)))}>Copy handoff</button>{selected.worktreeOperation && selected.kind === 'managed' ? <button className="text-button" onClick={() => setSitrepSource(selected)}>SitRep handoff</button> : null}</div></section> : null}
       </main>
     </div>
     {settings ? <HostMonitor hosts={settings.hosts} /> : null}
@@ -248,6 +250,7 @@ export default function App() {
     {error ? <div className="error-banner" role="alert"><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError('')}><X size={15} /></button></div> : null}
     {settings && dialog !== undefined ? <CreateDialog resume={dialog} settings={settings} hostId={hostFilter === 'all' ? settings.hosts.find((h) => h.enabled)?.id || '' : hostFilter} onClose={closeCreate} onSubmit={(input) => void create(input)} busy={busy} /> : null}
     {settings && showSettings ? <SettingsDialog settings={settings} onSave={saveSettings} onExternalSettings={(updated) => { setSettings(updated); void refresh(); }} onClose={closeSettings} /> : null}
+    {settings && sitrepSource ? <SitRepDialog source={sitrepSource} settings={settings} initialSummary={workspace.metadata[sitrepSource.key]?.notes || ''} onLaunched={async (name, hostId) => { if (!window.agentHQ) throw new Error('Desktop bridge unavailable'); for (let attempt = 0; attempt < 6; attempt++) { const next = await window.agentHQ.inventory(); acceptInventory(next); const unit = next.sessions.find((item) => item.id === name && item.hostId === hostId); if (unit) { openSession(unit); return; } await new Promise((resolve) => setTimeout(resolve, 350)); } throw new Error('Recipient launched but has not appeared in inventory; refresh to find it.'); }} onClose={() => setSitrepSource(null)} /> : null}
     {settings && cleanupTarget !== undefined ? <SessionCleanupDialog settings={settings} target={cleanupTarget} onSave={saveSettings} onClose={closeCleanup} /> : null}
     {showSwitcher ? <QuickSwitcher sessions={sessions.map((s) => ({ ...s, cwd: `${s.cwd} ${projectFor(s, workspace.metadata)}` }))} callsigns={situation.callsigns} actions={commands} overrides={situation.shortcuts} onSelect={(s) => { openSession(known[s.key] || s); requestFocus(s.key); }} onSettings={() => setShowSettings(true)} onInbox={() => setInbox(true)} onClose={closeSwitcher} /> : null}
     {showKeyboardHelp ? <KeyboardHelp overrides={situation.shortcuts} actions={commands} onSave={(shortcuts) => changeSituation({ shortcuts })} onClose={closeKeyboardHelp} /> : null}

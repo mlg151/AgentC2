@@ -555,7 +555,10 @@ def managed_action(payload, action):
 
 
 def main():
-    payload = json.loads(base64.b64decode(sys.argv[1]).decode("utf-8"))
+    encoded = sys.argv[1] if len(sys.argv) > 1 else globals().get("AGENTC2_PAYLOAD_B64")
+    if not encoded:
+        raise ValueError("Missing remote request")
+    payload = json.loads(base64.b64decode(encoded).decode("utf-8"))
     action = payload.get("action")
     if action == "inventory":
         result = inventory()
@@ -577,6 +580,10 @@ def main():
     elif action == "oporder_sync":
         with cleanup_lock():
             result = oporder_sync(payload)
+    elif action == "sitrep_source_preview":
+        result = sitrep_source_preview(payload)
+    elif action == "sitrep_target_preview":
+        result = sitrep_target_preview(payload)
     elif action == "diff_files":
         result = diff_files(payload)
     elif action == "diff_detail":

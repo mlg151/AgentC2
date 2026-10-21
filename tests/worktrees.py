@@ -1,6 +1,8 @@
 """Disposable Git repository checks for owned worktree lifecycle."""
 
 from pathlib import Path
+import base64
+import hashlib
 import subprocess
 import tempfile
 import unittest
@@ -63,6 +65,42 @@ class Worktrees(unittest.TestCase):
         self.assertEqual(self.scope["worktree_list"]()[0]["state"], "launched")
         with self.assertRaisesRegex(ValueError, "belongs"):
             self.scope["worktree_launch"](self.payload(3, slug="other"))
+
+    def test_sitrep_patch_is_applied_once_before_retryable_launch(self):
+        (self.repo / "README.md").write_text("fixture\nhandoff\n")
+        patch = subprocess.check_output(["git", "-C", str(self.repo), "diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--binary", "--full-index", "HEAD"])
+        payload = self.payload(11)
+        payload["sitrep"] = {"patchBase64": base64.b64encode(patch).decode(), "digest": hashlib.sha256(patch).hexdigest(), "source": {"hostId": "qa", "operationId": "source"}}
+        self.created.side_effect = RuntimeError("provider launch failed")
+        with self.assertRaisesRegex(RuntimeError, "provider launch failed"):
+            self.scope["worktree_launch"](payload)
+        record = self.scope["worktree_list"]()[0]
+        self.assertEqual(record["sitrepApplied"], payload["sitrep"]["digest"])
+        worktree = Path(record["path"])
+        self.assertEqual((worktree / "README.md").read_text(), "fixture\nhandoff\n")
+        self.created.side_effect = lambda command: {"name": command["managedName"]}
+        self.scope["worktree_launch"](payload)
+        self.assertEqual((worktree / "README.md").read_text(), "fixture\nhandoff\n")
+
+    def test_ready_sitrep_can_recover_after_restart_without_reapplying(self):
+        (self.repo / "README.md").write_text("fixture\nhandoff\n")
+        patch = subprocess.check_output(["git", "-C", str(self.repo), "diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--binary", "--full-index", "HEAD"])
+        payload = self.payload(12)
+        payload["sitrep"] = {"patchBase64": base64.b64encode(patch).decode(), "digest": hashlib.sha256(patch).hexdigest(), "source": {"hostId": "qa", "operationId": "source"}}
+        self.created.side_effect = RuntimeError("launch disconnected")
+        with self.assertRaisesRegex(RuntimeError, "launch disconnected"):
+            self.scope["worktree_launch"](payload)
+        record = self.scope["worktree_list"]()[0]
+        worktree = Path(record["path"])
+        recovery = {**self.payload(12), "instructions": "Re-entered objective", "recoverSitrep": True}
+        (worktree / "README.md").write_text("unexpected change\n")
+        with self.assertRaisesRegex(ValueError, "changed after transfer"):
+            self.scope["worktree_launch"](recovery)
+        (worktree / "README.md").write_text("fixture\nhandoff\n")
+        self.created.side_effect = lambda command: {"name": command["managedName"]}
+        result = self.scope["worktree_launch"](recovery)
+        self.assertEqual(result["worktree"]["sitrepSource"]["operationId"], "source")
+        self.assertEqual((worktree / "README.md").read_text(), "fixture\nhandoff\n")
 
     def test_preexisting_branch_collision_is_left_untouched(self):
         import hashlib

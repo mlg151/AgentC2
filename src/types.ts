@@ -49,6 +49,10 @@ export interface LaunchPreset { id: string; name: string; provider: Provider; co
 export interface OpOrderMcp { name: string; transport: 'stdio' | 'http'; providers: Exclude<Provider, 'terminal'>[]; command: string; args: string[]; url: string; env: string[]; headers: Record<string, string> }
 export interface OpOrder { version: 1; id: string; hostId: string; repository: string; enabled: boolean; instructions: string; overrides: { codex: string; claude: string; antigravity: string }; mcp: OpOrderMcp[] }
 export interface OpOrderPreview { revision: string; repository: string; changes: { path: string; status: 'create' | 'update' | 'remove' | 'unchanged' | 'conflict'; diff: string; reason?: string }[]; unsupported: string[]; ready: boolean }
+export interface SitrepPreviewInput { sourceHostId: string; name: string; operationId: string; targetHostId: string; repository: string; testCommand: string }
+export interface SitrepTest { command: string; exitCode: number | null; timedOut: boolean; output: string; outputTruncated: boolean; durationMs: number; ranAt: number }
+export interface SitrepPreview { version: 1; id: string; source: { operationId: string; name: string; repository: string; branch: string; baseCommit: string; headCommit: string; path: string }; target: { ready: boolean; reason: string; repository: string }; revision: string; patchPreview: string; patchPreviewTruncated: boolean; patchBytes: number; untracked: string[]; warnings: string[]; test: SitrepTest | null; ready: boolean }
+export interface SitrepLaunchInput { id: string; operationId: string; objective: string; summary: string; nextSteps: string; title: string; slug: string; provider: Exclude<Provider, 'terminal'>; presetId?: string; roeProfile?: RoeProfile }
 export interface CleanupPolicy { hostId: string; provider: Exclude<Provider, 'terminal'>; enabled: boolean; days: number }
 export interface Settings { hosts: HostConfig[]; presets: LaunchPreset[]; notifications: boolean; cleanup?: CleanupPolicy[]; roe?: { version: 1; hostDefaults: Record<string, RoeProfile> }; opOrders?: OpOrder[] }
 export interface CleanupInput { hostId: string; provider: Exclude<Provider, 'terminal'>; days: number; ids?: string[]; allowPinned?: boolean }
@@ -80,10 +84,11 @@ export interface CreateInput {
   presetId?: string;
   roeProfile?: RoeProfile;
   instructions?: string;
+  recoverSitrep?: boolean;
   worktree?: { operationId: string; repository: string; baseRef: string; slug: string };
 }
 
-export interface WorktreeRecord { operationId: string; repository?: string; baseRef?: string; baseCommit?: string; branch?: string; path?: string; name?: string; provider?: Provider; slug?: string; title?: string; presetName?: string; hasInstructions?: boolean; state: string; status: { exists?: boolean; active?: boolean; owned: boolean; dirty?: boolean | null; merged?: boolean | null } }
+export interface WorktreeRecord { operationId: string; repository?: string; baseRef?: string; baseCommit?: string; branch?: string; path?: string; name?: string; provider?: Provider; slug?: string; title?: string; presetName?: string; hasInstructions?: boolean; sitrepSource?: { version: 1; hostId: string; operationId: string; name: string; repository: string; revision: string }; state: string; status: { exists?: boolean; active?: boolean; owned: boolean; dirty?: boolean | null; merged?: boolean | null } }
 export interface DiffScope { hostId: string; name: string; operationId: string }
 export interface DiffFile { id: string; path: string; staged: boolean; unstaged: boolean; untracked: boolean }
 export interface DiffHunk { id: string; text: string; actionable: boolean }
@@ -95,6 +100,8 @@ export interface AgentHQApi {
   saveSettings(settings: Settings): Promise<Settings>;
   previewOpOrder(order: OpOrder): Promise<OpOrderPreview>;
   enrollOpOrder(order: OpOrder, revision: string): Promise<Settings>;
+  previewSitrep(input: SitrepPreviewInput): Promise<SitrepPreview>;
+  launchSitrep(input: SitrepLaunchInput): Promise<{ name: string; hostId: string }>;
   saveWorkspace(workspace: Workspace): Promise<Workspace>;
   setSessionPinned(key: string, pinned: boolean): Promise<boolean>;
   onSessionPinned(callback: (key: string, pinned: boolean) => void): () => void;

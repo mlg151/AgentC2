@@ -16,6 +16,7 @@ export function CreateDialog({ resume, settings, hostId, onClose, onSubmit, busy
   const [roeOverride, setRoeOverride] = useState<CreateInput['roeProfile'] | ''>('');
   const [sessionType, setSessionType] = useState<'agent' | 'terminal'>('agent');
   const [isolated, setIsolated] = useState(false);
+  const [recoverSitrep, setRecoverSitrep] = useState(false);
   const [baseRef, setBaseRef] = useState('HEAD');
   const [slug, setSlug] = useState('task');
   const [operationId, setOperationId] = useState(() => crypto.randomUUID().replaceAll('-', ''));
@@ -38,13 +39,14 @@ export function CreateDialog({ resume, settings, hostId, onClose, onSubmit, busy
   function retry(record: WorktreeRecord) {
     if (record.state !== 'ready' && record.state !== 'provisioning') return;
     setOperationId(record.operationId);
+    setRecoverSitrep(Boolean(record.sitrepSource));
     setCwd(record.repository || ''); setBaseRef(record.baseRef || 'HEAD');
     setSlug(record.slug || 'task'); setTitle(record.title || '');
     if (record.provider && record.provider !== 'terminal') setProvider(record.provider);
     const matching = settings.presets.find((item) => item.name === record.presetName && item.provider === record.provider && item.hostId === target);
     setPresetId(matching?.id || '');
     setInstructions('');
-    setWorktreeError(record.hasInstructions ? 'Re-enter the original starting instructions before retrying this operation.' : 'Review the launch settings, then start this operation again.');
+    setWorktreeError(record.sitrepSource ? 'The reviewed SitRep patch is retained. Re-enter recipient instructions, review the target and source association, then recover this same worktree.' : record.hasInstructions ? 'Re-enter the original starting instructions before retrying this operation.' : 'Review the launch settings, then start this operation again.');
   }
   async function archive(record: WorktreeRecord) {
     setWorktreeBusy(true); setWorktreeError('');
@@ -55,7 +57,7 @@ export function CreateDialog({ resume, settings, hostId, onClose, onSubmit, busy
     finally { setWorktreeBusy(false); }
   }
   return <Modal title={resume ? 'Resume conversation' : 'New session'} onClose={onClose}>
-    <form className="dialog-form" onSubmit={(event) => { event.preventDefault(); onSubmit(isTerminal ? { provider: 'terminal', cwd, title, hostId: target } : { provider, cwd, title, hostId: target, presetId: presetId || undefined, instructions, ...(roeOverride ? { roeProfile: roeOverride } : {}), ...(resume ? { conversationId: resume.id } : {}), ...(resume?.agentId ? { agentId: resume.agentId } : {}), ...(isolated ? { worktree: { operationId, repository: cwd, baseRef, slug } } : {}) }); }}>
+    <form className="dialog-form" onSubmit={(event) => { event.preventDefault(); onSubmit(isTerminal ? { provider: 'terminal', cwd, title, hostId: target } : { provider, cwd, title, hostId: target, presetId: presetId || undefined, instructions, ...(roeOverride ? { roeProfile: roeOverride } : {}), ...(resume ? { conversationId: resume.id } : {}), ...(resume?.agentId ? { agentId: resume.agentId } : {}), ...(isolated ? { worktree: { operationId, repository: cwd, baseRef, slug }, ...(recoverSitrep ? { recoverSitrep: true } : {}) } : {}) }); }}>
       <div className="dialog-heading"><div><h2>{resume ? 'Resume conversation' : 'New session'}</h2><p>{isTerminal ? 'Start a remote shell that keeps running when detached.' : 'Start a managed agent using your saved launch configuration.'}</p></div><button type="button" aria-label="Close" className="icon-button" onClick={onClose} disabled={busy}>×</button></div>
       {!resume ? <label>Session type<select value={sessionType} disabled={busy} onChange={(e) => setSessionType(e.target.value as typeof sessionType)}><option value="agent">Agent</option><option value="terminal">Terminal</option></select></label> : null}
       {!isTerminal ? <label>Launch preset<select value={presetId} disabled={busy} onChange={(e) => {
@@ -64,7 +66,7 @@ export function CreateDialog({ resume, settings, hostId, onClose, onSubmit, busy
         if (p) { setProvider(p.provider); setCwd(resume?.cwd || p.cwd); setInstructions(resume ? '' : p.instructions); if (!resume && p.hostId) setTarget(p.hostId); }
       }}>{!presetsOnly ? <option value="">Provider default</option> : null}{options.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label> : null}
       <div className="form-grid">{!isTerminal ? <label>Provider<select value={provider} disabled={Boolean(resume) || Boolean(preset) || busy} onChange={(e) => setProvider(e.target.value as typeof provider)}><option value="codex">Codex</option><option value="claude">Claude</option><option value="antigravity">Antigravity CLI</option></select></label> : null}<label>SSH host<select value={target} disabled={Boolean(resume) || busy} onChange={(e) => setTarget(e.target.value)}>{settings.hosts.filter((h) => h.enabled).map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}</select></label></div>
-      {!resume && !isTerminal ? <label className="checkbox-label"><input type="checkbox" checked={isolated} onChange={(event) => setIsolated(event.target.checked)} disabled={busy} />Isolate this task in a Git worktree</label> : null}
+      {!resume && !isTerminal ? <label className="checkbox-label"><input type="checkbox" checked={isolated} onChange={(event) => { setIsolated(event.target.checked); setRecoverSitrep(false); }} disabled={busy} />Isolate this task in a Git worktree</label> : null}
       <label>{isolated ? 'Remote Git repository' : 'Working directory'}<input value={cwd} onChange={(e) => setCwd(e.target.value)} placeholder={isolated ? 'Existing remote repository path' : 'Remote home directory'} disabled={busy} required={isolated} /></label>
       {isolated ? <>
         <div className="form-grid">
@@ -76,8 +78,8 @@ export function CreateDialog({ resume, settings, hostId, onClose, onSubmit, busy
           <strong>Owned worktrees on this host</strong>
           {worktreeLoading ? <small>Checking owned worktrees…</small> : visibleWorktrees.length ? visibleWorktrees.map((item) =>
             <div key={item.operationId} className="worktree-row">
-              <span><code>{item.branch || item.operationId}</code><small>{item.state} · {item.status.active ? 'tmux session present' : item.status.dirty ? 'dirty' : item.status.merged ? 'clean and merged' : 'unmerged or unavailable'} · {item.path}</small></span>
-              {(item.state === 'ready' || item.state === 'provisioning') ? <button type="button" disabled={busy || worktreeBusy} onClick={() => retry(item)}>Use for retry</button> : null}
+              <span><code>{item.branch || item.operationId}</code><small>{item.state} · {item.status.active ? 'tmux session present' : item.status.dirty ? 'dirty' : item.status.merged ? 'clean and merged' : 'unmerged or unavailable'} · {item.path}</small>{item.sitrepSource ? <small>SitRep from {item.sitrepSource.hostId}/{item.sitrepSource.name} · {item.sitrepSource.repository}</small> : null}</span>
+              {(item.state === 'ready' || item.state === 'provisioning') && (!item.sitrepSource || item.state === 'ready') ? <button type="button" disabled={busy || worktreeBusy || Boolean(item.sitrepSource && !item.status.owned)} onClick={() => retry(item)}>{item.sitrepSource ? 'Recover SitRep' : 'Use for retry'}</button> : null}
               <button type="button" disabled={busy || worktreeBusy || !item.status.owned || !item.status.exists || item.status.active || item.status.dirty !== false || item.status.merged !== true} onClick={() => void archive(item)}>Archive clean worktree</button>
             </div>
           ) : <small>No owned worktrees found.</small>}

@@ -1,4 +1,5 @@
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { sshBinary } = require('./platform.cjs');
@@ -19,7 +20,7 @@ function createService({ directory, home }) {
   const SSH_ARGS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'StrictHostKeyChecking=yes'];
   const TMUX_NAME = /^hq-[a-f0-9]{12}$/;
   const OTHER_TMUX_NAME = /^[A-Za-z0-9_.:-]{1,80}$/;
-  const helperSource = fs.readFileSync(path.join(__dirname, 'session-cleanup.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktrees.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktree-diff.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'provider_telemetry.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'oporders.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'remote.py'), 'utf8');
+  const helperSource = fs.readFileSync(path.join(__dirname, 'session-cleanup.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktrees.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktree-diff.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'sitrep.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'provider_telemetry.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'oporders.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'remote.py'), 'utf8');
   const hookSource = fs.readFileSync(path.join(__dirname, 'session-hook.py'), 'utf8');
 
 
@@ -29,6 +30,7 @@ function createService({ directory, home }) {
   let inventoryFlight, healthFlight;
   const opOrderSynced = new Map();
   const opOrderAttempts = new Map();
+  const sitrepPreviews = new Map();
 
   const hostCache = new Map(Object.entries(store.data.cachedUnits).map(([hostId, units]) => [hostId, units.map((unit) => ({ ...unit, hostId, hostName: store.data.settings.hosts.find((host) => host.id === hostId)?.name || hostId }))]));
   const healthCache = new Map();
@@ -113,7 +115,8 @@ function createService({ directory, home }) {
     const host = getHost(hostId);
     return new Promise((resolve, reject) => {
       const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
-      const child = spawn(SSH_BINARY, [...sshArgs(host), host.target, 'python3', '-', encoded], {
+      const embedded = encoded.length > 60000;
+      const child = spawn(SSH_BINARY, [...sshArgs(host), host.target, 'python3', '-', ...(embedded ? [] : [encoded])], {
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
@@ -144,7 +147,7 @@ function createService({ directory, home }) {
           reject(new Error(`Invalid response from remote host: ${error.message}`));
         }
       });
-      child.stdin.end(helperSource);
+      child.stdin.end(embedded ? `AGENTC2_PAYLOAD_B64 = '${encoded}'\n${helperSource}` : helperSource);
     });
   }
 
@@ -239,7 +242,7 @@ function createService({ directory, home }) {
     const release = cleanup.beginLaunch(getHost(input?.hostId).id);
     try { return await createSession(input, requirePreset); } finally { release(); }
   }
-  async function createSession(input, requirePreset = false) {
+  async function createSession(input, requirePreset = false, internalSitrep = null) {
     const provider = input?.provider;
     if (!['codex', 'claude', 'antigravity', 'terminal'].includes(provider)) throw new Error('Invalid provider');
     const isTerminal = provider === 'terminal';
@@ -251,6 +254,8 @@ function createService({ directory, home }) {
     const roeProfile = resolveRoeProfile(store.data.settings, host.id, preset, input.roeProfile);
     validateRoeLaunch(provider, preset, roeProfile);
     const isolated = input.worktree;
+    if (input.recoverSitrep !== undefined && input.recoverSitrep !== true) throw new Error('Invalid SitRep recovery flag');
+    if (input.recoverSitrep && !isolated) throw new Error('SitRep recovery requires an owned worktree');
     if (isolated && (isTerminal || input.conversationId || input.agentId || !/^[a-f0-9]{32}$/.test(isolated.operationId || '') || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(isolated.slug || '') || typeof isolated.repository !== 'string' || isolated.repository.length > 4096 || typeof isolated.baseRef !== 'string' || isolated.baseRef.length > 200)) throw new Error('Invalid isolated task');
     const created = await runRemote({
       action: isolated ? 'worktree_launch' : 'create', provider,
@@ -258,7 +263,8 @@ function createService({ directory, home }) {
       conversationId: input.conversationId ? String(input.conversationId) : null,
       agentId: input.agentId ? String(input.agentId) : null,
       preset, roeProfile, hookSource, instructions: String(input.instructions || '').slice(0, 20000),
-      ...(isolated ? { operationId: isolated.operationId, repository: isolated.repository, baseRef: isolated.baseRef, slug: isolated.slug } : {}),
+      ...(isolated ? { operationId: isolated.operationId, repository: isolated.repository, baseRef: isolated.baseRef, slug: isolated.slug, ...(input.recoverSitrep ? { recoverSitrep: true } : {}) } : {}),
+      ...(internalSitrep ? { sitrep: internalSitrep } : {}),
     }, input.hostId);
     void inventory().catch(() => {});
     return created;
@@ -276,6 +282,50 @@ function createService({ directory, home }) {
     const hostId = getHost(input.hostId).id;
     if (action === 'diff_hunk') terminals.assertSessionOwner(client, input.name, hostId);
     return runRemote({ action, name: input.name, operationId: input.operationId, ...(action === 'diff_files' ? {} : { fileId: input.fileId }), ...(action === 'diff_hunk' ? { revision: input.revision, hunkId: input.hunkId, operation: input.operation } : {}) }, hostId);
+  }
+
+  async function previewSitrep(client, input) {
+    if (!input || !TMUX_NAME.test(input.name || '') || !/^[a-f0-9]{32}$/.test(input.operationId || '') || typeof input.repository !== 'string' || (input.repository && !input.repository.startsWith('/')) || input.repository.length > 4096 || typeof input.testCommand !== 'string' || input.testCommand.length > 500) throw new Error('Invalid SitRep preview request');
+    const sourceHostId = getHost(input.sourceHostId).id;
+    const targetHostId = getHost(input.targetHostId).id;
+    if (input.testCommand) terminals.assertSessionOwner(client, input.name, sourceHostId);
+    const source = await runRemote({ action: 'sitrep_source_preview', name: input.name, operationId: input.operationId, testCommand: input.testCommand }, sourceHostId);
+    const repository = input.repository || (sourceHostId === targetHostId ? source.source.repository : '');
+    if (!repository) throw new Error('Enter the primary Git checkout on the target host');
+    const target = await runRemote({ action: 'sitrep_target_preview', repository, source: source.source, patchBase64: source.patchBase64 }, targetHostId);
+    const id = crypto.randomBytes(16).toString('hex');
+    sitrepPreviews.set(id, { sourceHostId, targetHostId, name: input.name, operationId: input.operationId, repository, revision: source.revision, test: source.test, createdAt: Date.now(), launchOperationId: null });
+    for (const [key, value] of sitrepPreviews) if (Date.now() - value.createdAt > 15 * 60_000) sitrepPreviews.delete(key);
+    return { version: 1, id, source: source.source, target, revision: source.revision, patchPreview: source.patchPreview, patchPreviewTruncated: source.patchPreviewTruncated, patchBytes: source.patchBytes, untracked: source.untracked, warnings: source.warnings, test: source.test, ready: target.ready && !source.warnings.length };
+  }
+
+  async function launchSitrep(client, input) {
+    const preview = sitrepPreviews.get(input?.id);
+    if (!preview || Date.now() - preview.createdAt > 15 * 60_000 || !/^[a-f0-9]{32}$/.test(input?.operationId || '') || (preview.launchOperationId && preview.launchOperationId !== input.operationId)) throw new Error('SitRep preview expired or operation changed; preview again');
+    terminals.assertSessionOwner(client, preview.name, preview.sourceHostId);
+    const field = (value, max) => { if (typeof value !== 'string' || value.length > max || value.includes('\0')) throw new Error('Invalid SitRep text'); return value.trim(); };
+    const objective = field(input.objective, 2000);
+    const summary = field(input.summary, 4000);
+    const nextSteps = field(input.nextSteps, 2000);
+    const title = field(input.title, 100);
+    const slug = field(input.slug, 40);
+    if (!objective || !summary || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(slug) || !['codex', 'claude', 'antigravity'].includes(input.provider)) throw new Error('SitRep needs an objective, summary, provider, and task slug');
+    const source = await runRemote({ action: 'sitrep_source_preview', name: preview.name, operationId: preview.operationId, testCommand: '' }, preview.sourceHostId);
+    if (source.revision !== preview.revision || source.warnings.length) throw new Error('Source changed after SitRep preview; review again');
+    const target = await runRemote({ action: 'sitrep_target_preview', repository: preview.repository, source: source.source, patchBase64: source.patchBase64 }, preview.targetHostId);
+    if (!target.ready) throw new Error(target.reason || 'Target base changed; review again');
+    const test = preview.test;
+    const evidence = test ? `Ran on ${preview.sourceHostId} in ${source.source.path} at ${new Date(test.ranAt).toISOString()}\nCommand: ${test.command}\nExit: ${test.timedOut ? 'timed out' : test.exitCode}\nOutput${test.outputTruncated ? ' (tail, truncated)' : ''}:\n${test.output}` : 'No test command was run for this handoff.';
+    const instructions = `SitRep handoff\nObjective: ${objective}\nSummary: ${summary}\nNext steps: ${nextSteps || 'Review the applied changes and continue the objective.'}\nSource: ${preview.sourceHostId}/${source.source.name} · ${source.source.repository} · ${source.source.branch}\nSource base: ${source.source.baseCommit}\nSource HEAD: ${source.source.headCommit}\nReviewed patch: ${source.patchBytes} bytes, applied to this worktree before launch.\nTest evidence: ${evidence}`;
+    if (instructions.length > 20000) throw new Error('SitRep exceeds provider input limit');
+    preview.launchOperationId = input.operationId;
+    const patch = Buffer.from(source.patchBase64, 'base64');
+    const release = cleanup.beginLaunch(preview.targetHostId);
+    try {
+      const result = await createSession({ provider: input.provider, presetId: input.presetId, hostId: preview.targetHostId, title, instructions, roeProfile: input.roeProfile, worktree: { operationId: input.operationId, repository: preview.repository, baseRef: source.source.baseCommit, slug } }, false,
+        { patchBase64: source.patchBase64, digest: crypto.createHash('sha256').update(patch).digest('hex'), source: { version: 1, hostId: preview.sourceHostId, operationId: preview.operationId, name: preview.name, repository: source.source.repository, revision: preview.revision } });
+      return { ...result, hostId: preview.targetHostId };
+    } finally { release(); }
   }
 
   function action(client, action, name, hostId) {
@@ -367,6 +417,6 @@ function createService({ directory, home }) {
     }
     return { matches, searched: selected.length, total: sessions.length, truncated, errors };
   }
-  return { store, events, terminals, tunnels, cleanup, inventory, health, create, worktrees, archiveWorktree, diffRequest, action, uploadClipboardImage, devUrls, openDevUrl, saveSettings, previewOpOrder, enrollOpOrder, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
+  return { store, events, terminals, tunnels, cleanup, inventory, health, create, worktrees, archiveWorktree, diffRequest, previewSitrep, launchSitrep, action, uploadClipboardImage, devUrls, openDevUrl, saveSettings, previewOpOrder, enrollOpOrder, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
 }
 module.exports = { createService };

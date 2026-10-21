@@ -50,6 +50,7 @@ jobs:
           node tests/terminal.e2e.cjs
           node tests/oporders.e2e.cjs
           node tests/oporders.ui.e2e.cjs
+          node tests/sitrep.e2e.cjs
           node tests/workspace.e2e.cjs
           node tests/companion.e2e.cjs
         env:

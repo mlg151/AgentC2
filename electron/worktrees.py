@@ -1,15 +1,18 @@
 """Owned, restart-recoverable Git worktrees for isolated tasks."""
 
 import hashlib
+import base64
 import json
 import os
 from pathlib import Path
 import re
+import subprocess
 import tempfile
 
 WORKTREE_ROOT = (Path.home() / ".cache" / "agent-hq" / "worktrees").resolve()
 WORKTREE_ID = re.compile(r"^[a-f0-9]{32}$")
 WORKTREE_SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
+SITREP_PATCH_LIMIT = 512_000
 
 
 def worktree_file(operation_id):
@@ -112,12 +115,26 @@ def worktree_launch(payload):
     branch = f"agentc2/{slug}-{token[:16]}"
     path = WORKTREE_ROOT / "paths" / hashlib.sha256(str(root).encode()).hexdigest()[:16] / operation_id
     name = "hq-" + token[:12]
+    sitrep = payload.get("sitrep")
+    patch = b""
+    if sitrep is not None:
+        if not isinstance(sitrep, dict) or not re.fullmatch(r"[a-f0-9]{64}", sitrep.get("digest") or ""):
+            raise ValueError("Invalid SitRep transfer")
+        try:
+            patch = base64.b64decode(sitrep.get("patchBase64") or "", validate=True)
+        except (ValueError, TypeError) as error:
+            raise ValueError("Invalid SitRep patch") from error
+        if len(patch) > SITREP_PATCH_LIMIT or hashlib.sha256(patch).hexdigest() != sitrep["digest"] or b"GIT binary patch" in patch or b"Binary files " in patch:
+            raise ValueError("SitRep patch is too large, binary, or changed")
     request = {key: payload.get(key) for key in ("provider", "title", "preset", "instructions")}
+    if sitrep:
+        request["sitrepDigest"] = sitrep["digest"]
     request.update({"repository": str(root), "baseRef": base_ref, "branch": branch, "path": str(path), "name": name})
     digest = hashlib.sha256(json.dumps(request, sort_keys=True).encode()).hexdigest()
     record = worktree_load(operation_id)
+    recovery = payload.get("recoverSitrep") is True and record and record.get("sitrepSource") and record.get("state") == "ready" and not sitrep
     if record:
-        if record.get("requestDigest") != digest or record.get("path") != str(path) or record.get("branch") != branch or record.get("name") != name or record["state"] == "archived":
+        if (record.get("requestDigest") != digest and not recovery) or record.get("path") != str(path) or record.get("branch") != branch or record.get("name") != name or record["state"] == "archived":
             raise ValueError("Operation ID belongs to another or archived task")
         if record["state"] == "launched":
             status = worktree_state(record)
@@ -130,7 +147,7 @@ def worktree_launch(payload):
             raise ValueError("Base ref did not resolve to a commit")
         if path.exists() or run(["git", "-C", str(root), "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"], timeout=5).returncode == 0:
             raise ValueError("Worktree path or branch already exists; no unowned files were changed")
-        record = {"operationId": operation_id, "requestDigest": digest, "repository": str(root), "baseRef": base_ref, "baseCommit": commit, "branch": branch, "path": str(path), "name": name, "provider": payload["provider"], "slug": slug, "title": payload.get("title") or "", "presetName": (payload.get("preset") or {}).get("name") or "", "hasInstructions": bool(payload.get("instructions")), "state": "provisioning"}
+        record = {"operationId": operation_id, "requestDigest": digest, "repository": str(root), "baseRef": base_ref, "baseCommit": commit, "branch": branch, "path": str(path), "name": name, "provider": payload["provider"], "slug": slug, "title": payload.get("title") or "", "presetName": (payload.get("preset") or {}).get("name") or "", "hasInstructions": bool(payload.get("instructions")), "state": "provisioning", "sitrepSource": sitrep.get("source") if sitrep else None}
         worktree_save(record)
     status = worktree_state(record)
     if not status["exists"]:
@@ -149,12 +166,41 @@ def worktree_launch(payload):
         status = worktree_state(record)
     if not status["owned"]:
         raise ValueError("Worktree ownership cannot be verified; inspect before retrying")
+    if record.get("sitrepSource") and record.get("state") == "ready" and not sitrep:
+        if status["active"] or not re.fullmatch(r"[a-f0-9]{64}", record.get("sitrepApplied") or ""):
+            raise ValueError("SitRep recipient is active or its transfer is incomplete")
+        transferred = subprocess.run(["git", "-C", str(path), "diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--binary", "--full-index", record["baseCommit"]], capture_output=True, timeout=15)
+        untracked = subprocess.run(["git", "-C", str(path), "ls-files", "--others", "--exclude-standard", "-z"], capture_output=True, timeout=10)
+        if transferred.returncode or untracked.returncode or untracked.stdout or hashlib.sha256(transferred.stdout).hexdigest() != record["sitrepApplied"]:
+            raise ValueError("SitRep worktree changed after transfer; inspect before recovery")
+    if recovery:
+        record.update({"requestDigest": digest, "provider": payload["provider"], "title": payload.get("title") or "", "presetName": (payload.get("preset") or {}).get("name") or "", "hasInstructions": bool(payload.get("instructions"))})
+        worktree_save(record)
     if status["active"]:
         if tmux_option(name, "@hq_worktree") != operation_id or tmux_option(name, "@hq_cwd") != str(path):
             raise ValueError("Tmux name belongs to a different session; inspect before retrying")
         record["state"] = "launched"
         worktree_save(record)
         return {"name": name, "worktree": record}
+    if sitrep and record.get("sitrepApplied") != sitrep["digest"]:
+        if patch:
+            if status["dirty"]:
+                reverse = subprocess.run(["git", "-C", str(path), "apply", "--index", "--reverse", "--check", "-"], input=patch, capture_output=True, timeout=15)
+                if reverse.returncode:
+                    raise ValueError("Target worktree changed during SitRep transfer; inspect before retrying")
+            else:
+                check = subprocess.run(["git", "-C", str(path), "apply", "--index", "--check", "-"], input=patch, capture_output=True, timeout=15)
+                if check.returncode:
+                    raise ValueError("SitRep patch does not apply to the target worktree")
+                applied = subprocess.run(["git", "-C", str(path), "apply", "--index", "-"], input=patch, capture_output=True, timeout=15)
+                if applied.returncode:
+                    raise ValueError("SitRep patch failed; inspect the target worktree before retrying")
+        record["sitrepApplied"] = sitrep["digest"]
+        worktree_save(record)
+    if sitrep and patch:
+        transferred = subprocess.run(["git", "-C", str(path), "diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--binary", "--full-index", record["baseCommit"]], capture_output=True, timeout=15)
+        if transferred.returncode or transferred.stdout != patch:
+            raise ValueError("Target worktree no longer matches the reviewed SitRep patch; inspect before launching")
     record["state"] = "ready"
     worktree_save(record)
     created = create({**payload, "cwd": str(path), "managedName": name, "worktreeOperation": operation_id})

@@ -191,6 +191,8 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
     assert.ok(await overwatch.locator('.overwatch-unit').count() <= 12);
     await page.getByRole('combobox', { name: 'Overwatch grid size' }).selectOption('16');
     const preview = overwatch.locator(`[data-session-key="default/tmux:${names[0]}"]`);
+    for (let index = 0; index < 4 && !await preview.count(); index++) await page.getByRole('button', { name: 'Next Overwatch page' }).click();
+    assert.equal(await preview.count(), 1, 'Selected fixture must appear on an Overwatch page');
     await poll(async () => (await preview.locator('pre').innerText()).includes('HQ_FIXTURE'), 'Read-only terminal snapshot missing');
     await page.screenshot({ path: path.join(os.tmpdir(), 'agentc2-overwatch.png') });
     assert.deepEqual(await page.evaluate((id) => window.agentHQ.terminalState(id), previewHandle), terminalBefore, 'Overwatch changed control ownership or PTY dimensions');

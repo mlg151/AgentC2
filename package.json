@@ -12,6 +12,7 @@
     "test:terminal": "npm run build && node tests/terminal.e2e.cjs",
     "test:launch-modes": "node tests/launch-modes.cjs",
     "test:oporders": "npm run build && python3 tests/oporders.py && node tests/oporders.e2e.cjs && node tests/oporders.ui.e2e.cjs",
+    "test:sitrep": "npm run build && python3 tests/sitrep.py && node tests/sitrep.e2e.cjs",
     "test:productivity": "node tests/productivity.cjs",
     "test:workspace": "npm run build && node tests/workspace.e2e.cjs",
     "test:remote": "npm run build && node tests/remote-control.cjs",
