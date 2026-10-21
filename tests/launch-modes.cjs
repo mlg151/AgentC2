@@ -3,11 +3,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 
-const helper = (fs.readFileSync(path.join(__dirname, '..', 'electron', 'provider_telemetry.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, '..', 'electron', 'remote.py'), 'utf8')).toString('base64');
+const helper = Buffer.from(fs.readFileSync(path.join(__dirname, '..', 'electron', 'provider_telemetry.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, '..', 'electron', 'remote.py'), 'utf8')).toString('base64');
 const hook = fs.readFileSync(path.join(__dirname, '..', 'electron', 'session-hook.py')).toString('base64');
+const providerBinDir = process.env.AGENTC2_PROVIDER_BIN_DIR || '';
 const source = `
-import base64,json,subprocess,time
+import base64,json,os,subprocess,time
 from pathlib import Path
+if ${JSON.stringify(providerBinDir)}: os.environ['PATH'] = ${JSON.stringify(providerBinDir)} + os.pathsep + os.environ.get('PATH', '')
 scope={'__name__':'agent_hq_launch_test'}
 exec(base64.b64decode('${helper}'),scope)
 results=[]
