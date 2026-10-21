@@ -32,7 +32,10 @@ export function fleetReadiness(inventory: Inventory | null, requests: FlashReque
     }
   }
   for (const fault of inventory.faults || []) add('fault', fault.sessionKey, `${fault.detail}; ${fault.status}`, fault.at);
-  for (const conflict of inventory.conflicts || []) add('fault', conflict.hostId, `OpOrder ${conflict.id}: ${conflict.detail}`, conflict.at);
+  for (const conflict of inventory.conflicts || []) {
+    if (inventory.hosts.find((host) => host.id === conflict.hostId)?.connected) add('fault', conflict.hostId, `OpOrder ${conflict.id}: ${conflict.detail}`, conflict.at);
+    else { unknown = true; add('unknown', conflict.hostId, `Last known OpOrder ${conflict.id} conflict cannot be rechecked while disconnected`, conflict.at); }
+  }
   for (const request of requests) if (request.state === 'pending') {
     if (request.connected) add('approval', `${request.hostName}/${request.name}`, `${request.tool} permission decision pending`, new Date(request.createdAt * 1000).toISOString());
     else { unknown = true; add('unknown', `${request.hostName}/${request.name}`, 'Last known permission request is disconnected'); }

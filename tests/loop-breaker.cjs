@@ -19,6 +19,9 @@ try {
   const breaker = new LoopBreaker(store);
   const a = 'a'.repeat(32), b = 'b'.repeat(32);
   assert.deepEqual(breaker.observe([session([], { outputTail: 'FAILED FAILED FAILED', telemetry: null })]), [], 'Terminal repetition and missing telemetry are not evidence');
+  const alternate = 'default/tmux:hq-bbbbbbbbbbbb';
+  assert.deepEqual(breaker.observe([session([event(1, 'tool_failed', a), event(2, 'tool_failed', a), event(3, 'tool_failed'), event(4, 'tool_failed', a), event(5, 'tool_failed', a)], { key: alternate })]), [], 'Unknown intervening failure resets a confirmed streak');
+  assert.equal(store.data.loopState[alternate].count, 2);
   assert.deepEqual(breaker.observe([session([event(1, 'tool_failed', a), event(2, 'tool_failed', a), event(3, 'tool_ok'), event(4, 'tool_failed', a), event(5, 'tool_failed', b)])]), []);
   assert.deepEqual(breaker.observe([session([event(1, 'tool_failed', a), event(2, 'tool_failed', a), event(3, 'tool_ok'), event(4, 'tool_failed', a), event(5, 'tool_failed', b), event(6, 'tool_failed', b), event(7, 'tool_failed', b)])]), []);
   const events = [1, 2, 3, 4, 5, 6, 7].map((index) => index === 3 ? event(index, 'tool_ok') : event(index, 'tool_failed', index < 5 ? a : b));

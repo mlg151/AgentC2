@@ -17,6 +17,7 @@ assert.equal(fleetReadiness(null, [], now).level, null);
 assert.equal(evaluate({ hosts: [{ id: 'default', name: 'Primary', connected: false }], faults: [{ sessionKey: key, at: '2026-10-21T17:59:59Z', detail: 'four failures', status: 'review' }] }).level, 1);
 assert.equal(evaluate({ faults: [{ sessionKey: key, at: '2026-10-21T17:59:59Z', detail: 'four failures', status: 'review' }] }).level, 2);
 assert.equal(evaluate({ conflicts: [{ id: 'order', hostId: 'default', detail: 'managed file changed', at: '2026-10-21T17:59:59Z' }] }).level, 2);
+assert.equal(evaluate({ hosts: [{ id: 'default', name: 'Primary', connected: false }], sessions: [{ ...unit, state: 'exited' }], conflicts: [{ id: 'order', hostId: 'default', detail: 'old conflict', at: '2026-10-21T17:59:59Z' }] }).level, null);
 const request = { id: 'request', hostName: 'Primary', name: 'hq-aaaaaaaaaaaa', tool: 'Bash', createdAt: now / 1000, state: 'pending', connected: true };
 assert.equal(evaluate({}, [request]).level, 3);
 assert.equal(evaluate({ sessions: [{ ...unit, events: [{ id: '2', kind: 'completed', at: '2026-10-21T17:59:30Z' }] }] }, [{ ...request, connected: false }]).level, null);

@@ -47,6 +47,10 @@ class LoopBreaker {
             state.fault = { id: event.id, at: event.at, label: typeof event.failureLabel === 'string' ? event.failureLabel.slice(0, 100) : 'Repeated confirmed failure', count: state.count, status: policy.autoInterrupt ? 'pending' : 'review', detail: `${state.count} consecutive matching provider failures in ${policy.windowMinutes} minutes`, autoInterrupt: policy.autoInterrupt };
             raised.push({ sessionKey: session.key, ...state.fault });
           }
+        } else if (['tool_failed', 'failed', 'input'].includes(event.kind)) {
+          // An unknown error or intervening permission request breaks a
+          // consecutive sequence, even when it cannot identify a new streak.
+          state.signature = ''; state.count = 0; state.firstAt = 0;
         }
         state.cursor = event.id;
       }
