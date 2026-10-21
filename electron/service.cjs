@@ -4,11 +4,12 @@ const { spawn } = require('node:child_process');
 const { sshBinary } = require('./platform.cjs');
 const { EventEmitter } = require('node:events');
 const pty = require('node-pty');
-const { Store, validateSettings, validateWorkspace } = require('./config.cjs');
+const { Store, validateSettings, validateSessionPin } = require('./config.cjs');
 const { Attention } = require('./attention.cjs');
 const { TmuxControl } = require('./tmux-control.cjs');
 const { Terminals } = require('./terminals.cjs');
 const { scrollTerminal } = require('./terminal-scroll.cjs');
+const { createCleanup } = require('./cleanup.cjs');
 
 function createService({ directory, home }) {
   const events = new EventEmitter();
@@ -16,12 +17,13 @@ function createService({ directory, home }) {
   const SSH_ARGS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'StrictHostKeyChecking=yes'];
   const TMUX_NAME = /^hq-[a-f0-9]{12}$/;
   const OTHER_TMUX_NAME = /^[A-Za-z0-9_.:-]{1,80}$/;
-  const helperSource = fs.readFileSync(path.join(__dirname, 'remote.py'), 'utf8');
+  const helperSource = fs.readFileSync(path.join(__dirname, 'session-cleanup.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'remote.py'), 'utf8');
   const hookSource = fs.readFileSync(path.join(__dirname, 'session-hook.py'), 'utf8');
 
 
   const store = new Store(directory);
   const attention = new Attention(store);
+  const cleanup = createCleanup({ store, events, inventory, runRemote, hostId: (id) => getHost(id).id });
   let inventoryFlight, healthFlight;
 
   const hostCache = new Map();
@@ -72,7 +74,7 @@ function createService({ directory, home }) {
         }
         return { id: h.id, name: h.name, target: h.target, connected: false, error: result.reason.message };
       });
-      const sessions = hosts.flatMap((h) => (hostCache.get(h.id) || []).map((s) => ({ ...s, stale: !statuses.find((status) => status.id === h.id).connected })));
+      const sessions = hosts.flatMap((h) => (hostCache.get(h.id) || []).map((s) => ({ ...s, stale: !statuses.find((status) => status.id === h.id).connected }))).filter((session) => !store.data.deletedSessions.includes(session.key));
     attention.update(sessions.filter((s) => !s.stale));
       const snapshot = { hosts: statuses, sessions, attention: store.data.attention };
       events.emit('inventory:updated', snapshot);
@@ -150,6 +152,7 @@ function createService({ directory, home }) {
   });
 
   async function saveSettings(input) {
+    if (cleanup.isBusy()) throw new Error('Wait for history cleanup before changing settings');
     await inventoryFlight;
     await healthFlight;
     if (terminals.opening.size) throw new Error('Wait for terminal connections before changing settings');
@@ -169,6 +172,11 @@ function createService({ directory, home }) {
   }
 
   async function create(input, requirePreset = false) {
+    if (input?.conversationId && store.data.deletedSessions.includes(`${input.hostId || 'default'}/${input.provider}:${input.conversationId}`)) throw new Error('This saved history has been deleted. Start a new session instead.');
+    const release = cleanup.beginLaunch(getHost(input?.hostId).id);
+    try { return await createSession(input, requirePreset); } finally { release(); }
+  }
+  async function createSession(input, requirePreset = false) {
     const provider = input?.provider;
     if (!['codex', 'claude', 'antigravity', 'terminal'].includes(provider)) throw new Error('Invalid provider');
     const isTerminal = provider === 'terminal';
@@ -199,10 +207,20 @@ function createService({ directory, home }) {
     return items;
   }
   function saveWorkspace(input) {
-    const result = store.save('workspace', validateWorkspace(input));
+    const result = store.saveWorkspace(input);
     events.emit('state:updated');
     return result;
   }
-  return { store, events, terminals, inventory, health, create, action, saveSettings, saveWorkspace, acknowledge, hostId: (id) => getHost(id).id };
+  function setSessionPinned(key, pinned) {
+    const hostId = validateSessionPin(key, pinned);
+    if (cleanup.isDeleting(key)) throw new Error('History deletion is in progress; wait for its result');
+    if (store.data.deletedSessions.includes(key)) throw new Error('History has been deleted; refresh sessions');
+    if (!store.data.settings.hosts.some((host) => host.id === hostId) || !(Object.hasOwn(store.data.workspace.metadata, key) || hostCache.get(hostId)?.some((session) => session.key === key))) throw new Error('Session is unavailable. Refresh sessions before pinning it.');
+    const result = store.setSessionPinned(key, pinned);
+    events.emit('session:pinned', key, result);
+    events.emit('state:updated');
+    return result;
+  }
+  return { store, events, terminals, cleanup, inventory, health, create, action, saveSettings, saveWorkspace, setSessionPinned, acknowledge, hostId: (id) => getHost(id).id };
 }
 module.exports = { createService };

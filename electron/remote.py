@@ -2,6 +2,8 @@
 
 import base64
 import getpass
+import hashlib
+import fcntl
 import json
 import os
 import pwd
@@ -13,6 +15,9 @@ import sqlite3
 import socket
 import subprocess
 import sys
+import stat
+import tempfile
+from contextlib import contextmanager
 import time
 import uuid
 
@@ -29,6 +34,20 @@ ID_RE = re.compile(r"^[a-zA-Z0-9_-]{6,100}$")
 TMUX_RE = re.compile(r"^hq-[a-f0-9]{12}$")
 SESSION_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
 HOOK_ROOT = HOME / ".cache" / "agent-hq"
+
+
+@contextmanager
+def cleanup_lock():
+    descriptor = os.open(HOME / ".agentc2-history.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, "w") as lock:
+        info = os.fstat(lock.fileno())
+        if info.st_uid != os.getuid() or info.st_nlink != 1 or not stat.S_ISREG(info.st_mode):
+            raise ValueError("Shared cleanup lock is unsupported")
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise ValueError("Another AgentC2 launch or history operation is running; retry after it finishes")
+        yield
 
 
 def session_events(name):
@@ -502,7 +521,12 @@ def main():
     elif action == "health":
         result = health()
     elif action == "create":
-        result = create(payload)
+        with cleanup_lock():
+            result = create(payload)
+    elif action == "cleanup_preview":
+        result = cleanup_preview(payload)
+    elif action == "cleanup_delete":
+        result = cleanup_delete(payload)
     elif action == "configure":
         result = configure_session(payload)
     elif action == "scroll":

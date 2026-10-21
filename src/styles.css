@@ -28,6 +28,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .sidebar-item.active>b{background:#21545b;color:#d7f7f6}
 .sidebar-item svg{color:#35cacc;flex:none}
 .sidebar-spacer{flex:1}
+.cleanup-body{display:flex;flex-direction:column;gap:16px}.cleanup-body h3{margin:0 0 10px;font-size:15px}.cleanup-preview{border-top:1px solid #344650;padding-top:16px;display:grid;gap:14px}.cleanup-item{border:1px solid #344650;border-radius:5px;padding:12px;overflow-wrap:anywhere}.cleanup-item p,.cleanup-result{font-size:12px;line-height:1.6;color:#aebfc9}.cleanup-item strong{overflow-wrap:anywhere}.cleanup-item details{font-size:12px;color:#91b5c1}.cleanup-item ul{padding-left:20px;max-height:160px;overflow:auto}.cleanup-result code{overflow-wrap:anywhere}.cleanup-body>*{flex-shrink:0}.cleanup-body>.button-secondary{align-self:flex-start}.cleanup-body .field-note{margin:0}.cleanup-body .host-editor{margin:0;display:grid;gap:12px}.cleanup-preview>.button-secondary{justify-self:start}.cleanup-body{scrollbar-color:#3c5260 transparent;scrollbar-width:thin}
 .sidebar-help{margin:0 19px;padding:16px 1px 0;border-top:1px solid #30414b;display:flex;align-items:flex-start;gap:11px;font-size:12px;line-height:1.45;color:#8b9da9}
 .sidebar-help svg{flex:none;color:#91a6b0;margin-top:1px}
 .provider-mark{display:grid;place-items:center;width:64px;height:64px;flex:none;border:1px solid;border-radius:7px;font-size:42px;font-weight:700;line-height:1;background:#102f35;color:#3bd1ce;border-color:#227879;font-family:Inter,"Segoe UI",Arial,sans-serif}

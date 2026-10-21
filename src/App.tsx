@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Bell, Columns2, Pin, Plus, Search, Settings as SettingsIcon, TerminalSquare, X } from 'lucide-react';
+import { Activity, Bell, Columns2, Pin, Plus, Search, Settings as SettingsIcon, TerminalSquare, Trash2, X } from 'lucide-react';
 import { SessionList, type ProviderFilter, type StateFilter } from './components/SessionList';
 import { SessionPane } from './components/SessionPane';
 import { CreateDialog } from './components/CreateDialog';
 import { SettingsDialog } from './components/SettingsDialog';
+import { SessionCleanupDialog } from './components/SessionCleanupDialog';
 import { QuickSwitcher } from './components/QuickSwitcher';
 import { ProviderMark } from './components/ProviderMark';
 import { HostMonitor } from './components/HostMonitor';
@@ -12,6 +13,14 @@ import { emptyMetadata, projectFor } from './workspace';
 import type { AttentionItem, CreateInput, Inventory, Session, Settings, Workspace } from './types';
 
 const emptyWorkspace: Workspace = { tabs: [], selectedKey: null, splitKey: null, metadata: {} };
+function applyPin(workspace: Workspace, key: string, pinned: boolean): Workspace {
+  if (workspace.metadata[key]?.pinned === pinned) return workspace;
+  return { ...workspace, metadata: { ...workspace.metadata, [key]: { ...emptyMetadata, ...workspace.metadata[key], pinned } } };
+}
+function withoutSessions(workspace: Workspace, keys: Set<string>): Workspace {
+  const tabs = workspace.tabs.filter((key) => !keys.has(key));
+  return { ...workspace, tabs, selectedKey: workspace.selectedKey && keys.has(workspace.selectedKey) ? tabs.at(-1) || null : workspace.selectedKey, splitKey: workspace.splitKey && keys.has(workspace.splitKey) ? null : workspace.splitKey, metadata: Object.fromEntries(Object.entries(workspace.metadata).filter(([key]) => !keys.has(key))) };
+}
 
 export default function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -27,12 +36,14 @@ export default function App() {
   const [inbox, setInbox] = useState(false);
   const [showAcknowledged, setShowAcknowledged] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [cleanupTarget, setCleanupTarget] = useState<Session | null | undefined>(undefined);
   const [showSwitcher, setShowSwitcher] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
   const [dialog, setDialog] = useState<Session | null | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [pinning, setPinning] = useState<Set<string>>(() => new Set());
   const initialized = useRef(false);
   const choseInitial = useRef(false);
   const sessions = inventory?.sessions || [];
@@ -56,14 +67,27 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     if (!window.agentHQ) { setError('Open AgentC2 as a desktop app to connect over SSH.'); return; }
+    const pins = new Map<string, boolean>();
+    const deleted = new Set<string>();
+    const offDeleted = window.agentHQ.onSessionsDeleted((keys) => {
+      for (const key of keys) deleted.add(key);
+      setWorkspace((current) => withoutSessions(current, new Set(keys)));
+      setKnown((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !deleted.has(key))));
+    });
+    const offPins = window.agentHQ.onSessionPinned((key, pinned) => {
+      pins.set(key, pinned);
+      setWorkspace((current) => applyPin(current, key, pinned));
+    });
     void window.agentHQ.getState().then(async (state) => {
       if (cancelled) return;
+      for (const [key, pinned] of pins) state.workspace = applyPin(state.workspace, key, pinned);
+      if (deleted.size) state.workspace = withoutSessions(state.workspace, deleted);
       setSettings(state.settings); setWorkspace(state.workspace); setAttention(state.attention);
       initialized.current = true;
       await refresh();
     }).catch((cause) => { if (!cancelled) setError(String(cause)); });
     const off = window.agentHQ.onInventory(acceptInventory);
-    return () => { cancelled = true; off(); };
+    return () => { cancelled = true; off(); offPins(); offDeleted(); };
   }, [acceptInventory, refresh]);
   useEffect(() => {
     if (initialized.current) void window.agentHQ?.saveWorkspace(workspace).catch((cause) => setError(`Could not save workspace: ${String(cause)}`));
@@ -99,6 +123,13 @@ export default function App() {
   function updateMetadata(key: string, patch: Partial<Workspace['metadata'][string]>) {
     setWorkspace((w) => ({ ...w, metadata: { ...w.metadata, [key]: { ...emptyMetadata, ...w.metadata[key], ...patch } } }));
   }
+  async function togglePin(session: Session) {
+    if (!window.agentHQ || pinning.has(session.key)) return;
+    setPinning((current) => new Set(current).add(session.key));
+    try { await window.agentHQ.setSessionPinned(session.key, !workspace.metadata[session.key]?.pinned); }
+    catch (cause) { setError(`Could not update pin: ${String(cause)}`); }
+    finally { setPinning((current) => { const next = new Set(current); next.delete(session.key); return next; }); }
+  }
   function closeTab(key: string) {
     setWorkspace((w) => {
       const tabs = w.tabs.filter((k) => k !== key);
@@ -132,6 +163,7 @@ export default function App() {
   }
   const closeCreate = useCallback(() => { if (!busy) setDialog(undefined); }, [busy]);
   const closeSettings = useCallback(() => setShowSettings(false), []);
+  const closeCleanup = useCallback(() => setCleanupTarget(undefined), []);
   const closeSwitcher = useCallback(() => setShowSwitcher(false), []);
 
   return <div className="app-shell">
@@ -144,18 +176,18 @@ export default function App() {
         {(['all', 'codex', 'claude', 'antigravity', 'terminal'] as const).map((p) => <button key={p} className={`sidebar-item${providerFilter === p && !inbox ? ' active' : ''}`} onClick={() => { setProviderFilter(p); setInbox(false); }}>{p === 'all' ? <Activity size={18} /> : <ProviderMark provider={p} small />}<span>{p === 'all' ? 'All sessions' : p === 'terminal' ? 'Terminals' : p === 'antigravity' ? 'Antigravity' : p === 'claude' ? 'Claude' : 'Codex'}</span><b>{sessions.filter((s) => p === 'all' || s.provider === p).length}</b></button>)}
         <div className="sidebar-title section-title">PROJECTS</div>
         <div className="project-list"><button className={`project-item${!projectFilter ? ' active' : ''}`} onClick={() => { setProjectFilter(''); setInbox(false); }}>All projects</button>{projects.map((p) => <button key={p} title={p} className={`project-item${projectFilter === p ? ' active' : ''}`} onClick={() => { setProjectFilter(p); setInbox(false); }}>{p.split('/').filter(Boolean).at(-1) || p}</button>)}</div>
-        <div className="sidebar-spacer" /><button className="sidebar-item" onClick={() => setDialog(null)}><Plus size={18} /><span>New session</span></button>
+        <div className="sidebar-spacer" /><button className="sidebar-item" onClick={() => setCleanupTarget(null)}><Trash2 size={17} /><span>Session cleanup</span></button><button className="sidebar-item" onClick={() => setDialog(null)}><Plus size={18} /><span>New session</span></button>
       </nav>
-      <SessionList sessions={scoped} selectedKey={workspace.selectedKey} onSelect={openSession} providerFilter={providerFilter} stateFilter={stateFilter} onStateFilter={setStateFilter} onRefresh={() => void refresh()} onNew={() => setDialog(null)} loading={loading} metadata={workspace.metadata} onPin={(s) => updateMetadata(s.key, { pinned: !workspace.metadata[s.key]?.pinned })} />
+      <SessionList sessions={scoped} selectedKey={workspace.selectedKey} onSelect={openSession} providerFilter={providerFilter} stateFilter={stateFilter} onStateFilter={setStateFilter} onRefresh={() => void refresh()} onNew={() => setDialog(null)} loading={loading} metadata={workspace.metadata} pinning={pinning} onPin={(s) => void togglePin(s)} />
       <main className="detail-panel">
         <div className="tab-strip" role="tablist" aria-label="Open sessions">{workspace.tabs.map((key) => <div className={`session-tab${workspace.selectedKey === key ? ' active' : ''}`} key={key}><button role="tab" aria-selected={workspace.selectedKey === key} title={known[key]?.title || key} onClick={() => { setInbox(false); setWorkspace((w) => ({ ...w, selectedKey: key, splitKey: w.splitKey === key ? null : w.splitKey })); }}>{known[key]?.title || key}</button><button aria-label={`Close tab ${known[key]?.title || key}`} onClick={() => closeTab(key)}><X size={12} /></button></div>)}</div>
         {inventory?.hosts.some((h) => !h.connected) ? <div className="host-errors" role="status">{inventory.hosts.filter((h) => !h.connected).map((h) => <span key={h.id} title={h.error}>{h.name}: {h.error}</span>)}<button className="text-button" onClick={() => void refresh()}>Retry</button></div> : null}
         {inbox ? <section className="attention-inbox"><div className="inbox-heading"><div><h1>Attention inbox</h1><p>Provider turn events, process results, and possible input requests across your hosts.</p></div><button className="button-secondary" disabled={!unread.length} onClick={() => void acknowledge('all')}>Acknowledge all</button></div><label className="checkbox-label"><input type="checkbox" checked={showAcknowledged} onChange={(e) => setShowAcknowledged(e.target.checked)} />Show acknowledged</label>
           <div className="attention-list">{attention.filter((a) => (showAcknowledged || !a.acknowledged) && (hostFilter === 'all' || a.hostId === hostFilter)).slice().reverse().map((a) => <article className={`attention-card ${a.kind}`} key={a.id}><div className="attention-card-heading"><strong>{a.kind === 'input' ? a.confidence === 'inferred' ? 'Possible input needed' : 'Input needed' : a.kind === 'failed' ? a.signature?.startsWith('hook:') ? 'Turn failed' : 'Process failed' : a.signature?.startsWith('hook:') ? 'Turn finished' : 'Process completed'}</strong><span className="signal-tag">{a.confidence}</span></div><h3>{a.title}</h3><p>{a.detail}</p><small>{settings?.hosts.find((h) => h.id === a.hostId)?.name || a.hostId} · {new Date(a.createdAt).toLocaleString()}</small><div className="inline-actions"><button className="button-secondary" disabled={!known[a.sessionKey]} onClick={() => { if (known[a.sessionKey]) openSession(known[a.sessionKey]); }}>Open session</button><button className="text-button" disabled={a.acknowledged} onClick={() => void acknowledge(a.id)}>{a.acknowledged ? 'Acknowledged' : 'Acknowledge'}</button></div></article>)}{!attention.some((a) => (showAcknowledged || !a.acknowledged) && (hostFilter === 'all' || a.hostId === hostFilter)) ? <div className="no-selection"><Bell size={32} /><h2>You’re caught up</h2><p>New provider events and process exits will appear here. Quiet output alone never counts as completion.</p></div> : null}</div>
         </section> : null}
-        {selected && !inbox ? <div className="workspace-tools"><button className="text-button" onClick={() => updateMetadata(selected.key, { pinned: !workspace.metadata[selected.key]?.pinned })}><Pin size={13} />{workspace.metadata[selected.key]?.pinned ? 'Unpin' : 'Pin'}</button><label>Project<input aria-label="Session project" list="project-names" placeholder={selected.cwd || 'Ungrouped'} value={workspace.metadata[selected.key]?.project || ''} maxLength={100} onChange={(e) => updateMetadata(selected.key, { project: e.target.value })} /><datalist id="project-names">{projects.map((p) => <option key={p}>{p}</option>)}</datalist></label><button className="text-button" onClick={() => setShowNotes((v) => !v)}>{showNotes ? 'Hide notes' : 'Notes & handoff'}</button><label className="split-selector"><Columns2 size={14} /><select aria-label="Split terminal" value={workspace.splitKey || ''} onChange={(e) => setWorkspace((w) => ({ ...w, splitKey: e.target.value || null }))}><option value="">Single pane</option>{workspace.tabs.filter((k) => k !== workspace.selectedKey).map((k) => <option key={k} value={k}>{known[k]?.title || k}</option>)}</select></label></div> : null}
+        {selected && !inbox ? <div className="workspace-tools"><button className="text-button" disabled={pinning.has(selected.key)} aria-pressed={Boolean(workspace.metadata[selected.key]?.pinned)} onClick={() => void togglePin(selected)}><Pin size={13} />{workspace.metadata[selected.key]?.pinned ? 'Unpin' : 'Pin'}</button><label>Project<input aria-label="Session project" list="project-names" placeholder={selected.cwd || 'Ungrouped'} value={workspace.metadata[selected.key]?.project || ''} maxLength={100} onChange={(e) => updateMetadata(selected.key, { project: e.target.value })} /><datalist id="project-names">{projects.map((p) => <option key={p}>{p}</option>)}</datalist></label><button className="text-button" onClick={() => setShowNotes((v) => !v)}>{showNotes ? 'Hide notes' : 'Notes & handoff'}</button><label className="split-selector"><Columns2 size={14} /><select aria-label="Split terminal" value={workspace.splitKey || ''} onChange={(e) => setWorkspace((w) => ({ ...w, splitKey: e.target.value || null }))}><option value="">Single pane</option>{workspace.tabs.filter((k) => k !== workspace.selectedKey).map((k) => <option key={k} value={k}>{known[k]?.title || k}</option>)}</select></label></div> : null}
         <div className={`pane-grid${workspace.splitKey ? ' is-split' : ''}${inbox ? ' pane-hidden' : ''}`}>
-          {workspace.tabs.map((key) => known[key] ? <SessionPane key={key} session={known[key]} primary={key === workspace.selectedKey} visible={key === workspace.selectedKey || key === workspace.splitKey} onResume={setDialog} onRefresh={() => void refresh()} /> : <section className={`session-pane${key === workspace.selectedKey || key === workspace.splitKey ? '' : ' pane-hidden'}`} key={key}><div className="no-selection"><h2>Session unavailable</h2><p>Enable its host or refresh to restore this tab.</p></div></section>)}
+          {workspace.tabs.map((key) => known[key] ? <SessionPane key={key} session={known[key]} primary={key === workspace.selectedKey} visible={key === workspace.selectedKey || key === workspace.splitKey} onResume={setDialog} onDeleteHistory={setCleanupTarget} onRefresh={() => void refresh()} /> : <section className={`session-pane${key === workspace.selectedKey || key === workspace.splitKey ? '' : ' pane-hidden'}`} key={key}><div className="no-selection"><h2>Session unavailable</h2><p>Enable its host or refresh to restore this tab.</p></div></section>)}
           {!workspace.tabs.length ? <div className="no-selection"><TerminalSquare size={35} /><h1>{loading ? 'Finding sessions…' : 'Select a session'}</h1><p>Open conversations in tabs or start a new managed terminal.</p><button className="button-primary" onClick={() => setDialog(null)}>New session</button></div> : null}
         </div>
         {selected && showNotes && !inbox ? <section className="notes-panel"><label>Notes & handoff<textarea aria-label="Session notes and handoff" rows={4} maxLength={20000} placeholder="Objective, current status, next step, and relevant links…" value={workspace.metadata[selected.key]?.notes || ''} onChange={(e) => updateMetadata(selected.key, { notes: e.target.value })} /></label><div className="inline-actions"><span>Saved locally with this session.</span><button className="text-button" onClick={() => void window.agentHQ?.writeClipboard(`${selected.title}\nHost: ${selected.hostName}\nProject: ${projectFor(selected, workspace.metadata)}\nDirectory: ${selected.cwd}\n\n${workspace.metadata[selected.key]?.notes || ''}`).catch((cause) => setError(String(cause)))}>Copy handoff</button></div></section> : null}
@@ -166,6 +198,7 @@ export default function App() {
     {error ? <div className="error-banner" role="alert"><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError('')}><X size={15} /></button></div> : null}
     {settings && dialog !== undefined ? <CreateDialog resume={dialog} settings={settings} hostId={hostFilter === 'all' ? settings.hosts.find((h) => h.enabled)?.id || '' : hostFilter} onClose={closeCreate} onSubmit={(input) => void create(input)} busy={busy} /> : null}
     {settings && showSettings ? <SettingsDialog settings={settings} onSave={saveSettings} onClose={closeSettings} /> : null}
+    {settings && cleanupTarget !== undefined ? <SessionCleanupDialog settings={settings} target={cleanupTarget} onSave={saveSettings} onClose={closeCleanup} /> : null}
     {showSwitcher ? <QuickSwitcher sessions={sessions.map((s) => ({ ...s, cwd: `${s.cwd} ${projectFor(s, workspace.metadata)}` }))} onSelect={(s) => openSession(known[s.key] || s)} onNew={() => setDialog(null)} onSettings={() => setShowSettings(true)} onInbox={() => setInbox(true)} onClose={closeSwitcher} /> : null}
   </div>;
 }

@@ -35,7 +35,13 @@ export interface Inventory {
 export interface HostConfig { id: string; name: string; target: string; port: number; enabled: boolean }
 export interface HostHealth { hostId: string; name: string; connected: boolean; cpuPercent?: number | null; memoryTotal?: number; memoryUsed?: number; disks?: { path: string; total: number; used: number; free: number }[]; sampledAt?: number; error?: string }
 export interface LaunchPreset { id: string; name: string; provider: Provider; command: string; args: string; cwd: string; instructions: string; fullPermissions: boolean; attentionHooks: boolean; hostId: string }
-export interface Settings { hosts: HostConfig[]; presets: LaunchPreset[]; notifications: boolean }
+export interface CleanupPolicy { hostId: string; provider: Exclude<Provider, 'terminal'>; enabled: boolean; days: number }
+export interface Settings { hosts: HostConfig[]; presets: LaunchPreset[]; notifications: boolean; cleanup?: CleanupPolicy[] }
+export interface CleanupInput { hostId: string; provider: Exclude<Provider, 'terminal'>; days: number; ids?: string[]; allowPinned?: boolean }
+export interface CleanupItem { key: string; id: string; provider: Provider; title: string; eligible: boolean; reason: string; bytes: number | null; updatedAt: string | null; files: string[]; estimated: boolean; missing?: boolean }
+export interface CleanupPreview { token: string; hostId: string; provider: Provider; items: CleanupItem[]; expiresAt: number; truncated: boolean }
+export interface CleanupResult { key?: string; hostId: string; provider: Provider; at: string; automatic: boolean; status: string; detail: string; bytes?: number; estimated?: boolean }
+export interface CleanupState { lastRuns: Record<string, string>; results: CleanupResult[] }
 export interface SessionMetadata { pinned: boolean; project: string; notes: string }
 export interface Workspace { tabs: string[]; selectedKey: string | null; splitKey: string | null; metadata: Record<string, SessionMetadata> }
 export interface AttentionItem { id: string; sessionKey: string; hostId: string; title: string; provider: Provider; createdAt: string; acknowledged: boolean; kind: 'completed' | 'failed' | 'input'; confidence: 'confirmed' | 'inferred'; detail: string; signature: string }
@@ -63,6 +69,12 @@ export interface AgentHQApi {
   getState(): Promise<{ settings: Settings; workspace: Workspace; attention: AttentionItem[] }>;
   saveSettings(settings: Settings): Promise<Settings>;
   saveWorkspace(workspace: Workspace): Promise<Workspace>;
+  setSessionPinned(key: string, pinned: boolean): Promise<boolean>;
+  onSessionPinned(callback: (key: string, pinned: boolean) => void): () => void;
+  onSessionsDeleted(callback: (keys: string[]) => void): () => void;
+  previewCleanup(input: CleanupInput): Promise<CleanupPreview>;
+  executeCleanup(token: string, keys: string[]): Promise<CleanupResult[]>;
+  cleanupState(): Promise<CleanupState>;
   acknowledge(id: string): Promise<AttentionItem[]>;
   onInventory(callback: (inventory: Inventory) => void): () => void;
   onAttentionOpen(callback: (key: string) => void): () => void;

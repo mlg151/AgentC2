@@ -9,6 +9,7 @@ const { EventEmitter, once } = require('node:events');
 const { WebSocket } = require('ws');
 const { Gateway } = require('../electron/gateway.cjs');
 const { Terminals } = require('../electron/terminals.cjs');
+const { createService } = require('../electron/service.cjs');
 
 class FakePty extends EventEmitter {
   constructor() { super(); this.writes = []; this.sizes = []; this.killed = false; }
@@ -19,7 +20,8 @@ class FakePty extends EventEmitter {
   kill() { this.killed = true; this.emit('exit', { exitCode: 0 }); }
 }
 function fixture(directory) {
-  const events = new EventEmitter();
+  const service = createService({ directory, home: os.homedir() });
+  const events = service.events;
   const ptys = [];
   let creates = 0, actions = 0;
   const terminals = new Terminals({
@@ -27,13 +29,12 @@ function fixture(directory) {
     configure: async () => {}, history: async () => ({ text: 'HISTORY_OLD\nHISTORY_NEW', truncated: false }), scroll: async () => {},
     emit: (id, event, value) => events.emit('client', id, event, value),
   });
-  const service = {
+  Object.assign(service, {
     events, terminals,
-    store: { data: { settings: { hosts: [], presets: [], notifications: false }, workspace: { metadata: {} }, attention: [] } },
     inventory: async () => ({ hosts: [], sessions: [], attention: [] }), health: async () => [], hostId: (id) => id || 'default', acknowledge: () => [],
     create: async () => { creates++; return { name: 'hq-fixture' }; },
     action: (client, action, name, hostId) => { terminals.assertSessionOwner(client, name, hostId); actions++; return { action }; },
-  };
+  });
   const gateway = new Gateway({ directory, service, assets: path.join(__dirname, '..', 'dist'), secure: false });
   return { gateway, service, terminals, ptys, counts: () => ({ creates, actions }) };
 }
@@ -50,7 +51,7 @@ async function connect(url, cookie, origin = url) {
 
 (async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-hq-remote-test-'));
-  const { gateway, terminals, ptys, counts } = fixture(directory);
+  const { gateway, service, terminals, ptys, counts } = fixture(directory);
   const sockets = [];
   let secureGateway;
   try {
@@ -96,12 +97,34 @@ async function connect(url, cookie, origin = url) {
     const bHandle = await b.request('terminal:open', ['hq-fixture', 60, 25, 'default']);
     assert.equal(ptys.length, 1);
     assert.equal((await a.request('terminal:state', [aHandle])).canControl, false);
+    const key = 'default/tmux:hq-fixture';
+    service.store.save('workspace', { tabs: [key], selectedKey: key, splitKey: null, metadata: { [key]: { pinned: false, project: 'Pin QA', notes: 'Preserve me' } } });
+    const stale = structuredClone(service.store.data.workspace);
+    const pinEvents = [];
+    service.events.on('session:pinned', (...args) => pinEvents.push(args));
+    await a.request('session:pin', [key, true]);
+    await a.request('session:pin', [key, true]);
+    assert.equal((await b.request('state')).metadata[key].pinned, true);
+    assert.ok(b.messages.some((message) => message.event === 'state:updated' && message.value.metadata[key]?.pinned));
+    assert.deepEqual(pinEvents.at(-1), [key, true]);
+    assert.equal(terminals.state(desktop, desktopHandle).canControl, true);
+    stale.metadata[key].notes = 'Desktop notes edited concurrently';
+    service.saveWorkspace(stale);
+    assert.equal((await a.request('state')).metadata[key].pinned, true);
+    assert.equal((await a.request('state')).metadata[key].notes, stale.metadata[key].notes);
+    await b.request('session:pin', [key, false]);
+    assert.equal((await a.request('state')).metadata[key].pinned, false);
+    for (const args of [[key, 'true'], ['default/tmux:unknown', true], ['foreign/tmux:hq-fixture', true], ['default/tmux:../bad', true]]) await assert.rejects(a.request('session:pin', args), /Invalid session pin|unavailable/);
+    assert.equal(service.store.data.workspace.metadata[key].project, 'Pin QA');
+    console.log('PASS authenticated pin edits without terminal ownership, broadcasts to other devices/desktop, stale-save protection, and scoped pin validation');
     await assert.rejects(a.request('terminal:write', [aHandle, 'no']), /Take control/);
     await assert.rejects(b.request('terminal:state', [aHandle]), /disconnected/);
     await a.request('terminal:resize', [aHandle, 30, 10]); assert.equal(ptys[0].sizes.length, 0);
     await a.request('terminal:take', [aHandle]);
     await assert.rejects(terminals.write(desktop, desktopHandle, 'no'), /Take control/);
     await assert.rejects(a.request('saveSettings', [{}]), /Unsupported/);
+    await assert.rejects(a.request('cleanup:preview', [{ hostId: 'default', provider: 'claude', days: 30 }]), /Unsupported/);
+    await assert.rejects(a.request('cleanup:execute', ['unknown', []]), /Unsupported/);
     await a.request('terminal:write', [aHandle, 'HQ_PHONE_OUTPUT\r\n']);
     const snapshot = await b.request('terminal:ready', [bHandle]);
     assert.ok(snapshot.text.includes('HQ_PHONE_OUTPUT'));

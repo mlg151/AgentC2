@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link2Off, Play, Square, TerminalSquare, Zap } from 'lucide-react';
+import { Link2Off, Play, Square, TerminalSquare, Trash2, Zap } from 'lucide-react';
 import { TerminalView } from './TerminalView';
 import type { Session } from '../types';
 
-export function SessionPane({ session, visible, primary, onResume, onRefresh }: { session: Session; visible: boolean; primary: boolean; onResume: (s: Session) => void; onRefresh: () => void }) {
+export function SessionPane({ session, visible, primary, onResume, onRefresh, onDeleteHistory }: { session: Session; visible: boolean; primary: boolean; onResume: (s: Session) => void; onRefresh: () => void; onDeleteHistory: (session: Session) => void }) {
   const [terminalId, setTerminalId] = useState<string | null>(null);
   const [wanted, setWanted] = useState(Boolean(session.canAttach));
   const [attempt, setAttempt] = useState(0);
@@ -45,6 +45,7 @@ export function SessionPane({ session, visible, primary, onResume, onRefresh }: 
     <div className="toolbar">
       {session.canAttach ? <button className="button-primary" disabled={busy || Boolean(terminalId) || connecting || session.stale} onClick={() => { setWanted(true); setAttempt((a) => a + 1); }}><TerminalSquare size={15} />{connecting ? 'Attaching…' : 'Attach'}</button> : null}
       {session.canResume ? <button className="button-primary" disabled={session.stale || busy} onClick={() => onResume(session)}><Play size={15} />Resume</button> : null}
+      {session.kind === 'conversation' ? <button className="toolbar-button danger" disabled={session.stale || busy} onClick={() => onDeleteHistory(session)}><Trash2 size={14} />Delete history</button> : null}
       {session.canInterrupt ? <button className="toolbar-button" disabled={session.stale || busy} onClick={() => void window.agentHQ?.interrupt(session.id, session.hostId).catch(showError)}><Zap size={15} />Interrupt</button> : null}
       {session.canAttach ? <button className="toolbar-button" disabled={!terminalId || busy} onClick={() => setWanted(false)}><Link2Off size={15} />Detach</button> : null}
       {session.canStop ? <button className="toolbar-button danger" disabled={session.stale || busy} onClick={() => void stop()}><Square size={14} />Stop</button> : null}

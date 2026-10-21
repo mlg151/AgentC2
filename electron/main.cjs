@@ -6,7 +6,7 @@ const { createService } = require('./service.cjs');
 const { Gateway } = require('./gateway.cjs');
 
 const desktop = { id: 'desktop', name: 'Desktop' };
-let mainWindow, service, gateway, tray, monitor, healthMonitor;
+let mainWindow, service, gateway, tray, monitor, healthMonitor, cleanupMonitor;
 let quitting = false;
 let startupError = '';
 const icon = path.join(__dirname, '..', 'assets', process.platform === 'win32' ? 'app-icon.ico' : 'app-icon.png');
@@ -114,6 +114,8 @@ app.whenReady().then(async () => {
       }
     });
     service.events.on('health:updated', (value) => send('health:updated', value));
+    service.events.on('session:pinned', (key, pinned) => send('session:pinned', key, pinned));
+    service.events.on('sessions:deleted', (keys) => send('sessions:deleted', keys));
     for (const item of service.store.data.attention) notified.add(item.id);
     if (gateway.data.enabled) await gateway.start().catch((error) => { gateway.error = error.message; });
     updateTray();
@@ -122,6 +124,10 @@ app.whenReady().then(async () => {
   handle('state:get', () => service.store.data);
   handle('settings:save', (input) => service.saveSettings(input));
   handle('workspace:save', (input) => service.saveWorkspace(input));
+  handle('session:pin', (key, pinned) => service.setSessionPinned(key, pinned));
+  handle('cleanup:preview', (input) => service.cleanup.preview(input));
+  handle('cleanup:execute', (token, keys) => service.cleanup.execute(token, keys));
+  handle('cleanup:state', () => service.cleanup.state());
   handle('attention:ack', (id) => service.acknowledge(id));
   handle('inventory', () => service.inventory());
   handle('health', () => service.health());
@@ -154,6 +160,8 @@ app.whenReady().then(async () => {
   if (!startupError) {
     monitor = setInterval(() => { void service.inventory().catch(() => {}); }, 15000);
     healthMonitor = setInterval(() => { void service.health().catch(() => {}); }, 5000);
+    cleanupMonitor = setInterval(() => { void service.cleanup.runDue().catch(() => {}); }, 60000);
+    void service.cleanup.runDue().catch(() => {});
     powerMonitor.on('resume', () => { void service.inventory().catch(() => {}); void service.health().catch(() => {}); });
     powerMonitor.on('suspend', () => { for (const record of [...gateway.sockets.values()]) gateway.drop(record, 4004, 'Desktop sleeping'); });
   }
@@ -162,7 +170,7 @@ app.whenReady().then(async () => {
 const notified = new Set();
 app.on('before-quit', () => {
   quitting = true;
-  clearInterval(monitor); clearInterval(healthMonitor);
+  clearInterval(monitor); clearInterval(healthMonitor); clearInterval(cleanupMonitor);
   void gateway?.dispose(); service?.terminals.closeAll(); tray?.destroy(); tray = null;
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

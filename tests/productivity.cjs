@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { Store, defaults, validateSettings, validateWorkspace } = require('../electron/config.cjs');
+const { Store, defaults, validateSettings, validateWorkspace, validateSessionPin } = require('../electron/config.cjs');
 const { Attention, classify } = require('../electron/attention.cjs');
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-hq-state-test-'));
 try {
@@ -21,6 +21,30 @@ try {
   const workspace = validateWorkspace({ tabs: ['default/tmux:hq-123', 'secondary/tmux:hq-123'], selectedKey: 'default/tmux:hq-123', splitKey: 'secondary/tmux:hq-123', metadata: { 'default/tmux:hq-123': { pinned: true, project: 'Release', notes: 'Check release notes.' } } });
   store.save('workspace', workspace);
   assert.deepEqual(new Store(directory).data.workspace, workspace);
+  // Pins have an authoritative field-level mutation, independent of stale
+  // desktop layout/notes snapshots and of the same session on another host.
+  const firstKey = 'default/tmux:hq-123', secondKey = 'secondary/tmux:hq-123';
+  for (const key of [firstKey, 'default/process:1234', 'default/codex:abc-123', 'secondary/claude:abc-123', 'default/antigravity:abc-123']) assert.ok(validateSessionPin(key, true));
+  for (const key of ['', 'default', '../codex:abc', 'default/tmux:../foo', 'default/unknown:abc', 'default/codex:abc\n', '__proto__']) assert.throws(() => store.setSessionPinned(key, true), /Invalid session pin/);
+  for (const value of [undefined, null, 'true', 1, {}]) assert.throws(() => store.setSessionPinned(firstKey, value), /Invalid session pin/);
+  const stale = structuredClone(workspace);
+  store.setSessionPinned(firstKey, false);
+  stale.metadata[firstKey].notes = 'Edited while the phone unpinned.';
+  store.saveWorkspace(stale);
+  assert.equal(store.data.workspace.metadata[firstKey].pinned, false);
+  assert.equal(store.data.workspace.metadata[firstKey].notes, stale.metadata[firstKey].notes);
+  store.setSessionPinned(secondKey, true);
+  store.saveWorkspace({ ...stale, tabs: [secondKey], selectedKey: secondKey, splitKey: null });
+  assert.equal(store.data.workspace.metadata[secondKey].pinned, true);
+  assert.equal(store.data.workspace.metadata[firstKey].pinned, false);
+  assert.deepEqual(store.data.workspace.tabs, [secondKey]);
+  store.setSessionPinned(firstKey, true);
+  store.setSessionPinned(firstKey, true);
+  store.setSessionPinned(firstKey, false);
+  assert.equal(new Store(directory).data.workspace.metadata[firstKey].pinned, false);
+  assert.equal(new Store(directory).data.workspace.metadata[secondKey].pinned, true);
+  assert.equal(store.data.workspace.metadata[firstKey].project, 'Release');
+  console.log('PASS validated idempotent pins, stale workspace merging, notes/layout preservation, host isolation, and pin restart persistence');
   const session = { key: 'default/tmux:test', hostId: 'default', title: 'Fixture', provider: 'codex', state: 'live', outputTail: 'Working…' };
   const attention = new Attention(store);
   assert.equal(classify(session), null);

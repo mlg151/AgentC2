@@ -15,6 +15,7 @@
     "test:workspace": "npm run build && node tests/workspace.e2e.cjs",
     "test:remote": "npm run build && node tests/remote-control.cjs",
     "test:companion": "npm run build && node tests/companion.e2e.cjs",
+    "test:cleanup": "npm run build && node tests/cleanup.e2e.cjs",
     "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never",
     "dist:linux": "npm run build && electron-builder --linux AppImage deb --x64 --publish never",
     "dist:mac": "npm run build && electron-builder --mac dmg zip --publish never",
@@ -22,7 +23,7 @@
     "test:platform": "node tests/platform.cjs",
     "test:desktop": "node tests/desktop.e2e.cjs",
     "test:package": "node tests/desktop.e2e.cjs --packaged",
-    "test:ci": "npm run build && npm run test:productivity && node tests/remote-control.cjs && npm run test:platform && node tests/packaging.cjs && node tests/native-pty.cjs"
+    "test:ci": "npm run build && npm run test:productivity && node tests/cleanup.cjs && node tests/remote-control.cjs && npm run test:platform && node tests/packaging.cjs && node tests/native-pty.cjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",

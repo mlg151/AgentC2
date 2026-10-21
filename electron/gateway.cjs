@@ -244,6 +244,7 @@ class Gateway {
       case 'inventory': return service.inventory();
       case 'health': return service.health();
       case 'acknowledge': return service.acknowledge(args[0]);
+      case 'session:pin': return service.setSessionPinned(args[0], args[1]);
       case 'create': return this.once(device, request, () => service.create(args[0], true));
       case 'interrupt': case 'stop': return this.once(device, request, () => service.action(client, request.method, args[0], args[1]));
       case 'terminal:open': {

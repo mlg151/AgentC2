@@ -30,7 +30,7 @@ function stateLabel(session: Session) {
   return session.state === 'archived' ? 'Archived' : 'Saved';
 }
 
-export function SessionList({ sessions, selectedKey, onSelect, providerFilter, stateFilter, onStateFilter, onRefresh, onNew, loading, metadata, onPin }: {
+export function SessionList({ sessions, selectedKey, onSelect, providerFilter, stateFilter, onStateFilter, onRefresh, onNew, loading, metadata, pinning, onPin }: {
   sessions: Session[];
   selectedKey: string | null;
   onSelect: (session: Session) => void;
@@ -41,6 +41,7 @@ export function SessionList({ sessions, selectedKey, onSelect, providerFilter, s
   onNew: () => void;
   loading: boolean;
   metadata: Record<string, SessionMetadata>;
+  pinning: ReadonlySet<string>;
   onPin: (session: Session) => void;
 }) {
   const [query, setQuery] = useState('');
@@ -76,7 +77,7 @@ export function SessionList({ sessions, selectedKey, onSelect, providerFilter, s
         <ProviderMark provider={session.provider} small />
         <span className="session-main"><strong title={session.title}>{session.title}</strong><small title={session.cwd}>{session.hostName} · {session.cwd || session.id}</small><em className={session.state === 'live' && !session.stale ? 'is-live' : ''}><i />{stateLabel(session)}</em></span>
         <time title={session.updatedAt || ''}>{relativeTime(session.updatedAt)}</time>
-      </button><button className={`pin-button${metadata[session.key]?.pinned ? ' pinned' : ''}`} aria-label={`${metadata[session.key]?.pinned ? 'Unpin' : 'Pin'} ${session.title}`} onClick={() => onPin(session)}><Pin size={13} /></button></div>)}
+      </button><button className={`pin-button${metadata[session.key]?.pinned ? ' pinned' : ''}`} aria-label={`${metadata[session.key]?.pinned ? 'Unpin' : 'Pin'} ${session.title}`} aria-pressed={Boolean(metadata[session.key]?.pinned)} disabled={pinning.has(session.key)} onClick={() => onPin(session)}><Pin size={13} /></button></div>)}
       {filtered.length > limit ? <button className="show-more" onClick={() => setLimit((current) => current + 150)}>Show more ({filtered.length - limit} remaining)</button> : null}
     </div>
     <div className="list-footer">{filtered.length.toLocaleString()} session{filtered.length === 1 ? '' : 's'}</div>

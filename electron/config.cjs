@@ -38,7 +38,16 @@ function validateSettings(input) {
     if (p.hostId && !hosts.some((h) => h.id === p.hostId)) throw new Error('Preset host does not exist');
     return { id: p.id, name: text(p.name, 100).trim() || command, provider: p.provider, command, args: text(p.args), cwd: text(p.cwd), instructions: text(p.instructions, 20000), fullPermissions: Boolean(p.fullPermissions), attentionHooks: Boolean(p.attentionHooks), hostId: p.hostId || '' };
   });
-  return { hosts, presets, notifications: Boolean(input.notifications) };
+  const cleanup = input.cleanup || [];
+  if (!Array.isArray(cleanup) || cleanup.length > 90) throw new Error('Invalid cleanup policies');
+  const scopes = new Set();
+  const policies = cleanup.map((policy) => {
+    const key = `${policy.hostId}/${policy.provider}`;
+    if (!hosts.some((host) => host.id === policy.hostId) || !PROVIDERS.includes(policy.provider) || scopes.has(key) || typeof policy.enabled !== 'boolean' || !Number.isInteger(policy.days) || policy.days < 1 || policy.days > 36500) throw new Error('Cleanup policies need a unique host/provider and an age between 1 and 36500 days');
+    scopes.add(key);
+    return { hostId: policy.hostId, provider: policy.provider, enabled: policy.enabled, days: policy.days };
+  });
+  return { hosts, presets, notifications: Boolean(input.notifications), cleanup: policies };
 }
 function validateWorkspace(w) {
   if (!w || !Array.isArray(w.tabs) || w.tabs.length > 40 || !w.metadata || typeof w.metadata !== 'object') throw new Error('Invalid workspace');
@@ -48,24 +57,84 @@ function validateWorkspace(w) {
   }]));
   return { tabs, selectedKey: w.selectedKey ? text(w.selectedKey, 300) : null, splitKey: w.splitKey ? text(w.splitKey, 300) : null, metadata };
 }
+function validateSessionPin(key, pinned) {
+  if (typeof key !== 'string' || key.length > 300 || !/^[a-zA-Z0-9_-]{1,80}\/(?:tmux|process|codex|claude|antigravity):[a-zA-Z0-9_.:-]{1,200}$/.test(key) || typeof pinned !== 'boolean') throw new Error('Invalid session pin');
+  return key.slice(0, key.indexOf('/'));
+}
+function validateCleanupState(value) {
+  if (!value || !value.lastRuns || typeof value.lastRuns !== 'object' || !Array.isArray(value.results)) throw new Error('Invalid saved cleanup state');
+  const lastRuns = Object.fromEntries(Object.entries(value.lastRuns).slice(-300).map(([key, at]) => {
+    if (!/^[a-zA-Z0-9_-]{1,80}\/(codex|claude|antigravity)$/.test(key) || typeof at !== 'string' || !Number.isFinite(Date.parse(at))) throw new Error('Invalid cleanup run timestamp');
+    return [key, at];
+  }));
+  const results = value.results.slice(0, 100).map((item) => {
+    if (!item || !ID.test(item.hostId) || !PROVIDERS.includes(item.provider) || !['deleted', 'missing', 'excluded', 'changed', 'unknown', 'failed', 'skipped'].includes(item.status) || typeof item.automatic !== 'boolean' || typeof item.at !== 'string' || !Number.isFinite(Date.parse(item.at))) throw new Error('Invalid saved cleanup result');
+    if (item.key !== undefined) validateSessionPin(item.key, false);
+    if (item.operationId !== undefined && (typeof item.operationId !== 'string' || !ID.test(item.operationId))) throw new Error('Invalid cleanup operation ID');
+    if (item.bytes !== undefined && (!Number.isSafeInteger(item.bytes) || item.bytes < 0)) throw new Error('Invalid cleanup byte count');
+    return { hostId: item.hostId, provider: item.provider, at: item.at, automatic: item.automatic, status: item.status, detail: text(item.detail, 500), ...(item.operationId === undefined ? {} : { operationId: item.operationId }), ...(item.key === undefined ? {} : { key: item.key }), ...(item.bytes === undefined ? {} : { bytes: item.bytes }), ...(item.estimated === undefined ? {} : { estimated: Boolean(item.estimated) }) };
+  });
+  return { lastRuns, results };
+}
 class Store {
   constructor(directory) {
     this.file = path.join(directory, 'workspace.json');
     fs.mkdirSync(directory, { recursive: true });
-    this.data = { settings: defaults(), workspace: { tabs: [], selectedKey: null, splitKey: null, metadata: {} }, attention: [], attentionCursors: {} };
+    this.data = { settings: defaults(), workspace: { tabs: [], selectedKey: null, splitKey: null, metadata: {} }, attention: [], attentionCursors: {}, deletedSessions: [], cleanupState: { lastRuns: {}, results: [] } };
     if (fs.existsSync(this.file)) {
       // Do not silently overwrite an unreadable user's configuration.
       const saved = JSON.parse(fs.readFileSync(this.file, 'utf8'));
-      this.data = { settings: validateSettings(saved.settings), workspace: validateWorkspace(saved.workspace), attention: Array.isArray(saved.attention) ? saved.attention.slice(-500) : [], attentionCursors: saved.attentionCursors || {} };
+      this.data = { ...this.data, settings: validateSettings(saved.settings), workspace: validateWorkspace(saved.workspace), attention: Array.isArray(saved.attention) ? saved.attention.slice(-500) : [], attentionCursors: saved.attentionCursors || {}, deletedSessions: Array.isArray(saved.deletedSessions) ? saved.deletedSessions.slice(-10000).map((key) => text(key, 300)) : [], cleanupState: validateCleanupState(saved.cleanupState || this.data.cleanupState) };
     }
   }
   save(key, value) {
-    const next = { ...this.data, [key]: value };
+    this.update({ [key]: value });
+    return value;
+  }
+  update(patch) {
+    const next = { ...this.data, ...patch };
     const temporary = this.file + '.tmp';
     fs.writeFileSync(temporary, JSON.stringify(next, null, 2), { mode: 0o600 });
     fs.renameSync(temporary, this.file);
     this.data = next;
-    return value;
+  }
+  saveWorkspace(input) {
+    const workspace = validateWorkspace(input);
+    const deleted = new Set(this.data.deletedSessions);
+    for (const key of deleted) delete workspace.metadata[key];
+    workspace.tabs = workspace.tabs.filter((key) => !deleted.has(key));
+    if (deleted.has(workspace.selectedKey)) workspace.selectedKey = workspace.tabs.at(-1) || null;
+    if (deleted.has(workspace.splitKey)) workspace.splitKey = null;
+    // Pin mutations have their own API. An older desktop snapshot must not undo
+    // a companion change, even when that snapshot predates the metadata entry.
+    for (const [key, metadata] of Object.entries(workspace.metadata)) {
+      metadata.pinned = this.data.workspace.metadata[key]?.pinned || false;
+    }
+    for (const [key, metadata] of Object.entries(this.data.workspace.metadata)) {
+      if (!Object.hasOwn(workspace.metadata, key)) workspace.metadata[key] = metadata;
+    }
+    if (Object.keys(workspace.metadata).length > 10000) throw new Error('Session metadata limit reached');
+    return this.save('workspace', workspace);
+  }
+  setSessionPinned(key, pinned) {
+    validateSessionPin(key, pinned);
+    const workspace = this.data.workspace;
+    if (!Object.hasOwn(workspace.metadata, key) && Object.keys(workspace.metadata).length >= 10000) throw new Error('Session metadata limit reached');
+    const metadata = { ...workspace.metadata, [key]: { project: '', notes: '', ...workspace.metadata[key], pinned } };
+    this.save('workspace', { ...workspace, metadata });
+    return pinned;
+  }
+  forgetSessions(keys) {
+    const deleted = new Set([...this.data.deletedSessions, ...keys]);
+    const workspace = structuredClone(this.data.workspace);
+    for (const key of keys) delete workspace.metadata[key];
+    workspace.tabs = workspace.tabs.filter((key) => !deleted.has(key));
+    if (deleted.has(workspace.selectedKey)) workspace.selectedKey = workspace.tabs.at(-1) || null;
+    if (deleted.has(workspace.splitKey)) workspace.splitKey = null;
+    const attentionCursors = { ...this.data.attentionCursors };
+    for (const key of keys) delete attentionCursors[key];
+    // One atomic store replacement prevents stale renderer saves resurrecting history.
+    this.update({ deletedSessions: [...deleted].slice(-10000), workspace, attention: this.data.attention.filter((item) => !deleted.has(item.sessionKey)), attentionCursors });
   }
 }
-module.exports = { Store, defaults, validateSettings, validateWorkspace };
+module.exports = { Store, defaults, validateSettings, validateWorkspace, validateSessionPin };

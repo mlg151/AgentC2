@@ -5,6 +5,20 @@ contextBridge.exposeInMainWorld('agentHQ', {
   getState: () => ipcRenderer.invoke('state:get'),
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
   saveWorkspace: (workspace) => ipcRenderer.invoke('workspace:save', workspace),
+  setSessionPinned: (key, pinned) => ipcRenderer.invoke('session:pin', key, pinned),
+  previewCleanup: (input) => ipcRenderer.invoke('cleanup:preview', input),
+  executeCleanup: (token, keys) => ipcRenderer.invoke('cleanup:execute', token, keys),
+  cleanupState: () => ipcRenderer.invoke('cleanup:state'),
+  onSessionsDeleted: (callback) => {
+    const listener = (_event, keys) => callback(keys);
+    ipcRenderer.on('sessions:deleted', listener);
+    return () => ipcRenderer.removeListener('sessions:deleted', listener);
+  },
+  onSessionPinned: (callback) => {
+    const listener = (_event, key, pinned) => callback(key, pinned);
+    ipcRenderer.on('session:pinned', listener);
+    return () => ipcRenderer.removeListener('session:pinned', listener);
+  },
   acknowledge: (id) => ipcRenderer.invoke('attention:ack', id),
   inventory: () => ipcRenderer.invoke('inventory'),
   health: () => ipcRenderer.invoke('health'),
