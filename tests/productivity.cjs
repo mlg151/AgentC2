@@ -49,6 +49,9 @@ try {
   assert.throws(() => validateSettings({ ...config, opOrders: [{ ...opOrder, repository: '/srv/../project' }] }), /Invalid OpOrder repository/);
   assert.throws(() => validateSettings({ ...config, opOrders: [{ ...opOrder, mcp: [{ ...opOrder.mcp[0], headers: { Authorization: 'Bearer secret' } }] }] }), /environment variables/);
   assert.throws(() => validateSettings({ ...config, opOrders: [{ ...opOrder, mcp: [{ ...opOrder.mcp[0], url: 'http://example.com/mcp' }] }] }), /transport/);
+  const conflict = { id: 'project', hostId: 'default', detail: 'Managed file changed', at: new Date().toISOString() };
+  store.save('opOrderConflicts', { project: conflict });
+  assert.deepEqual(new Store(directory).data.opOrderConflicts.project, conflict, 'A sync conflict must survive desktop restart');
   const workspace = validateWorkspace({ tabs: ['default/tmux:hq-123', 'secondary/tmux:hq-123'], selectedKey: 'default/tmux:hq-123', splitKey: 'secondary/tmux:hq-123', metadata: { 'default/tmux:hq-123': { pinned: true, project: 'Release', notes: 'Check release notes.' } } });
   store.save('workspace', workspace);
   assert.deepEqual(new Store(directory).data.workspace, workspace);

@@ -35,7 +35,7 @@ function createService({ directory, home }) {
   let inventoryFlight, healthFlight;
   const opOrderSynced = new Map();
   const opOrderAttempts = new Map();
-  const opOrderConflicts = new Map();
+  const opOrderConflicts = new Map(Object.entries(store.data.opOrderConflicts));
   const sitrepPreviews = new Map();
   const flashCache = new Map();
   let flashFlight;
@@ -127,9 +127,10 @@ function createService({ directory, home }) {
       try {
         await runRemote({ action: 'oporder_sync', order }, hostId);
         opOrderSynced.set(order.id, fingerprint);
-        opOrderConflicts.delete(order.id);
+        if (opOrderConflicts.delete(order.id)) store.save('opOrderConflicts', Object.fromEntries(opOrderConflicts));
       } catch (error) {
         opOrderConflicts.set(order.id, { id: order.id, hostId, detail: error.message.slice(0, 300), at: new Date().toISOString() });
+        store.save('opOrderConflicts', Object.fromEntries(opOrderConflicts));
         console.warn(`OpOrder ${order.id} needs review: ${error.message}`);
         events.emit('oporder:conflict', { id: order.id, hostId, error: error.message });
       }
@@ -236,6 +237,7 @@ function createService({ directory, home }) {
     store.update({ settings, cachedUnits: retained });
     for (const order of store.data.settings.opOrders || []) if (!order.enabled) { opOrderSynced.delete(order.id); opOrderAttempts.delete(order.id); opOrderConflicts.delete(order.id); }
     for (const id of opOrderConflicts.keys()) if (!store.data.settings.opOrders.some((order) => order.id === id)) opOrderConflicts.delete(id);
+    if (JSON.stringify(Object.fromEntries(opOrderConflicts)) !== JSON.stringify(store.data.opOrderConflicts)) store.save('opOrderConflicts', Object.fromEntries(opOrderConflicts));
     events.emit('state:updated');
     return result;
   }
