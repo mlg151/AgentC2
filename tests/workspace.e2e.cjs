@@ -11,30 +11,41 @@ const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-hq-workspace-test
 const host = process.env.AGENTC2_HOST || process.env.AGENT_HQ_HOST;
 if (!host) throw new Error('Set AGENTC2_HOST to an explicitly configured SSH test host');
 const ssh = require('../electron/platform.cjs').sshBinary();
-const names = [0, 1].map(() => `hq-${crypto.randomBytes(6).toString('hex')}`);
+const names = Array.from({ length: 10 }, (_, index) => index).map(() => `hq-${crypto.randomBytes(6).toString('hex')}`);
 const created = [];
 const marker = `HQ_WORKSPACE_${crypto.randomBytes(4).toString('hex')}`;
 const errors = [];
 let app, page, clipboardBefore;
 function remote(action) {
   const source = `
-import subprocess,sys,json,base64,shlex
+import subprocess,sys,json,base64,shlex,shutil
+from pathlib import Path
 p=json.loads(base64.b64decode(sys.argv[1])); names=p['names']
+fixture_root=Path.home()/('agentc2-qa-'+p['marker'])
 def run(*args):
  r=subprocess.run(args,text=True,capture_output=True)
  if r.returncode: raise RuntimeError(r.stderr)
  return r.stdout.strip()
 if p['action']=='setup':
+ for label in ['anchor','target']:
+  repo=fixture_root/label;repo.mkdir(parents=True)
+  run('git','init','-b','qa/'+label,str(repo))
+  run('git','-C',str(repo),'-c','user.name=AgentC2 fixture','-c','user.email=fixture@example.invalid','commit','--allow-empty','-m','Fixture')
  for i,name in enumerate(names):
   run('tmux','new-session','-d','-s',name,'-n','setup')
-  for k,v in [('provider','codex'),('title',p['marker']+' '+str(i)),('cwd','/tmp')]: run('tmux','set-option','-t',name,'@hq_'+k,v)
+  for k,v in [('provider','codex'),('title',p['marker']+' '+str(i)),('cwd',str(fixture_root/('anchor' if i%2==0 else 'target')))]: run('tmux','set-option','-t',name,'@hq_'+k,v)
   run('tmux','set-option','-t',name,'history-limit','50000')
+  run('tmux','set-option','-t',name,'status-left',' AGENTC2 QA ')
+  run('tmux','set-option','-t',name,'status-right','')
   program="import os; [print('HQ_SEARCH_%05d'%i,flush=True) for i in range(1,3001)]; os.execvpe('bash',['bash','--noprofile','--norc'],dict(os.environ,PS1='HQ_FIXTURE> '))"
-  run('tmux','new-window','-t',name,'-n','chat',shlex.join(['python3','-u','-c',program]))
+  run('tmux','new-window','-t',name,'-n','chat','-c',str(fixture_root/('anchor' if i%2==0 else 'target')),shlex.join(['python3','-u','-c',program]))
   run('tmux','kill-window','-t',name+':setup')
  print('{}')
+elif p['action']=='state':
+ print(json.dumps([run('tmux','capture-pane','-p','-t',name) for name in names[:2]]))
 elif p['action']=='cleanup':
  for name in names: subprocess.run(['tmux','kill-session','-t',name],capture_output=True)
+ if fixture_root.exists(): shutil.rmtree(fixture_root)
  print('{}')
 `;
   return new Promise((resolve, reject) => {
@@ -57,7 +68,7 @@ async function poll(check, message) {
 }
 async function state() { return page.evaluate(() => window.agentHQ.getState()); }
 async function refresh() { await page.evaluate(() => window.agentHQ.inventory()); }
-async function select(index) { await page.locator('.session-row').filter({ hasText: `${marker} ${index}` }).click(); await page.locator('.session-pane:visible .terminal-panel.is-attached').waitFor({ timeout: 30000 }); }
+async function select(index) { await page.locator('.session-row').filter({ hasText: `${marker} ${index}` }).click(); await page.locator('.session-pane.is-focused .terminal-panel.is-attached').waitFor({ timeout: 30000 }); }
 
 (async () => {
   try {
@@ -78,6 +89,14 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
     clipboardBefore = await page.evaluate(() => window.agentHQ.readClipboard());
     await page.getByRole('textbox', { name: 'Search sessions' }).fill(marker);
     await select(0);
+    const gitUnit = (await page.evaluate(() => window.agentHQ.inventory())).sessions.find((session) => session.id === names[0]);
+    assert.equal(gitUnit.branch, 'qa/anchor');
+    assert.ok(gitUnit.repository.endsWith('/anchor'));
+    await page.getByLabel('Roster options', { exact: true }).click();
+    await page.getByRole('combobox', { name: 'Group roster', exact: true }).selectOption('repository');
+    assert.ok((await page.locator('.roster-group-heading').allTextContents()).some((text) => text.includes('anchor')));
+    await page.getByRole('combobox', { name: 'Group roster', exact: true }).selectOption('host');
+    await page.getByLabel('Roster options', { exact: true }).click();
     // Pins, project groups, notes, and handoff clipboard.
     await page.getByRole('button', { name: `Pin ${marker} 0`, exact: true }).click();
     await page.getByRole('combobox', { name: 'Session project' }).fill('Workspace QA');
@@ -91,6 +110,69 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
     await page.getByRole('combobox', { name: 'Split terminal', exact: true }).selectOption(`default/tmux:${names[1]}`);
     assert.equal(await page.locator('.session-pane:visible').count(), 2);
     console.log('PASS pins, project groups, notes/handoff, persistent terminals, and split panes');
+    // Pane B cycling may not focus, remount, or resize the anchor.
+    const anchor = page.locator(`[data-session-key="default/tmux:${names[0]}"].session-pane`);
+    await anchor.locator('.xterm-helper-textarea').focus();
+    const anchorElement = await anchor.elementHandle();
+    const anchorBounds = await anchor.boundingBox();
+    await page.keyboard.press('Alt+j');
+    await page.waitForTimeout(400);
+    assert.ok(await anchorElement.evaluate((element) => element.isConnected));
+    assert.deepEqual(await anchor.boundingBox(), anchorBounds);
+    assert.ok(await anchor.locator('.xterm-helper-textarea').evaluate((element) => element === document.activeElement), 'Cycling B stole anchor focus');
+    await poll(async () => Boolean((await state()).workspace.situation.callsigns[`default/tmux:${names[1]}`]), 'Callsigns not persisted');
+    let room = (await state()).workspace.situation;
+    await select(1);
+    await page.keyboard.press('Alt+l');
+    const promptBefore = await remote('state');
+    await page.keyboard.press('Control+Space');
+    await page.keyboard.type(room.callsigns[`default/tmux:${names[1]}`]);
+    await poll(async () => (await state()).workspace.situation.targetKey === `default/tmux:${names[1]}`, 'Callsign command did not select the target');
+    await page.keyboard.press('Control+Space');
+    await page.keyboard.press('Escape');
+    assert.ok((await page.locator('.command-feedback').innerText()).includes('cancelled'));
+    await page.keyboard.press('Control+Space');
+    await poll(async () => (await page.locator('.command-feedback').innerText()).includes('timed out'), 'Command mode did not time out');
+    assert.equal(await remote('state'), promptBefore, 'Command digits or cancellation leaked into a fixture PTY');
+    await page.getByRole('textbox', { name: 'Search sessions' }).focus();
+    await page.keyboard.press('Control+Space');
+    await page.keyboard.type('01');
+    assert.equal(await page.getByRole('textbox', { name: 'Search sessions' }).inputValue(), marker + '01');
+    await page.getByRole('textbox', { name: 'Search sessions' }).fill(marker);
+    await select(0);
+    await page.locator('.session-pane.is-focused .xterm-helper-textarea').evaluate((element) => element.dispatchEvent(new KeyboardEvent('keydown', { key: 'g', code: 'KeyG', ctrlKey: true, isComposing: true, bubbles: true })));
+    assert.equal(await page.getByRole('dialog', { name: 'Overwatch', exact: true }).count(), 0, 'IME composition triggered a command');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1600, 1000));
+    await page.waitForTimeout(400);
+    const previewHandle = await page.evaluate((name) => window.agentHQ.openTerminal(name, 100, 32, 'default'), names[0]);
+    const terminalBefore = await page.evaluate((id) => window.agentHQ.terminalState(id), previewHandle);
+    await page.keyboard.press('Control+g');
+    const overwatch = page.getByRole('dialog', { name: 'Overwatch', exact: true });
+    await overwatch.waitFor();
+    assert.equal(await overwatch.locator('.xterm').count(), 0);
+    assert.ok(await overwatch.locator('.overwatch-unit').count() <= 12);
+    await page.getByRole('combobox', { name: 'Overwatch grid size' }).selectOption('16');
+    const preview = overwatch.locator(`[data-session-key="default/tmux:${names[0]}"]`);
+    await poll(async () => (await preview.locator('pre').innerText()).includes('HQ_FIXTURE'), 'Read-only terminal snapshot missing');
+    await page.screenshot({ path: path.join(os.tmpdir(), 'agentc2-overwatch.png') });
+    assert.deepEqual(await page.evaluate((id) => window.agentHQ.terminalState(id), previewHandle), terminalBefore, 'Overwatch changed control ownership or PTY dimensions');
+    await page.evaluate((id) => window.agentHQ.closeTerminal(id), previewHandle);
+    await preview.click();
+    await overwatch.waitFor({ state: 'hidden' });
+    await page.keyboard.press('Control+Space'); await page.keyboard.press('z');
+    await poll(async () => page.locator('.session-pane:visible').count().then((count) => count === 1), 'Zen did not isolate the focused pane');
+    await page.keyboard.press('Control+Space'); await page.keyboard.press('z');
+    await poll(async () => page.locator('.session-pane:visible').count().then((count) => count === 2), 'Zen did not restore both panes');
+    await page.keyboard.press('F1');
+    await page.getByRole('textbox', { name: 'Shortcut Cycle Pane B forward', exact: true }).fill('Ctrl+K');
+    await page.getByRole('button', { name: 'Save shortcuts', exact: true }).click();
+    assert.ok((await page.getByRole('alert').innerText()).includes('conflicts'));
+    await page.getByRole('textbox', { name: 'Shortcut Cycle Pane B forward', exact: true }).fill('Alt+U');
+    await page.getByRole('button', { name: 'Save shortcuts', exact: true }).click();
+    await poll(async () => (await state()).workspace.situation.shortcuts.cycleNext === 'Alt+U', 'Shortcut remapping not persisted');
+    await select(0);
+    console.log('PASS stable anchor focus/dimensions, callsign commands, cancel/timeout, read-only Overwatch, Zen restoration, and validated shortcut persistence');
+
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1600, 1000));
     await page.waitForTimeout(800);
     await page.screenshot({ path: path.join(os.tmpdir(), 'agent-hq-workspace.png') });
@@ -98,6 +180,7 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
     await page.waitForTimeout(800);
     await page.screenshot({ path: path.join(os.tmpdir(), 'agent-hq-workspace-narrow.png') });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+    assert.ok(await page.evaluate(() => { const host = document.querySelector('.situation-header .host-picker select').getBoundingClientRect(); const settings = document.querySelector('.situation-header [aria-label="Settings"]').getBoundingClientRect(); return host.right + 4 <= settings.left; }), 'Theater selector overlaps Settings in a narrow window');
     assert.ok(await page.evaluate(() => {
       const grid = document.querySelector('.pane-grid').getBoundingClientRect();
       return [...document.querySelectorAll('.session-pane:not(.pane-hidden) .terminal-panel')].every((p) => p.getBoundingClientRect().bottom <= grid.bottom + 1);
@@ -115,7 +198,13 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+k' : 'Control+k');
     await page.getByRole('textbox', { name: 'Quick switcher search' }).fill(`${marker} 1`);
     await page.keyboard.press('Enter');
-    assert.equal(await page.locator('.session-pane:visible .detail-footer code').innerText(), names[1]);
+    await poll(async () => (await page.locator('.session-pane.is-focused .detail-footer code').innerText()) === names[1], 'Quick switcher did not focus the selected target');
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+k' : 'Control+k');
+    await page.getByRole('textbox', { name: 'Quick switcher search' }).fill('HQ_SEARCH_00001');
+    await page.getByRole('button', { name: 'Search retained terminal history', exact: true }).click();
+    await page.getByRole('region', { name: 'History search results' }).waitFor({ timeout: 30000 });
+    assert.ok((await page.getByRole('region', { name: 'History search results' }).innerText()).includes('HQ_SEARCH_00001'));
+    await page.keyboard.press('Escape');
     console.log('PASS retained-history search, next/previous, and Ctrl+K from the terminal');
     // Configure hosts and a claude3 preset through the real UI.
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
@@ -135,7 +224,7 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
     await refresh();
     await page.getByRole('combobox', { name: 'Filter SSH host' }).selectOption(mirror.id);
     await page.locator('.session-row').filter({ hasText: `${marker} 0` }).waitFor();
-    assert.ok((await page.locator('.session-row').first().innerText()).includes('Mirror QA'));
+    assert.ok((await page.locator('.roster-group').first().innerText()).includes('Mirror QA'));
     // Launch harmless fixture commands with the preset pipeline and quoted instructions.
     const config = saved.settings;
     await app.evaluate(({ Notification }) => {
@@ -149,13 +238,14 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
     await page.evaluate((c) => window.agentHQ.saveSettings(c), config);
     // Reload reads the saved preset exactly as a restart would.
     await page.reload(); await page.locator('.session-row').first().waitFor({ timeout: 60000 });
-    await page.getByRole('button', { name: 'New', exact: true }).click();
+    await page.getByRole('button', { name: 'New unit', exact: true }).click();
     await page.getByRole('combobox', { name: 'Launch preset' }).selectOption('fixture');
     await page.getByRole('textbox', { name: 'Session name', exact: true }).fill(`${marker} failed preset`);
     assert.equal(await page.getByRole('combobox', { name: 'SSH host', exact: true }).inputValue(), mirror.id);
     await page.getByRole('button', { name: 'Start session', exact: true }).click();
     await page.getByRole('dialog', { name: 'New session', exact: true }).waitFor({ state: 'hidden', timeout: 60000 });
     let latest = await page.evaluate(() => window.agentHQ.inventory());
+    await poll(async () => { latest = await page.evaluate(() => window.agentHQ.inventory()); return latest.sessions.some((s) => s.title === `${marker} failed preset` && s.hostId === mirror.id); }, 'Created session was not reconciled into inventory');
     const failed = latest.sessions.find((s) => s.title === `${marker} failed preset` && s.hostId === mirror.id);
     assert.ok(failed); created.push(failed.id);
     await poll(async () => { latest = await page.evaluate(() => window.agentHQ.inventory()); return latest.attention.some((a) => a.sessionKey === failed.key && a.kind === 'failed'); }, 'Confirmed failure missing from inbox');
@@ -179,7 +269,7 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
     assert.ok((await page.locator('.attention-inbox').innerText()).includes('Process completed'));
     await app.evaluate((_electron, title) => globalThis.qaNotifications.find((n) => n.body === title).emit('click'), `${marker} failed preset`);
     await page.locator('.attention-inbox').waitFor({ state: 'hidden' });
-    assert.equal(await page.locator('.session-pane:visible .detail-footer code').innerText(), failed.id);
+    assert.equal(await page.locator('.session-pane.is-focused .detail-footer code').innerText(), failed.id);
     await page.getByRole('button', { name: /Attention inbox/ }).click();
     await page.getByRole('button', { name: 'Acknowledge all', exact: true }).click();
     await poll(async () => (await state()).attention.every((a) => a.acknowledged), 'Acknowledgement not saved');
@@ -196,6 +286,8 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
     assert.equal(saved.workspace.metadata[`default/tmux:${names[0]}`].pinned, true);
     assert.ok(saved.workspace.metadata[`default/tmux:${names[0]}`].notes.includes('Next: inspect fixture output'));
     assert.equal(saved.settings.presets.find((p) => p.name === 'Claude OpenRouter QA').command, 'claude3');
+    assert.equal(saved.workspace.situation.shortcuts.cycleNext, 'Alt+U');
+    assert.equal(saved.workspace.situation.callsigns[`default/tmux:${names[1]}`], room.callsigns[`default/tmux:${names[1]}`]);
     assert.ok(saved.attention.every((a) => a.acknowledged));
     await refresh();
     assert.ok((await state()).attention.every((a) => a.acknowledged), 'Restart duplicated attention events');

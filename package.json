@@ -23,7 +23,7 @@
     "test:platform": "node tests/platform.cjs",
     "test:desktop": "node tests/desktop.e2e.cjs",
     "test:package": "node tests/desktop.e2e.cjs --packaged",
-    "test:ci": "npm run build && npm run test:productivity && node tests/cleanup.cjs && node tests/remote-control.cjs && npm run test:platform && node tests/packaging.cjs && node tests/native-pty.cjs"
+    "test:ci": "npm run build && npm run test:productivity && node tests/cleanup.cjs && node tests/situation.cjs && node tests/remote-control.cjs && npm run test:platform && node tests/packaging.cjs && node tests/native-pty.cjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",

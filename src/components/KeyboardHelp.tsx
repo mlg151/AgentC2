@@ -1,0 +1,11 @@
+import { useState } from 'react';
+import { Modal } from './Modal';
+import { commandBinding, commandDefinitions, validateShortcuts } from '../commands';
+import type { CommandActions } from '../commands';
+import { isMac } from '../platform';
+
+export function KeyboardHelp({ overrides, actions, onSave, onClose }: { overrides: Record<string, string>; actions: CommandActions; onSave: (value: Record<string, string>) => void; onClose: () => void }) {
+  const [draft, setDraft] = useState(overrides);
+  const [error, setError] = useState('');
+  return <Modal title="Situation Room commands" onClose={onClose} wide><div className="dialog-heading"><div><h2>Situation Room commands</h2><p>Command mode accepts a letter or two-digit callsign. Escape or 1.5 seconds cancels.</p></div><button className="icon-button" aria-label="Close keyboard help" onClick={onClose}>×</button></div><p className="field-note">Primary means {isMac ? 'Command' : 'Control'}. Shortcuts use physical letter keys, skip text fields and IME composition, and preserve unhandled terminal keys. Alt+Space is commonly reserved by the OS, so Next urgent defaults to Alt+Shift+Space. Remap it here if your platform allows Alt+Space.</p><div className="settings-body keyboard-settings"><table><thead><tr><th>Action</th><th>Shortcut</th><th>Command mode</th></tr></thead><tbody>{commandDefinitions.map((command) => <tr key={command.id}><td>{command.label}{actions[command.id]?.available === false ? <small>{actions[command.id]?.reason}</small> : null}</td><td><input aria-label={`Shortcut ${command.label}`} value={commandBinding(command.id, draft)} onChange={(event) => setDraft((current) => ({ ...current, [command.id]: event.target.value }))} /></td><td>{command.chord ? `→ ${command.chord.toUpperCase()}` : '—'}</td></tr>)}</tbody></table></div>{error ? <p className="form-error" role="alert">{error}</p> : null}<div className="dialog-actions"><button className="button-secondary" onClick={() => { setDraft({}); setError(''); }}>Restore defaults</button><button className="button-primary" onClick={() => { try { onSave(validateShortcuts(draft, isMac)); onClose(); } catch (cause) { setError(String(cause)); } }}>Save shortcuts</button></div></Modal>;
+}

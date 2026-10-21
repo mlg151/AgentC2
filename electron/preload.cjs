@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('agentHQ', {
   previewCleanup: (input) => ipcRenderer.invoke('cleanup:preview', input),
   executeCleanup: (token, keys) => ipcRenderer.invoke('cleanup:execute', token, keys),
   cleanupState: () => ipcRenderer.invoke('cleanup:state'),
+  terminalPreviews: (keys) => ipcRenderer.invoke('terminal:previews', keys),
+  searchHistory: (query, keys) => ipcRenderer.invoke('terminal:search', query, keys),
   onSessionsDeleted: (callback) => {
     const listener = (_event, keys) => callback(keys);
     ipcRenderer.on('sessions:deleted', listener);

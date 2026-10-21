@@ -102,55 +102,55 @@ async function waitForInput(pane) {
     await page.getByRole('textbox', { name: 'Search sessions' }).fill('AgentC2 terminal regression');
     async function select(label) {
       await page.locator('.session-row').filter({ hasText: `AgentC2 terminal regression ${label}` }).click();
-      await waitForInput(page.locator('.session-pane:visible'));
-      assert.equal(await page.locator('.session-pane:visible .detail-footer code').innerText(), names[labels.indexOf(label)]);
+      await waitForInput(page.locator('.session-pane.is-focused'));
+      assert.equal(await page.locator('.session-pane.is-focused .detail-footer code').innerText(), names[labels.indexOf(label)]);
     }
     await select('A');
     await select('B');
     await select('A');
     console.log('PASS managed selection auto-attaches and switches chats');
-    const screen = await page.locator('.session-pane:visible .xterm-screen').boundingBox();
+    const screen = await page.locator('.session-pane.is-focused .xterm-screen').boundingBox();
     assert.ok(screen);
-    const beforeHistory = await page.locator('.session-pane:visible .xterm-rows').innerText();
+    const beforeHistory = await page.locator('.session-pane.is-focused .xterm-rows').innerText();
     await page.mouse.move(screen.x + 120, screen.y + 100);
     await page.mouse.wheel(0, -700);
     await poll(async () => {
       const state = (await remote('state'))[0];
       return state.mode === '1' && Number(state.position) > 0;
     }, 'Wheel did not scroll tmux history');
-    await poll(async () => (await page.locator('.session-pane:visible .xterm-rows').innerText()) !== beforeHistory, 'Shell history did not move on screen');
+    await poll(async () => (await page.locator('.session-pane.is-focused .xterm-rows').innerText()) !== beforeHistory, 'Shell history did not move on screen');
     console.log('PASS mouse wheel scrolls history retained before attachment');
     await page.mouse.wheel(0, 700);
     await poll(async () => (await remote('state'))[0].mode === '0', 'Scrolling back to the bottom did not restore live input');
-    await page.getByRole('button', { name: 'Latest', exact: true }).click();
+    await page.locator('.session-pane.is-focused').getByRole('button', { name: 'Latest', exact: true }).click();
     await poll(async () => (await remote('state'))[0].mode === '0', 'Latest did not exit history');
     await page.mouse.move(screen.x + 120, screen.y + 100);
     await page.mouse.wheel(0, 400);
     await page.waitForTimeout(300);
     assert.equal((await remote('state'))[0].mode, '0', 'Scrolling down at latest trapped input in copy mode');
-    await page.locator('.session-pane:visible .xterm-helper-textarea').focus();
+    await page.locator('.session-pane.is-focused .xterm-helper-textarea').focus();
     await page.keyboard.press('Shift+PageUp');
     await poll(async () => (await remote('state'))[0].mode === '1', 'Shift+PageUp did not scroll');
-    await page.getByRole('button', { name: 'Latest', exact: true }).click();
+    await page.locator('.session-pane.is-focused').getByRole('button', { name: 'Latest', exact: true }).click();
     await poll(async () => (await remote('state'))[0].mode === '0', 'Latest did not exit history');
     // Select actual rendered output with an ordinary mouse drag.
     await page.mouse.move(screen.x + 1, screen.y + 8);
     await page.mouse.down();
     await page.mouse.move(screen.x + 210, screen.y + 8, { steps: 10 });
     await page.mouse.up();
-    await page.getByRole('button', { name: 'Copy', exact: true }).waitFor();
-    await poll(() => page.getByRole('button', { name: 'Copy', exact: true }).isEnabled(), 'Mouse drag did not select text');
+    await page.locator('.session-pane.is-focused').getByRole('button', { name: 'Copy', exact: true }).waitFor();
+    await poll(() => page.locator('.session-pane.is-focused').getByRole('button', { name: 'Copy', exact: true }).isEnabled(), 'Mouse drag did not select text');
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+c' : 'Control+Shift+C');
     await poll(async () => (await page.evaluate(() => window.agentHQ.readClipboard())).includes('HQ_HISTORY_A'), 'Copy shortcut did not copy rendered output');
     await page.evaluate(() => window.agentHQ.writeClipboard('clipboard reset'));
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+c' : 'Control+c');
     await poll(async () => (await page.evaluate(() => window.agentHQ.readClipboard())).includes('HQ_HISTORY_A'), 'Ctrl+C did not copy the selection');
     await page.evaluate(() => window.agentHQ.writeClipboard('clipboard reset'));
-    await page.getByRole('button', { name: 'Copy', exact: true }).click();
+    await page.locator('.session-pane.is-focused').getByRole('button', { name: 'Copy', exact: true }).click();
     await poll(async () => (await page.evaluate(() => window.agentHQ.readClipboard())).includes('HQ_HISTORY_A'), 'Copy button did not copy the selection');
     if (process.platform === 'darwin') {
       await page.evaluate(() => window.agentHQ.writeClipboard('interrupt must preserve clipboard'));
-      await page.locator('.session-pane:visible .xterm-helper-textarea').focus();
+      await page.locator('.session-pane.is-focused .xterm-helper-textarea').focus();
       await page.keyboard.press('Control+c');
       await poll(async () => (await remote('state'))[0].text.includes('^C'), 'macOS Ctrl+C did not reach the shell');
       assert.equal(await page.evaluate(() => window.agentHQ.readClipboard()), 'interrupt must preserve clipboard');
@@ -158,18 +158,18 @@ async function waitForInput(pane) {
     console.log(`PASS mouse selection, platform copy shortcuts, and Copy button${process.platform === 'darwin' ? '; Ctrl+C interrupts without changing the clipboard' : ''}`);
     for (const [shortcut, marker] of [[process.platform === 'darwin' ? 'Meta+v' : 'Control+v', 'HQ_PASTE_CTRL_V'], ['Control+Shift+v', 'HQ_PASTE_CTRL_SHIFT_V'], ['Shift+Insert', 'HQ_PASTE_SHIFT_INSERT']]) {
       await page.evaluate((text) => window.agentHQ.writeClipboard(text), marker);
-      await page.locator('.session-pane:visible .xterm-helper-textarea').focus();
+      await page.locator('.session-pane.is-focused .xterm-helper-textarea').focus();
       await page.keyboard.press('Control+u');
       await page.keyboard.press(shortcut);
       await poll(async () => (await remote('state'))[0].text.includes(marker), `${shortcut} did not paste`);
       assert.equal((await remote('state'))[0].text.split(marker).length - 1, 1, `${shortcut} pasted more than once`);
     }
-    await page.locator('.session-pane:visible .xterm-helper-textarea').focus();
+    await page.locator('.session-pane.is-focused .xterm-helper-textarea').focus();
     await page.keyboard.press('Control+u');
     await page.keyboard.press('Shift+PageUp');
     await poll(async () => (await remote('state'))[0].mode === '1', 'History setup failed before paste');
     await page.evaluate(() => window.agentHQ.writeClipboard('HQ_PASTE_BUTTON_λ'));
-    await page.getByRole('button', { name: 'Paste', exact: true }).click();
+    await page.locator('.session-pane.is-focused').getByRole('button', { name: 'Paste', exact: true }).click();
     await poll(async () => (await remote('state'))[0].text.includes('HQ_PASTE_BUTTON_λ'), 'Paste button did not paste Unicode');
     assert.equal((await remote('state'))[0].mode, '0', 'Paste must return to live input');
     console.log('PASS Ctrl+V, Ctrl+Shift+V, Shift+Insert, and Paste button');
@@ -192,22 +192,22 @@ async function waitForInput(pane) {
     // retain their transcript internally and have no tmux scrollback to browse.
     for (const label of ['KEYS', 'MOUSE']) {
       await select(label);
-      const output = page.locator('.session-pane:visible .xterm-rows');
+      const output = page.locator('.session-pane.is-focused .xterm-rows');
       const atLatest = `HQ_FULLSCREEN_${label}_POSITION_0`;
       await poll(async () => (await output.innerText()).includes(atLatest), 'Fullscreen fixture did not render');
-      const box = await page.locator('.session-pane:visible .xterm-screen').boundingBox();
+      const box = await page.locator('.session-pane.is-focused .xterm-screen').boundingBox();
       await page.mouse.move(box.x + 100, box.y + 60);
       await page.mouse.wheel(0, -400);
       await poll(async () => !(await output.innerText()).includes(atLatest), `${label} wheel did not move rendered transcript`);
       assert.ok((await output.innerText()).includes(label === 'MOUSE' ? 'wheel-up' : 'page-up'));
-      await page.locator('.session-pane:visible').screenshot({ path: path.join(os.tmpdir(), `agent-hq-scroll-${label.toLowerCase()}.png`) });
+      await page.locator('.session-pane.is-focused').screenshot({ path: path.join(os.tmpdir(), `agent-hq-scroll-${label.toLowerCase()}.png`) });
       assert.equal((await remote('state'))[labels.indexOf(label)].mode, '0', 'Fullscreen scrolling entered tmux copy mode');
       const scrolled = await output.innerText();
       await page.mouse.wheel(0, 120);
       await poll(async () => (await output.innerText()) !== scrolled, `${label} wheel down did not move transcript`);
-      await page.getByRole('button', { name: 'Latest', exact: true }).click();
+      await page.locator('.session-pane.is-focused').getByRole('button', { name: 'Latest', exact: true }).click();
       await poll(async () => (await output.innerText()).includes(atLatest), `${label} Latest did not restore transcript`);
-      await page.locator('.session-pane:visible .xterm-helper-textarea').focus();
+      await page.locator('.session-pane.is-focused .xterm-helper-textarea').focus();
       await page.keyboard.press('Shift+PageUp');
       await poll(async () => !(await output.innerText()).includes(atLatest), `${label} Shift+PageUp did not scroll`);
       await page.keyboard.press('Shift+PageDown');
@@ -217,7 +217,7 @@ async function waitForInput(pane) {
         await page.mouse.move(box.x + 100, box.y + 60);
         await page.mouse.wheel(0, -400);
         await poll(async () => !(await output.innerText()).includes(atLatest), 'Could not recover fullscreen session from legacy copy mode');
-        await page.getByRole('button', { name: 'Latest', exact: true }).click();
+        await page.locator('.session-pane.is-focused').getByRole('button', { name: 'Latest', exact: true }).click();
         await poll(async () => (await output.innerText()).includes(atLatest), 'Recovery did not return to latest');
         await remote('fallback-up');
         await poll(async () => !(await output.innerText()).includes(atLatest), 'SSH fallback did not scroll fullscreen transcript');
@@ -227,7 +227,7 @@ async function waitForInput(pane) {
     }
     console.log('PASS fullscreen keyboard/mouse scrolling, rendered up/down, Shift+PageUp/Down, Latest, legacy-mode recovery, and SSH fallback');
     await select('A');
-    await page.locator('.session-pane:visible .xterm-helper-textarea').focus();
+    await page.locator('.session-pane.is-focused .xterm-helper-textarea').focus();
     await page.keyboard.press('Control+u');
     await page.keyboard.press('Shift+PageUp');
     await poll(async () => (await remote('state'))[0].mode === '1', 'History setup failed before typing');
@@ -237,7 +237,7 @@ async function waitForInput(pane) {
     await page.keyboard.press('Control+u');
     console.log('PASS typing after shell history resumes live input');
     await page.getByRole('textbox', { name: 'Search sessions' }).fill('');
-    await page.locator('.sidebar').getByRole('button', { name: 'New session', exact: true }).click();
+    await page.getByRole('button', { name: 'New unit', exact: true }).click();
     await page.getByRole('combobox', { name: 'Session type', exact: true }).selectOption('terminal');
     assert.equal(await page.getByRole('combobox', { name: 'Launch preset', exact: true }).count(), 0);
     const shellTitle = `HQ_SHELL_${crypto.randomBytes(4).toString('hex')}`;
@@ -253,7 +253,7 @@ async function waitForInput(pane) {
     assert.ok(shell); names.push(shell.id);
     assert.equal(shell.provider, 'terminal'); assert.equal(shell.cwd, '/tmp');
     assert.ok(shell.canAttach && shell.canStop && shell.canInterrupt && shell.managed);
-    const pane = page.locator('.session-pane:visible');
+    const pane = page.locator('.session-pane.is-focused');
     await waitForInput(pane);
     // Keep the test shell isolated and print links at known terminal cells.
     await pane.locator('.xterm-helper-textarea').focus();

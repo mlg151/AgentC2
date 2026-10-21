@@ -7,7 +7,7 @@ import { HistorySearch } from './HistorySearch';
 import { enableTerminalLinks } from '../terminalLinks';
 import type { TerminalState } from '../types';
 
-export function TerminalView({ terminalId, visible }: { terminalId: string | null; visible: boolean }) {
+export function TerminalView({ terminalId, visible, focused = true }: { terminalId: string | null; visible: boolean; focused?: boolean }) {
   const elementRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -83,7 +83,7 @@ export function TerminalView({ terminalId, visible }: { terminalId: string | nul
       scrollOnUserInput: true,
       allowProposedApi: false,
       theme: {
-        background: '#0a1218', foreground: '#dbe6ec', cursor: '#35c9cc',
+        background: '#0a0e14', foreground: '#dbe6ec', cursor: '#00f0ff',
         selectionBackground: '#255b68', black: '#15222b', red: '#ec6c70',
         green: '#45d89b', yellow: '#e9bd76', blue: '#80b7ed',
         magenta: '#b7a4ec', cyan: '#50d4d8', white: '#dce7ea',
@@ -243,11 +243,18 @@ export function TerminalView({ terminalId, visible }: { terminalId: string | nul
       const terminal = terminalRef.current;
       if (terminal) {
         void window.agentHQ?.resizeTerminal(terminalId, terminal.cols, terminal.rows).catch(showError);
-        if (!document.querySelector('[role="dialog"]')) terminal.focus();
       }
     });
     return () => cancelAnimationFrame(frame);
   }, [visible, terminalId, showError]);
+
+  useEffect(() => {
+    if (!visible || !focused || !terminalId) return;
+    const frame = requestAnimationFrame(() => {
+      if (!document.querySelector('[role="dialog"]')) terminalRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [visible, focused, terminalId]);
 
   return <div className={`terminal-console${visible ? '' : ' terminal-hidden'}`}>
     <div className="terminal-utilities">

@@ -337,6 +337,16 @@ def inventory():
         + claude_sessions() + antigravity_sessions()
     )
     sessions.sort(key=lambda s: str(s.get("updatedAt") or ""), reverse=True)
+    repositories = {}
+    for session in sessions:
+        cwd = session.get("cwd")
+        if not cwd or session.get("kind") == "conversation":
+            continue
+        if cwd not in repositories and len(repositories) < 16:
+            info = run(["git", "-C", cwd, "rev-parse", "--show-toplevel", "--abbrev-ref", "HEAD"], timeout=0.5)
+            lines = info.stdout.strip().splitlines()
+            repositories[cwd] = {"repository": lines[0], "branch": lines[1]} if info.returncode == 0 and len(lines) == 2 else {"repository": None, "branch": None}
+        session.update(repositories.get(cwd, {}))
     return {"host": socket.gethostname(), "user": getpass.getuser(), "sessions": sessions}
 
 
@@ -533,6 +543,14 @@ def main():
         result = scroll_session(payload)
     elif action == "history":
         result = history(payload)
+    elif action == "preview":
+        name = payload.get("name", "")
+        if not SESSION_RE.fullmatch(name):
+            raise ValueError("Invalid session name")
+        captured = run(["tmux", "capture-pane", "-p", "-J", "-t", name], timeout=3)
+        if captured.returncode != 0:
+            raise ValueError("Terminal preview is unavailable")
+        result = {"text": "\n".join(captured.stdout.splitlines()[-30:])[:16000]}
     elif action in ("interrupt", "stop"):
         result = managed_action(payload, action)
     else:

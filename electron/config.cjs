@@ -55,7 +55,28 @@ function validateWorkspace(w) {
   const metadata = Object.fromEntries(Object.entries(w.metadata).slice(0, 10000).map(([k, m]) => [text(k, 300), {
     pinned: Boolean(m.pinned), project: text(m.project || '', 100), notes: text(m.notes || '', 20000),
   }]));
-  return { tabs, selectedKey: w.selectedKey ? text(w.selectedKey, 300) : null, splitKey: w.splitKey ? text(w.splitKey, 300) : null, metadata };
+  const source = w.situation || {};
+  if (typeof source !== 'object' || (source.version !== undefined && source.version !== 1)) throw new Error('Unsupported Situation Room workspace');
+  const slot = (key) => key && tabs.includes(text(key, 300)) ? key : null;
+  const anchorKey = slot(source.anchorKey === undefined ? w.selectedKey : source.anchorKey);
+  const target = slot(source.targetKey === undefined ? w.splitKey : source.targetKey);
+  const targetKey = target === anchorKey ? null : target;
+  const used = new Set();
+  const callsigns = Object.fromEntries(Object.entries(source.callsigns || {}).map(([key, value]) => {
+    validateSessionPin(key, false);
+    if (typeof value !== 'string' || !/^(0[1-9]|[1-9][0-9])$/.test(value) || used.has(value)) throw new Error('Callsigns must be unique from 01 to 99');
+    used.add(value);
+    return [text(key, 300), value];
+  }));
+  if (used.size > 99) throw new Error('At most 99 callsigns can be assigned');
+  const shortcuts = Object.fromEntries(Object.entries(source.shortcuts || {}).map(([key, value]) => [text(key, 60), text(value, 80)]));
+  if (Object.keys(shortcuts).length > 50) throw new Error('Too many keyboard overrides');
+  const focusedPane = source.focusedPane === 'target' && targetKey || !anchorKey && targetKey ? 'target' : 'anchor';
+  const selectedKey = focusedPane === 'anchor' ? anchorKey : targetKey;
+  const splitKey = focusedPane === 'anchor' ? targetKey : anchorKey;
+  const collapsedGroups = Array.isArray(source.collapsedGroups) ? [...new Set(source.collapsedGroups.slice(0, 300).map((value) => text(value, 4096)))] : [];
+  const situation = { version: 1, anchorKey, targetKey, focusedPane, callsigns, groupBy: source.groupBy === 'repository' ? 'repository' : 'host', collapsedGroups, urgentFirst: Boolean(source.urgentFirst), rosterCollapsed: Boolean(source.rosterCollapsed), zen: Boolean(source.zen), ligatures: Boolean(source.ligatures), shortcuts };
+  return { tabs, selectedKey, splitKey, metadata, situation };
 }
 function validateSessionPin(key, pinned) {
   if (typeof key !== 'string' || key.length > 300 || !/^[a-zA-Z0-9_-]{1,80}\/(?:tmux|process|codex|claude|antigravity):[a-zA-Z0-9_.:-]{1,200}$/.test(key) || typeof pinned !== 'boolean') throw new Error('Invalid session pin');
@@ -80,7 +101,7 @@ class Store {
   constructor(directory) {
     this.file = path.join(directory, 'workspace.json');
     fs.mkdirSync(directory, { recursive: true });
-    this.data = { settings: defaults(), workspace: { tabs: [], selectedKey: null, splitKey: null, metadata: {} }, attention: [], attentionCursors: {}, deletedSessions: [], cleanupState: { lastRuns: {}, results: [] } };
+    this.data = { settings: defaults(), workspace: validateWorkspace({ tabs: [], selectedKey: null, splitKey: null, metadata: {} }), attention: [], attentionCursors: {}, deletedSessions: [], cleanupState: { lastRuns: {}, results: [] } };
     if (fs.existsSync(this.file)) {
       // Do not silently overwrite an unreadable user's configuration.
       const saved = JSON.parse(fs.readFileSync(this.file, 'utf8'));
@@ -105,6 +126,11 @@ class Store {
     workspace.tabs = workspace.tabs.filter((key) => !deleted.has(key));
     if (deleted.has(workspace.selectedKey)) workspace.selectedKey = workspace.tabs.at(-1) || null;
     if (deleted.has(workspace.splitKey)) workspace.splitKey = null;
+    if (workspace.situation) {
+      if (deleted.has(workspace.situation.anchorKey)) workspace.situation.anchorKey = null;
+      if (deleted.has(workspace.situation.targetKey)) workspace.situation.targetKey = null;
+      for (const key of deleted) delete workspace.situation.callsigns[key];
+    }
     // Pin mutations have their own API. An older desktop snapshot must not undo
     // a companion change, even when that snapshot predates the metadata entry.
     for (const [key, metadata] of Object.entries(workspace.metadata)) {
@@ -114,7 +140,7 @@ class Store {
       if (!Object.hasOwn(workspace.metadata, key)) workspace.metadata[key] = metadata;
     }
     if (Object.keys(workspace.metadata).length > 10000) throw new Error('Session metadata limit reached');
-    return this.save('workspace', workspace);
+    return this.save('workspace', validateWorkspace(workspace));
   }
   setSessionPinned(key, pinned) {
     validateSessionPin(key, pinned);
@@ -131,10 +157,15 @@ class Store {
     workspace.tabs = workspace.tabs.filter((key) => !deleted.has(key));
     if (deleted.has(workspace.selectedKey)) workspace.selectedKey = workspace.tabs.at(-1) || null;
     if (deleted.has(workspace.splitKey)) workspace.splitKey = null;
+    if (workspace.situation) {
+      if (deleted.has(workspace.situation.anchorKey)) workspace.situation.anchorKey = null;
+      if (deleted.has(workspace.situation.targetKey)) workspace.situation.targetKey = null;
+      for (const key of deleted) delete workspace.situation.callsigns[key];
+    }
     const attentionCursors = { ...this.data.attentionCursors };
     for (const key of keys) delete attentionCursors[key];
     // One atomic store replacement prevents stale renderer saves resurrecting history.
-    this.update({ deletedSessions: [...deleted].slice(-10000), workspace, attention: this.data.attention.filter((item) => !deleted.has(item.sessionKey)), attentionCursors });
+    this.update({ deletedSessions: [...deleted].slice(-10000), workspace: validateWorkspace(workspace), attention: this.data.attention.filter((item) => !deleted.has(item.sessionKey)), attentionCursors });
   }
 }
 module.exports = { Store, defaults, validateSettings, validateWorkspace, validateSessionPin };

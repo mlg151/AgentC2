@@ -45,9 +45,12 @@ class Terminals {
     const mirror = new Terminal({ ...size, scrollback: 5000, allowProposedApi: true });
     const serializer = new SerializeAddon();
     mirror.loadAddon(serializer);
-    const record = { key, name, hostId, terminal, mirror, serializer, ...size, handles: new Set(), owner: null, queue: Promise.resolve(), sequence: 0, exitCode: null, scrollQueue: Promise.resolve(), disposed: false };
+    const record = { key, name, hostId, terminal, mirror, serializer, ...size, handles: new Set(), owner: null, queue: Promise.resolve(), sequence: 0, exitCode: null, scrollQueue: Promise.resolve(), disposed: false, activityBuckets: new Map() };
     this.sessions.set(key, record);
     terminal.onData((data) => {
+      const bucket = Math.floor(Date.now() / 10000);
+      record.activityBuckets.set(bucket, (record.activityBuckets.get(bucket) || 0) + Buffer.byteLength(data));
+      for (const key of record.activityBuckets.keys()) if (key < bucket - 4) record.activityBuckets.delete(key);
       record.queue = record.queue.then(() => new Promise((resolve) => {
         if (record.disposed) return resolve();
         mirror.write(data, () => {
@@ -82,6 +85,20 @@ class Terminals {
   state(client, id) {
     const { record } = this.get(client, id);
     return { id, cols: record.cols, rows: record.rows, controller: record.owner ? { id: record.owner.id, name: record.owner.name } : null, canControl: record.owner?.id === client.id, exitCode: record.exitCode };
+  }
+  activity(name, hostId) {
+    const record = this.sessions.get(`${hostId}/${name}`);
+    if (!record) return undefined;
+    const bucket = Math.floor(Date.now() / 10000);
+    return Array.from({ length: 5 }, (_, index) => record.activityBuckets.get(bucket - 4 + index) || 0);
+  }
+  async preview(name, hostId) {
+    const record = this.sessions.get(`${hostId}/${name}`);
+    if (!record) return null;
+    await record.queue;
+    if (record.disposed) return null;
+    const buffer = record.mirror.buffer.active;
+    return Array.from({ length: Math.min(record.rows, 30) }, (_, index) => buffer.getLine(buffer.baseY + index)?.translateToString(true) || '').join('\n').slice(0, 16000);
   }
 
   publish(record) {

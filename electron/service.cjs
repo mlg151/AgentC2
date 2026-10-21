@@ -75,7 +75,8 @@ function createService({ directory, home }) {
         return { id: h.id, name: h.name, target: h.target, connected: false, error: result.reason.message };
       });
       const sessions = hosts.flatMap((h) => (hostCache.get(h.id) || []).map((s) => ({ ...s, stale: !statuses.find((status) => status.id === h.id).connected }))).filter((session) => !store.data.deletedSessions.includes(session.key));
-    attention.update(sessions.filter((s) => !s.stale));
+      for (const session of sessions) if (session.key.startsWith(`${session.hostId}/tmux:`)) session.outputActivity = terminals.activity(session.id, session.hostId);
+      attention.update(sessions.filter((s) => !s.stale));
       const snapshot = { hosts: statuses, sessions, attention: store.data.attention };
       events.emit('inventory:updated', snapshot);
       return snapshot;
@@ -221,6 +222,51 @@ function createService({ directory, home }) {
     events.emit('state:updated');
     return result;
   }
-  return { store, events, terminals, cleanup, inventory, health, create, action, saveSettings, saveWorkspace, setSessionPinned, acknowledge, hostId: (id) => getHost(id).id };
+  function cachedSession(key) {
+    if (typeof key !== 'string' || key.length > 300) throw new Error('Invalid session key');
+    const session = [...hostCache.values()].flat().find((item) => item.key === key);
+    if (!session || store.data.deletedSessions.includes(key)) throw new Error('Session unavailable; refresh inventory');
+    getHost(session.hostId);
+    return session;
+  }
+  async function terminalPreviews(keys) {
+    if (!Array.isArray(keys) || keys.length > 16 || new Set(keys).size !== keys.length) throw new Error('Choose up to 16 unique units');
+    const sessions = keys.map(cachedSession);
+    const results = [];
+    for (let index = 0; index < sessions.length; index += 4) {
+      results.push(...await Promise.all(sessions.slice(index, index + 4).map(async (session) => {
+        if (!session.canAttach) return { key: session.key, text: 'This process has no attachable terminal.', sampledAt: null, error: true };
+        try {
+          const mirror = await terminals.preview(session.id, session.hostId);
+          const text = mirror === null ? (await runRemote({ action: 'preview', name: session.id }, session.hostId)).text : mirror;
+          return { key: session.key, text, sampledAt: Date.now(), error: false };
+        } catch { return { key: session.key, text: 'Snapshot unavailable. Check this theater or refresh inventory.', sampledAt: null, error: true }; }
+      })));
+    }
+    return results;
+  }
+  async function searchHistory(query, keys) {
+    if (typeof query !== 'string' || query.length < 3 || query.length > 200 || query.includes('\0') || !Array.isArray(keys) || keys.length > 200) throw new Error('History search needs 3–200 characters and up to 200 unit keys');
+    const sessions = [...new Set(keys)].map(cachedSession).filter((session) => session.canAttach);
+    const selected = sessions.slice(0, 8), matches = [], errors = [];
+    let truncated = sessions.length > selected.length;
+    for (let index = 0; index < selected.length; index += 2) {
+      const results = await Promise.allSettled(selected.slice(index, index + 2).map((session) => runRemote({ action: 'history', name: session.id }, session.hostId)));
+      results.forEach((result, offset) => {
+        const session = selected[index + offset];
+        if (result.status === 'rejected') { errors.push(session.key); return; }
+        truncated ||= result.value.truncated;
+        const lines = result.value.text.split('\n');
+        let count = 0;
+        for (let line = 0; line < lines.length; line++) if (lines[line].toLowerCase().includes(query.toLowerCase())) {
+          if (++count > 5) { truncated = true; break; }
+          const position = lines[line].toLowerCase().indexOf(query.toLowerCase());
+          matches.push({ key: session.key, line: line + 1, excerpt: lines[line].slice(Math.max(0, position - 70), position + query.length + 100) });
+        }
+      });
+    }
+    return { matches, searched: selected.length, total: sessions.length, truncated, errors };
+  }
+  return { store, events, terminals, cleanup, inventory, health, create, action, saveSettings, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
 }
 module.exports = { createService };

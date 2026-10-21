@@ -24,6 +24,11 @@ export interface Session {
   exitCode?: number | null;
   outputTail?: string;
   presetName?: string;
+  branch?: string | null;
+  repository?: string | null;
+  outputActivity?: number[];
+  activity?: 'engaged' | 'idle' | 'halted' | 'fault';
+  contextPercent?: number | null;
 }
 
 export interface Inventory {
@@ -43,11 +48,14 @@ export interface CleanupPreview { token: string; hostId: string; provider: Provi
 export interface CleanupResult { key?: string; hostId: string; provider: Provider; at: string; automatic: boolean; status: string; detail: string; bytes?: number; estimated?: boolean }
 export interface CleanupState { lastRuns: Record<string, string>; results: CleanupResult[] }
 export interface SessionMetadata { pinned: boolean; project: string; notes: string }
-export interface Workspace { tabs: string[]; selectedKey: string | null; splitKey: string | null; metadata: Record<string, SessionMetadata> }
+export interface SituationWorkspace { version: 1; anchorKey: string | null; targetKey: string | null; focusedPane: 'anchor' | 'target'; callsigns: Record<string, string>; groupBy: 'host' | 'repository'; collapsedGroups: string[]; urgentFirst: boolean; rosterCollapsed: boolean; zen: boolean; ligatures: boolean; shortcuts: Record<string, string> }
+export interface Workspace { tabs: string[]; selectedKey: string | null; splitKey: string | null; metadata: Record<string, SessionMetadata>; situation?: SituationWorkspace }
 export interface AttentionItem { id: string; sessionKey: string; hostId: string; title: string; provider: Provider; createdAt: string; acknowledged: boolean; kind: 'completed' | 'failed' | 'input'; confidence: 'confirmed' | 'inferred'; detail: string; signature: string }
 
 export interface TerminalState { id: string; cols: number; rows: number; controller: { id: string; name: string } | null; canControl: boolean; exitCode: number | null }
 export interface TerminalSnapshot { text: string; sequence: number; state: TerminalState }
+export interface UnitPreview { key: string; text: string; sampledAt: number | null; error: boolean }
+export interface HistoryMatches { matches: { key: string; line: number; excerpt: string }[]; searched: number; total: number; truncated: boolean; errors: string[] }
 export interface PairedDevice { id: string; name: string; createdAt: string; expiresAt: number }
 export interface RemoteConfig { enabled: boolean; port: number; url: string; transport?: 'https' | 'tailnet-http' }
 export interface RemoteStatus extends RemoteConfig { running: boolean; error: string; devices: PairedDevice[] }
@@ -75,6 +83,8 @@ export interface AgentHQApi {
   previewCleanup(input: CleanupInput): Promise<CleanupPreview>;
   executeCleanup(token: string, keys: string[]): Promise<CleanupResult[]>;
   cleanupState(): Promise<CleanupState>;
+  terminalPreviews(keys: string[]): Promise<UnitPreview[]>;
+  searchHistory(query: string, keys: string[]): Promise<HistoryMatches>;
   acknowledge(id: string): Promise<AttentionItem[]>;
   onInventory(callback: (inventory: Inventory) => void): () => void;
   onAttentionOpen(callback: (key: string) => void): () => void;
