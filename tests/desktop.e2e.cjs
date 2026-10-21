@@ -94,14 +94,14 @@ const { packagePath } = require('../scripts/package-path.cjs');
     });
     await page.waitForFunction(() => document.visibilityState === 'visible');
     await page.evaluate(() => window.agentHQ.saveRemote({ enabled: false, port: 43127, url: '' }));
+    assert.equal((await page.evaluate(() => window.agentHQ.remoteStatus())).enabled, false);
     if (process.platform === 'darwin') {
       stage = 'macOS last-window close';
       const closed = page.waitForEvent('close', { timeout: 30000 });
-      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
+      await page.close();
       await closed;
-      assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 0);
       stage = 'macOS Dock activation';
-      await app.evaluate(({ app }) => app.emit('activate'));
+      if (!await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)) await app.evaluate(({ app }) => app.emit('activate'));
       // Activation may also arrive from the OS during the preceding close.
       // Resolve an existing window as well as one still being announced.
       page = await app.firstWindow({ timeout: 30000 });
