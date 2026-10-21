@@ -25,6 +25,7 @@ export interface Session {
   exitCode?: number | null;
   outputTail?: string;
   presetName?: string;
+  presetId?: string;
   branch?: string | null;
   repository?: string | null;
   worktreeOperation?: string;
@@ -39,13 +40,15 @@ export interface Inventory {
   hosts: { id: string; name: string; target: string; user?: string; connected: boolean; error?: string }[];
   sessions: Session[];
   attention: AttentionItem[];
+  faults: FaultRecord[];
 }
+export interface FaultRecord { sessionKey: string; id: string; at: string; label: string; count: number; status: 'pending' | 'review' | 'attempted' | 'interrupted' | 'failed' | 'unknown'; detail: string; autoInterrupt: boolean; result?: string }
 
 export interface HostConfig { id: string; name: string; target: string; port: number; enabled: boolean; autoForward?: boolean }
 export type RoeProfile = 'full' | 'gated' | 'provider-default';
 export interface DevUrl { url: string; hostId: string; port: number; status: 'available' | 'opening' | 'ready' | 'failed'; localUrl: string | null; error: string | null }
 export interface HostHealth { hostId: string; name: string; connected: boolean; cpuPercent?: number | null; memoryTotal?: number; memoryUsed?: number; disks?: { path: string; total: number; used: number; free: number }[]; sampledAt?: number; error?: string }
-export interface LaunchPreset { id: string; name: string; provider: Provider; command: string; args: string; cwd: string; instructions: string; fullPermissions: boolean; roeProfile?: RoeProfile | ''; attentionHooks: boolean; hostId: string }
+export interface LaunchPreset { id: string; name: string; provider: Provider; command: string; args: string; cwd: string; instructions: string; fullPermissions: boolean; roeProfile?: RoeProfile | ''; attentionHooks: boolean; hostId: string; loopBreaker?: { enabled: boolean; autoInterrupt: boolean; threshold: number; windowMinutes: number; cooldownMinutes: number } }
 export interface OpOrderMcp { name: string; transport: 'stdio' | 'http'; providers: Exclude<Provider, 'terminal'>[]; command: string; args: string[]; url: string; env: string[]; headers: Record<string, string> }
 export interface OpOrder { version: 1; id: string; hostId: string; repository: string; enabled: boolean; instructions: string; overrides: { codex: string; claude: string; antigravity: string }; mcp: OpOrderMcp[] }
 export interface OpOrderPreview { revision: string; repository: string; changes: { path: string; status: 'create' | 'update' | 'remove' | 'unchanged' | 'conflict'; diff: string; reason?: string }[]; unsupported: string[]; ready: boolean }
@@ -142,6 +145,8 @@ export interface AgentHQApi {
   diffDetail(input: DiffScope & { fileId: string }): Promise<DiffDetail>;
   diffHunk(input: DiffScope & { fileId: string; revision: string; hunkId: string; operation: 'stage' | 'revert' }): Promise<{ changed: true }>;
   interrupt(name: string, hostId?: string): Promise<void>;
+  interruptFaults(): Promise<{ sessionKey: string; status: string; result?: string }[]>;
+  resetFault(key: string): Promise<boolean>;
   stop(name: string, hostId?: string): Promise<void>;
   openTerminal(name: string, cols: number, rows: number, hostId?: string): Promise<string>;
   terminalHistory(id: string): Promise<{ text: string; truncated: boolean }>;

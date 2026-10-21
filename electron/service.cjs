@@ -14,6 +14,7 @@ const { createCleanup } = require('./cleanup.cjs');
 const { uploadPng } = require('./image-upload.cjs');
 const { Tunnels } = require('./tunnels.cjs');
 const { createExercises } = require('./exercises.cjs');
+const { LoopBreaker } = require('./loop-breaker.cjs');
 
 function createService({ directory, home }) {
   const events = new EventEmitter();
@@ -27,6 +28,8 @@ function createService({ directory, home }) {
 
   const store = new Store(directory);
   const attention = new Attention(store);
+  const loopBreaker = new LoopBreaker(store);
+  for (const fault of loopBreaker.faults()) if (['pending', 'attempted'].includes(fault.status)) loopBreaker.record(fault.sessionKey, 'unknown', 'Application restarted before the interrupt result was recorded');
   const cleanup = createCleanup({ store, events, inventory, runRemote, hostId: (id) => getHost(id).id });
   const exercises = createExercises({ store, getHost, runRemote, createSession, beginLaunch: (hostId) => cleanup.beginLaunch(hostId), emit: (...args) => events.emit(...args) });
   let inventoryFlight, healthFlight;
@@ -35,6 +38,7 @@ function createService({ directory, home }) {
   const sitrepPreviews = new Map();
   const flashCache = new Map();
   let flashFlight;
+  const faultFlights = new Set();
 
   const hostCache = new Map(Object.entries(store.data.cachedUnits).map(([hostId, units]) => [hostId, units.map((unit) => ({ ...unit, hostId, hostName: store.data.settings.hosts.find((host) => host.id === hostId)?.name || hostId }))]));
   const healthCache = new Map();
@@ -92,7 +96,13 @@ function createService({ directory, home }) {
       const sessions = hosts.flatMap((h) => (hostCache.get(h.id) || []).map((s) => ({ ...s, stale: !statuses.find((status) => status.id === h.id).connected }))).filter((session) => !store.data.deletedSessions.includes(session.key));
       for (const session of sessions) if (session.key.startsWith(`${session.hostId}/tmux:`)) session.outputActivity = terminals.activity(session.id, session.hostId);
       attention.update(sessions.filter((s) => !s.stale));
-      const snapshot = { hosts: statuses, sessions, attention: store.data.attention };
+      const raised = loopBreaker.observe(sessions.filter((s) => !s.stale));
+      for (const fault of raised) {
+        const item = { id: crypto.randomUUID(), sessionKey: fault.sessionKey, hostId: fault.sessionKey.split('/')[0], title: sessions.find((s) => s.key === fault.sessionKey)?.title || fault.sessionKey, provider: 'claude', createdAt: fault.at, acknowledged: false, signature: `loop:${fault.id}`, kind: 'failed', confidence: 'confirmed', detail: `${fault.detail}. ${fault.label}. Review the fault before resuming.` };
+        store.save('attention', [...store.data.attention, item].slice(-500));
+        if (fault.autoInterrupt) void interruptFault({ id: 'desktop' }, fault.sessionKey).catch((error) => console.warn(`Automatic interrupt failed: ${error.message}`));
+      }
+      const snapshot = { hosts: statuses, sessions, attention: store.data.attention, faults: loopBreaker.faults() };
       events.emit('inventory:updated', snapshot);
       return snapshot;
     })().finally(() => { inventoryFlight = null; });
@@ -383,6 +393,44 @@ function createService({ directory, home }) {
     if (action === 'stop') attention.resolveRequests(pending.filter((item) => item.name === name).map((item) => item.id));
     return result;
   }
+  async function interruptFault(client, sessionKey) {
+    const fault = loopBreaker.faults().find((item) => item.sessionKey === sessionKey);
+    if (!fault || !['pending', 'review', 'failed', 'unknown'].includes(fault.status)) throw new Error('No eligible confirmed fault');
+    const match = /^([A-Za-z0-9_-]{1,80})\/tmux:(hq-[a-f0-9]{12})$/.exec(sessionKey);
+    if (!match) throw new Error('Invalid fault target');
+    if (faultFlights.has(sessionKey)) throw new Error('Fault interrupt is already in progress');
+    faultFlights.add(sessionKey);
+    const [, hostId, name] = match;
+    try {
+      terminals.assertSessionOwner(client, name, hostId);
+      const host = getHost(hostId);
+      const fresh = await runRemote({ action: 'inventory' }, host.id);
+      const unit = fresh.sessions.find((item) => item.key === `tmux:${name}`);
+      if (!unit || unit.kind !== 'managed' || unit.provider !== 'claude' || unit.state !== 'live' || !unit.canInterrupt || !unit.presetId || unit.presetId !== (hostCache.get(hostId) || []).find((item) => item.key === sessionKey)?.presetId) throw new Error('Faulted managed unit changed or exited; refresh and review');
+      terminals.assertSessionOwner(client, name, hostId);
+      loopBreaker.record(sessionKey, 'attempted', 'A scoped Ctrl+C was sent; awaiting remote acceptance');
+      await runRemote({ action: 'interrupt', name }, hostId);
+      return loopBreaker.record(sessionKey, 'interrupted', 'Remote tmux accepted one scoped Ctrl+C');
+    } catch (error) {
+      if (loopBreaker.faults().some((item) => item.sessionKey === sessionKey && item.status !== 'interrupted')) loopBreaker.record(sessionKey, 'failed', error.message);
+      throw error;
+    } finally { faultFlights.delete(sessionKey); events.emit('state:updated'); void inventory().catch(() => {}); }
+  }
+  async function interruptFaults(client) {
+    const targets = loopBreaker.faults().filter((item) => ['review', 'failed', 'unknown'].includes(item.status));
+    const results = [];
+    for (const target of targets) {
+      try { results.push(await interruptFault(client, target.sessionKey)); }
+      catch (error) { results.push({ sessionKey: target.sessionKey, status: 'failed', result: error.message }); }
+    }
+    return results;
+  }
+  function resetFault(sessionKey) {
+    if (typeof sessionKey !== 'string' || !/^[A-Za-z0-9_-]{1,80}\/tmux:hq-[a-f0-9]{12}$/.test(sessionKey)) throw new Error('Invalid fault target');
+    const result = loopBreaker.reset(sessionKey);
+    events.emit('state:updated');
+    return result;
+  }
   async function uploadClipboardImage(client, id, png) {
     const { record } = terminals.get(client, id);
     terminals.assertOwner(client, record);
@@ -466,6 +514,6 @@ function createService({ directory, home }) {
     }
     return { matches, searched: selected.length, total: sessions.length, truncated, errors };
   }
-  return { store, events, terminals, tunnels, cleanup, exercises, inventory, health, create, worktrees, flashQueue, flashDecide, archiveWorktree, diffRequest, previewSitrep, launchSitrep, action, uploadClipboardImage, devUrls, openDevUrl, saveSettings, previewOpOrder, enrollOpOrder, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
+  return { store, events, terminals, tunnels, cleanup, exercises, inventory, health, create, worktrees, flashQueue, flashDecide, archiveWorktree, diffRequest, previewSitrep, launchSitrep, action, interruptFaults, resetFault, loopBreaker, uploadClipboardImage, devUrls, openDevUrl, saveSettings, previewOpOrder, enrollOpOrder, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
 }
 module.exports = { createService };

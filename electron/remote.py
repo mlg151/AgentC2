@@ -80,7 +80,7 @@ def hook_arguments(provider, name, payload):
         profile = next((args[index + 1] for index, arg in enumerate(args[:-1]) if arg in ("-p", "--profile")), "")
         return ["-c", "notify=" + json.dumps(["python3", str(script), provider, "notify", "PROFILE=" + profile])]
     command = shlex.join(["python3", str(script), provider, "hook"])
-    hooks = {event: [{"hooks": [{"type": "command", "command": command, "timeout": 310 if event == "PermissionRequest" else 5}]}] for event in ("Stop", "StopFailure", "PermissionRequest", "UserPromptSubmit")}
+    hooks = {event: [{"hooks": [{"type": "command", "command": command, "timeout": 310 if event == "PermissionRequest" else 5}]}] for event in ("Stop", "StopFailure", "PermissionRequest", "UserPromptSubmit", "PostToolUse", "PostToolUseFailure")}
     hooks["Notification"] = [{"matcher": "permission_prompt|elicitation_dialog", "hooks": [{"type": "command", "command": command, "timeout": 5}]}]
     hooks["PreToolUse"] = [{"matcher": "AskUserQuestion", "hooks": [{"type": "command", "command": command, "timeout": 5}]}]
     settings = {"hooks": hooks}
@@ -295,6 +295,7 @@ def tmux_sessions():
             "canInterrupt": managed and not dead, "canStop": managed,
             "exitCode": exit_code, "outputTail": output.stdout[-12000:],
             "presetName": tmux_option(name, "@hq_preset") if managed else "",
+            "presetId": tmux_option(name, "@hq_preset_id") if managed else "",
             "roeProfile": (tmux_option(name, "@hq_roe") or "unknown") if managed else "unknown",
             "worktreeOperation": tmux_option(name, "@hq_worktree") if managed else "",
             "events": events,
@@ -357,9 +358,9 @@ def inventory():
         if not cwd or session.get("kind") == "conversation":
             continue
         if cwd not in repositories and len(repositories) < 16:
-            info = run(["git", "-C", cwd, "rev-parse", "--show-toplevel", "--abbrev-ref", "HEAD"], timeout=0.5)
+            info = run(["git", "-C", cwd, "rev-parse", "--show-toplevel", "--abbrev-ref", "HEAD", "HEAD"], timeout=0.5)
             lines = info.stdout.strip().splitlines()
-            repositories[cwd] = {"repository": lines[0], "branch": lines[1]} if info.returncode == 0 and len(lines) == 2 else {"repository": None, "branch": None}
+            repositories[cwd] = {"repository": lines[0], "branch": lines[1], "headCommit": lines[2]} if info.returncode == 0 and len(lines) == 3 else {"repository": None, "branch": None, "headCommit": None}
         session.update(repositories.get(cwd, {}))
     return {"host": socket.gethostname(), "user": getpass.getuser(), "sessions": sessions}
 
@@ -468,7 +469,7 @@ def create(payload):
             shutil.rmtree(HOOK_ROOT / name)
         raise RuntimeError(launched.stderr.strip() or "Could not start tmux session")
     try:
-        for key, value in (("provider", provider), ("title", title), ("cwd", str(cwd)), ("preset", preset.get("name", "") if preset else ""), ("worktree", payload.get("worktreeOperation") or ""), ("roe", "unknown" if agent_id else roe_profile or ("provider-default" if preset and preset.get("fullPermissions") is False else "full"))):
+        for key, value in (("provider", provider), ("title", title), ("cwd", str(cwd)), ("preset", preset.get("name", "") if preset else ""), ("preset_id", preset.get("id", "") if preset else ""), ("worktree", payload.get("worktreeOperation") or ""), ("roe", "unknown" if agent_id else roe_profile or ("provider-default" if preset and preset.get("fullPermissions") is False else "full"))):
             checked(["tmux", "set-option", "-t", name, f"@hq_{key}", value])
         configure_session({"name": name})
         checked(["tmux", "set-window-option", "-t", name, "remain-on-exit", "on"])

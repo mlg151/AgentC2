@@ -45,7 +45,11 @@ function validateSettings(input) {
     const roeProfile = p.roeProfile === undefined ? '' : p.roeProfile;
     if (!ROE_PROFILES.includes(roeProfile)) throw new Error('Invalid preset Rules of Engagement profile');
     if (roeProfile === 'gated' && p.provider === 'antigravity') throw new Error('Antigravity has no verified session-scoped gated mode');
-    return { id: p.id, name: text(p.name, 100).trim() || command, provider: p.provider, command, args: text(p.args), cwd: text(p.cwd), instructions: text(p.instructions, 20000), fullPermissions: Boolean(p.fullPermissions), roeProfile, attentionHooks: Boolean(p.attentionHooks), hostId: p.hostId || '' };
+    const loop = p.loopBreaker || {};
+    if (loop.enabled !== undefined && typeof loop.enabled !== 'boolean' || loop.autoInterrupt !== undefined && typeof loop.autoInterrupt !== 'boolean' || loop.threshold !== undefined && (!Number.isInteger(loop.threshold) || loop.threshold < 2 || loop.threshold > 20) || loop.windowMinutes !== undefined && (!Number.isInteger(loop.windowMinutes) || loop.windowMinutes < 1 || loop.windowMinutes > 120) || loop.cooldownMinutes !== undefined && (!Number.isInteger(loop.cooldownMinutes) || loop.cooldownMinutes < 1 || loop.cooldownMinutes > 1440)) throw new Error('Invalid repeated-failure policy');
+    if (loop.enabled && (p.provider !== 'claude' || !p.attentionHooks)) throw new Error('Repeated-failure detection requires Claude provider hooks');
+    if (loop.autoInterrupt && !loop.enabled) throw new Error('Automatic failure interrupt requires an enabled detector');
+    return { id: p.id, name: text(p.name, 100).trim() || command, provider: p.provider, command, args: text(p.args), cwd: text(p.cwd), instructions: text(p.instructions, 20000), fullPermissions: Boolean(p.fullPermissions), roeProfile, attentionHooks: Boolean(p.attentionHooks), hostId: p.hostId || '', loopBreaker: { enabled: Boolean(loop.enabled), autoInterrupt: Boolean(loop.autoInterrupt), threshold: loop.threshold || 4, windowMinutes: loop.windowMinutes || 10, cooldownMinutes: loop.cooldownMinutes || 15 } };
   });
   const cleanup = input.cleanup || [];
   if (!Array.isArray(cleanup) || cleanup.length > 90) throw new Error('Invalid cleanup policies');
@@ -174,7 +178,7 @@ function validateCachedUnits(value) {
       const id = text(unit.id, 200);
       if (!unit.key.endsWith(`:${id}`)) throw new Error('Cached unit identity changed');
       const updatedAt = unit.updatedAt && Number.isFinite(Date.parse(unit.updatedAt)) ? text(unit.updatedAt, 80) : null;
-      return { key: unit.key, id, provider: unit.provider, kind: unit.kind, title: text(unit.title || '', 150), cwd: text(unit.cwd || '', 500), updatedAt, state: text(unit.state || '', 40), managed: Boolean(unit.managed), canAttach: Boolean(unit.canAttach), canResume: Boolean(unit.canResume), canInterrupt: Boolean(unit.canInterrupt), canStop: Boolean(unit.canStop), exitCode: Number.isInteger(unit.exitCode) ? unit.exitCode : null, presetName: text(unit.presetName || '', 100), roeProfile: ['full', 'gated', 'provider-default'].includes(unit.roeProfile) ? unit.roeProfile : 'unknown', branch: text(unit.branch || '', 200), repository: text(unit.repository || '', 500), worktreeOperation: text(unit.worktreeOperation || '', 32) };
+      return { key: unit.key, id, provider: unit.provider, kind: unit.kind, title: text(unit.title || '', 150), cwd: text(unit.cwd || '', 500), updatedAt, state: text(unit.state || '', 40), managed: Boolean(unit.managed), canAttach: Boolean(unit.canAttach), canResume: Boolean(unit.canResume), canInterrupt: Boolean(unit.canInterrupt), canStop: Boolean(unit.canStop), exitCode: Number.isInteger(unit.exitCode) ? unit.exitCode : null, presetName: text(unit.presetName || '', 100), presetId: text(unit.presetId || '', 80), roeProfile: ['full', 'gated', 'provider-default'].includes(unit.roeProfile) ? unit.roeProfile : 'unknown', branch: text(unit.branch || '', 200), repository: text(unit.repository || '', 500), worktreeOperation: text(unit.worktreeOperation || '', 32) };
     });
   }
   return cached;
@@ -183,11 +187,11 @@ class Store {
   constructor(directory) {
     this.file = path.join(directory, 'workspace.json');
     fs.mkdirSync(directory, { recursive: true });
-    this.data = { settings: defaults(), workspace: validateWorkspace({ tabs: [], selectedKey: null, splitKey: null, metadata: {} }), attention: [], attentionCursors: {}, deletedSessions: [], cleanupState: { lastRuns: {}, results: [] }, cachedUnits: {}, exercises: [], flashResolved: [] };
+    this.data = { settings: defaults(), workspace: validateWorkspace({ tabs: [], selectedKey: null, splitKey: null, metadata: {} }), attention: [], attentionCursors: {}, deletedSessions: [], cleanupState: { lastRuns: {}, results: [] }, cachedUnits: {}, exercises: [], flashResolved: [], loopState: {} };
     if (fs.existsSync(this.file)) {
       // Do not silently overwrite an unreadable user's configuration.
       const saved = JSON.parse(fs.readFileSync(this.file, 'utf8'));
-      this.data = { ...this.data, settings: validateSettings(saved.settings), workspace: validateWorkspace(saved.workspace), attention: Array.isArray(saved.attention) ? saved.attention.slice(-500) : [], attentionCursors: saved.attentionCursors || {}, deletedSessions: Array.isArray(saved.deletedSessions) ? saved.deletedSessions.slice(-10000).map((key) => text(key, 300)) : [], cleanupState: validateCleanupState(saved.cleanupState || this.data.cleanupState), cachedUnits: validateCachedUnits(saved.cachedUnits || {}), exercises: Array.isArray(saved.exercises) ? saved.exercises.filter((item) => item?.version === 1 && /^[a-f0-9]{32}$/.test(item.id) && Array.isArray(item.contestants)).slice(0, 50) : [], flashResolved: Array.isArray(saved.flashResolved) ? saved.flashResolved.filter((id) => /^[a-f0-9]{32}$/.test(id)).slice(-1000) : [] };
+      this.data = { ...this.data, settings: validateSettings(saved.settings), workspace: validateWorkspace(saved.workspace), attention: Array.isArray(saved.attention) ? saved.attention.slice(-500) : [], attentionCursors: saved.attentionCursors || {}, deletedSessions: Array.isArray(saved.deletedSessions) ? saved.deletedSessions.slice(-10000).map((key) => text(key, 300)) : [], cleanupState: validateCleanupState(saved.cleanupState || this.data.cleanupState), cachedUnits: validateCachedUnits(saved.cachedUnits || {}), exercises: Array.isArray(saved.exercises) ? saved.exercises.filter((item) => item?.version === 1 && /^[a-f0-9]{32}$/.test(item.id) && Array.isArray(item.contestants)).slice(0, 50) : [], flashResolved: Array.isArray(saved.flashResolved) ? saved.flashResolved.filter((id) => /^[a-f0-9]{32}$/.test(id)).slice(-1000) : [], loopState: saved.loopState && typeof saved.loopState === 'object' && !Array.isArray(saved.loopState) ? Object.fromEntries(Object.entries(saved.loopState).filter(([key, value]) => /^[A-Za-z0-9_-]{1,80}\/tmux:hq-[a-f0-9]{12}$/.test(key) && value && typeof value === 'object').slice(-500)) : {} };
     }
   }
   save(key, value) {
@@ -264,7 +268,8 @@ class Store {
     for (const key of keys) delete attentionCursors[key];
     // One atomic store replacement prevents stale renderer saves resurrecting history.
     const cachedUnits = Object.fromEntries(Object.entries(this.data.cachedUnits).map(([hostId, units]) => [hostId, units.filter((unit) => !deleted.has(unit.key))]));
-    this.update({ deletedSessions: [...deleted].slice(-10000), workspace: validateWorkspace(workspace), attention: this.data.attention.filter((item) => !deleted.has(item.sessionKey)), attentionCursors, cachedUnits });
+    const loopState = Object.fromEntries(Object.entries(this.data.loopState).filter(([key]) => !deleted.has(key)));
+    this.update({ deletedSessions: [...deleted].slice(-10000), workspace: validateWorkspace(workspace), attention: this.data.attention.filter((item) => !deleted.has(item.sessionKey)), attentionCursors, cachedUnits, loopState });
   }
 }
 module.exports = { Store, defaults, validateSettings, resolveRoeProfile, validateRoeLaunch, validateWorkspace, validateSessionPin };

@@ -1,0 +1,43 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { Store, defaults, validateSettings } = require('../electron/config.cjs');
+const { LoopBreaker } = require('../electron/loop-breaker.cjs');
+
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agentc2-breaker-'));
+try {
+  const store = new Store(directory);
+  const settings = defaults();
+  settings.presets[1].loopBreaker = { enabled: true, autoInterrupt: false, threshold: 4, windowMinutes: 10, cooldownMinutes: 15 };
+  store.save('settings', validateSettings(settings));
+  assert.throws(() => validateSettings({ ...settings, presets: settings.presets.map((item) => item.id === 'claude' ? { ...item, loopBreaker: { ...item.loopBreaker, threshold: 1 } } : item) }), /failure policy/);
+  const key = 'default/tmux:hq-aaaaaaaaaaaa';
+  const base = Date.now() - 30000;
+  const event = (index, kind, signature) => ({ id: index.toString(16).padStart(32, '0'), at: new Date(base + index * 1000).toISOString(), kind, source: 'claude', failureSignature: signature, failureLabel: 'Bash Exit code 1' });
+  const session = (events, extra = {}) => ({ key, kind: 'managed', provider: 'claude', presetId: 'claude', state: 'live', events, ...extra });
+  const breaker = new LoopBreaker(store);
+  const a = 'a'.repeat(32), b = 'b'.repeat(32);
+  assert.deepEqual(breaker.observe([session([], { outputTail: 'FAILED FAILED FAILED', telemetry: null })]), [], 'Terminal repetition and missing telemetry are not evidence');
+  assert.deepEqual(breaker.observe([session([event(1, 'tool_failed', a), event(2, 'tool_failed', a), event(3, 'tool_ok'), event(4, 'tool_failed', a), event(5, 'tool_failed', b)])]), []);
+  assert.deepEqual(breaker.observe([session([event(1, 'tool_failed', a), event(2, 'tool_failed', a), event(3, 'tool_ok'), event(4, 'tool_failed', a), event(5, 'tool_failed', b), event(6, 'tool_failed', b), event(7, 'tool_failed', b)])]), []);
+  const events = [1, 2, 3, 4, 5, 6, 7].map((index) => index === 3 ? event(index, 'tool_ok') : event(index, 'tool_failed', index < 5 ? a : b));
+  events.push(event(8, 'tool_failed', b));
+  const fault = breaker.observe([session(events)])[0];
+  assert.equal(fault.count, 4);
+  assert.equal(fault.status, 'review');
+  assert.equal(breaker.observe([session(events)]).length, 0);
+  assert.equal(new LoopBreaker(new Store(directory)).observe([session(events)]).length, 0, 'Restart must not replay');
+  assert.equal(breaker.observe([session([...events, event(9, 'tool_failed', b)], { kind: 'external-tmux' })]).length, 0);
+  assert.equal(breaker.observe([session([...events, event(9, 'tool_failed', b)], { stale: true })]).length, 0);
+  assert.equal(breaker.faults().length, 1);
+  breaker.record(key, 'interrupted', 'tmux accepted');
+  assert.equal(new LoopBreaker(new Store(directory)).faults()[0].status, 'interrupted');
+  breaker.reset(key);
+  assert.equal(breaker.faults().length, 0);
+  assert.equal(breaker.observe([session([...events, event(9, 'tool_failed', b)])]).length, 0, 'Cooldown prevents immediate repeat fault');
+  breaker.observe([session([...events, event(9, 'tool_failed', b)], { worktreeOperation: 'a'.repeat(32), headCommit: '1'.repeat(40) })]);
+  assert.equal(breaker.observe([session([...events, event(9, 'tool_failed', b), event(10, 'tool_failed', b)], { worktreeOperation: 'a'.repeat(32), headCommit: '2'.repeat(40) })]).length, 0, 'Revision progress resets a streak');
+  assert.equal(store.data.loopState[key].count, 0);
+  console.log('PASS repeated confirmed failures, progress and signature resets, scope, restart deduplication, and cooldown');
+} finally { fs.rmSync(directory, { recursive: true, force: true }); }

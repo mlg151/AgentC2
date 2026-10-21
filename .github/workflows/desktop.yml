@@ -126,6 +126,7 @@ jobs:
       - run: python3 tests/sitrep.py
       - run: python3 tests/exercises.py
       - run: python3 tests/flash.py
+      - run: python3 tests/loop-breaker.py
       - run: python3 tests/worktrees.py
       - run: python3 tests/worktree-diff.py
       - run: python3 tests/provider-telemetry.py

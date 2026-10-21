@@ -106,6 +106,10 @@ def main():
         kind = "completed" if payload.get("type") == "agent-turn-complete" else None
     else:
         kind = {"Stop": "completed", "StopFailure": "failed", "PermissionRequest": "input", "UserPromptSubmit": "working"}.get(payload.get("hook_event_name"))
+        if payload.get("hook_event_name") == "PostToolUseFailure" and not payload.get("is_interrupt"):
+            kind = "tool_failed"
+        if payload.get("hook_event_name") == "PostToolUse":
+            kind = "tool_ok"
         if payload.get("hook_event_name") == "Notification" and payload.get("notification_type") in ("permission_prompt", "elicitation_dialog"):
             kind = "input"
         if payload.get("hook_event_name") == "PreToolUse" and payload.get("tool_name") == "AskUserQuestion":
@@ -113,8 +117,11 @@ def main():
     if kind:
         session_id = payload.get("thread-id") if provider == "codex" else payload.get("session_id")
         turn_id = payload.get("turn-id") if provider == "codex" else payload.get("prompt_id")
-        stable = isinstance(session_id, str) and isinstance(turn_id, str) and (kind != "input" or isinstance(payload.get("tool_use_id"), str))
-        identity = f"{provider}:{session_id}:{turn_id}:{kind}:{payload.get('tool_use_id', '')}"
+        tool_use_id = payload.get("tool_use_id")
+        stable = isinstance(session_id, str) and isinstance(turn_id, str) and (kind != "input" or isinstance(tool_use_id, str))
+        if kind in ("tool_failed", "tool_ok"):
+            stable = isinstance(session_id, str) and isinstance(tool_use_id, str)
+        identity = f"{provider}:{session_id}:{turn_id}:{kind}:{tool_use_id or ''}"
         event = {"id": hashlib.sha256(identity.encode()).hexdigest()[:32] if stable else uuid.uuid4().hex,
                  "kind": kind, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "source": provider,
                  "session": session_id if isinstance(session_id, str) and len(session_id) <= 100 else None,
@@ -122,6 +129,22 @@ def main():
         if request_id:
             event["requestId"] = request_id
             event["tool"] = payload.get("tool_name")
+        if kind == "tool_failed":
+            tool = payload.get("tool_name")
+            error = payload.get("error")
+            code = error.splitlines()[0] if isinstance(error, str) else ""
+            # Provider docs only guarantee the first-line exit code. Keep the
+            # command as a digest; neither commands nor error output are logged.
+            if isinstance(tool, str) and len(tool) <= 100 and code.startswith("Exit code ") and code[10:].isdigit():
+                command = payload.get("tool_input")
+                if isinstance(command, dict):
+                    event["failureSignature"] = hashlib.sha256((tool + ":" + code + ":" + json.dumps(command, sort_keys=True)).encode()).hexdigest()[:32]
+                    event["failureLabel"] = f"{tool} {code}"
+        if kind == "failed" and payload.get("hook_event_name") == "StopFailure" and isinstance(payload.get("error"), str):
+            category = payload["error"]
+            if category in ("rate_limit", "overloaded", "authentication_failed", "oauth_org_not_allowed", "account_on_hold", "billing_error", "invalid_request", "model_not_found", "server_error", "max_output_tokens", "cloud_credential_error"):
+                event["failureSignature"] = "api:" + category
+                event["failureLabel"] = "Provider API " + category
         log = Path(__file__).with_name("events.jsonl")
         with log.open("a+", encoding="utf-8") as stream:
             fcntl.flock(stream, fcntl.LOCK_EX)
