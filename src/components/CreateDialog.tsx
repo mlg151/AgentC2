@@ -26,7 +26,7 @@ export function CreateDialog({ resume, settings, hostId, onClose, onSubmit, busy
   const isTerminal = sessionType === 'terminal';
   const preset = settings.presets.find((p) => p.id === presetId);
   const effectiveRoe = roeOverride || preset?.roeProfile || settings.roe?.hostDefaults[target] || (preset?.fullPermissions === false ? 'provider-default' : 'full');
-  const gatedUnavailable = !isTerminal && !resume?.agentId && effectiveRoe === 'gated' && (provider === 'antigravity' || Boolean(preset && (preset.command !== provider || /--(?:dangerously|sandbox|ask-for-approval|permission-mode|settings|allowedTools|allowed-tools)/.test(preset.args))));
+  const gatedUnavailable = !isTerminal && !resume?.agentId && effectiveRoe === 'gated' && (provider === 'antigravity' || Boolean(preset && (preset.command !== provider || /--(?:dangerously|sandbox|ask-for-approval|permission-mode|settings|allowedTools|allowed-tools|config|profile)|(?:^|\s)-c(?:\s|=)/.test(preset.args))));
   const visibleWorktrees = worktrees.filter((item) => item.state !== 'archived').slice(-8);
   useEffect(() => {
     if (!isolated || !target) return;

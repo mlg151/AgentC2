@@ -68,7 +68,7 @@ function resolveRoeProfile(settings, hostId, preset, override) {
 function validateRoeLaunch(provider, preset, profile) {
   if (profile !== 'gated') return;
   if (!['codex', 'claude'].includes(provider)) throw new Error('Provider has no verified session-scoped gated mode');
-  if (preset && (preset.command !== provider || /--(?:dangerously|sandbox|ask-for-approval|permission-mode|settings|allowedTools|allowed-tools)/.test(preset.args))) throw new Error('Gated mode requires the standard provider command without conflicting permission arguments');
+  if (preset && (preset.command !== provider || /--(?:dangerously|sandbox|ask-for-approval|permission-mode|settings|allowedTools|allowed-tools|config|profile)|(?:^|\s)-c(?:\s|=)/.test(preset.args))) throw new Error('Gated mode requires the standard provider command without conflicting permission arguments');
 }
 function validateWorkspace(w) {
   if (!w || !Array.isArray(w.tabs) || w.tabs.length > 40 || !w.metadata || typeof w.metadata !== 'object') throw new Error('Invalid workspace');

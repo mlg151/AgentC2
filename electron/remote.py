@@ -436,7 +436,7 @@ def create(payload):
     roe_profile = payload.get("roeProfile")
     if not is_terminal and roe_profile not in (None, "full", "gated", "provider-default"):
         raise ValueError("Invalid Rules of Engagement profile")
-    if roe_profile == "gated" and (provider == "antigravity" or (preset and (preset.get("command") != provider or any(flag in preset.get("args", "") for flag in ("--dangerously", "--sandbox", "--ask-for-approval", "--permission-mode", "--settings", "--allowedTools", "--allowed-tools"))))):
+    if roe_profile == "gated" and (provider == "antigravity" or (preset and (preset.get("command") != provider or any(flag in preset.get("args", "") for flag in ("--dangerously", "--sandbox", "--ask-for-approval", "--permission-mode", "--settings", "--allowedTools", "--allowed-tools", "--config", "--profile")) or re.search(r"(^|\s)-c(\s|=)", preset.get("args", ""))))):
         raise ValueError("Gated mode requires a supported, unmodified provider command")
     title = " ".join(str(payload.get("title") or "").split())[:100]
     if not title:

@@ -31,6 +31,7 @@ try {
   assert.throws(() => validateRoeLaunch('antigravity', null, 'gated'), /verified session-scoped/);
   assert.throws(() => validateRoeLaunch('claude', { command: 'claude3', args: '' }, 'gated'), /standard provider/);
   assert.throws(() => validateRoeLaunch('codex', { command: 'codex', args: '--dangerously-bypass-approvals-and-sandbox' }, 'gated'), /conflicting permission/);
+  assert.throws(() => validateRoeLaunch('codex', { command: 'codex', args: '-c approval_policy=never' }, 'gated'), /conflicting permission/);
   assert.doesNotThrow(() => validateRoeLaunch('claude', { command: 'claude', args: '--model sonnet' }, 'gated'));
   assert.throws(() => validateSettings({ ...config, roe: { version: 2, hostDefaults: {} } }), /Unsupported Rules/);
   assert.throws(() => validateSettings({ ...config, roe: { version: 1, hostDefaults: { missing: 'gated' } } }), /Invalid host Rules/);
