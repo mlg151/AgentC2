@@ -44,6 +44,14 @@ try {
   assert.equal(new Store(directory).data.workspace.metadata[firstKey].pinned, false);
   assert.equal(new Store(directory).data.workspace.metadata[secondKey].pinned, true);
   assert.equal(store.data.workspace.metadata[firstKey].project, 'Release');
+  store.cacheUnits('default', [{ key: firstKey, id: 'hq-123', provider: 'codex', kind: 'managed', title: 'Retained unit', cwd: '/fixture', updatedAt: '2026-10-21T00:00:00Z', state: 'live', canAttach: true, outputTail: 'PRIVATE_TRANSCRIPT_MARKER', events: [{ detail: 'PRIVATE_EVENT_MARKER' }] }]);
+  assert.equal(new Store(directory).data.cachedUnits.default[0].title, 'Retained unit');
+  assert.equal(new Store(directory).data.cachedUnits.default[0].canAttach, true);
+  assert.ok(!fs.readFileSync(path.join(directory, 'workspace.json'), 'utf8').includes('PRIVATE_TRANSCRIPT_MARKER'));
+  assert.ok(!fs.readFileSync(path.join(directory, 'workspace.json'), 'utf8').includes('PRIVATE_EVENT_MARKER'));
+  assert.throws(() => store.cacheUnits('default', [{ key: secondKey, id: 'hq-123', provider: 'codex', kind: 'managed' }]), /Invalid cached unit/);
+  store.forgetSessions([firstKey]);
+  assert.equal(new Store(directory).data.cachedUnits.default.length, 0);
   console.log('PASS validated idempotent pins, stale workspace merging, notes/layout preservation, host isolation, and pin restart persistence');
   const session = { key: 'default/tmux:test', hostId: 'default', title: 'Fixture', provider: 'codex', state: 'live', outputTail: 'Working…' };
   const attention = new Attention(store);

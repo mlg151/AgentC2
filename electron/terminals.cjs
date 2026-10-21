@@ -34,6 +34,7 @@ class Terminals {
     this.handles.set(id, handle);
     record.handles.add(id);
     if (!record.owner && client.id === 'desktop') record.owner = client;
+    if (record.connection === 'reconnecting') this.reconnect(record);
     this.publish(record);
     return id;
   }
@@ -45,15 +46,24 @@ class Terminals {
     const mirror = new Terminal({ ...size, scrollback: 5000, allowProposedApi: true });
     const serializer = new SerializeAddon();
     mirror.loadAddon(serializer);
-    const record = { key, name, hostId, terminal, mirror, serializer, ...size, handles: new Set(), owner: null, queue: Promise.resolve(), sequence: 0, exitCode: null, scrollQueue: Promise.resolve(), disposed: false, activityBuckets: new Map() };
+    const record = { key, name, hostId, terminal, mirror, serializer, ...size, handles: new Set(), owner: null, queue: Promise.resolve(), sequence: 0, exitCode: null, connection: 'connected', reconnectAttempts: 0, reconnectTimer: null, scrollQueue: Promise.resolve(), disposed: false, activityBuckets: new Map() };
     this.sessions.set(key, record);
+    this.bind(record, terminal);
+  }
+
+  bind(record, terminal) {
     terminal.onData((data) => {
+      if (record.disposed || record.terminal !== terminal) return;
+      if (record.connection !== 'connected') {
+        record.connection = 'connected'; record.reconnectAttempts = 0;
+        this.publish(record);
+      }
       const bucket = Math.floor(Date.now() / 10000);
       record.activityBuckets.set(bucket, (record.activityBuckets.get(bucket) || 0) + Buffer.byteLength(data));
       for (const key of record.activityBuckets.keys()) if (key < bucket - 4) record.activityBuckets.delete(key);
       record.queue = record.queue.then(() => new Promise((resolve) => {
         if (record.disposed) return resolve();
-        mirror.write(data, () => {
+        record.mirror.write(data, () => {
           record.sequence++;
           for (const id of record.handles) {
             const handle = this.handles.get(id);
@@ -63,8 +73,17 @@ class Terminals {
         });
       }));
     });
-    terminal.onExit(({ exitCode }) => {
+    terminal.onExit(({ exitCode, signal }) => {
+      if (record.disposed || record.terminal !== terminal) return;
+      if (exitCode === 255 || signal === 9) {
+        record.connection = 'reconnecting';
+        record.control?.close(); record.control = null;
+        this.publish(record);
+        this.reconnect(record);
+        return;
+      }
       record.exitCode = exitCode;
+      record.connection = 'exited';
       void record.queue.then(() => {
         if (record.disposed) return;
         this.publish(record);
@@ -76,6 +95,22 @@ class Terminals {
     });
   }
 
+  reconnect(record) {
+    if (record.disposed || !record.handles.size || record.reconnectTimer) return;
+    const delay = Math.min(30000, 1000 * 2 ** Math.min(record.reconnectAttempts++, 5));
+    record.reconnectTimer = setTimeout(() => {
+      record.reconnectTimer = null;
+      if (record.disposed || !record.handles.size) return;
+      try {
+        const terminal = this.spawn(record.name, record.hostId, { cols: record.cols, rows: record.rows });
+        record.terminal = terminal;
+        this.bind(record, terminal);
+      } catch {
+        this.reconnect(record);
+      }
+    }, delay);
+  }
+
   get(client, id) {
     const handle = this.handles.get(id);
     if (!handle || handle.client.id !== client.id) throw new Error('Terminal is disconnected');
@@ -84,7 +119,7 @@ class Terminals {
 
   state(client, id) {
     const { record } = this.get(client, id);
-    return { id, cols: record.cols, rows: record.rows, controller: record.owner ? { id: record.owner.id, name: record.owner.name } : null, canControl: record.owner?.id === client.id, exitCode: record.exitCode };
+    return { id, cols: record.cols, rows: record.rows, controller: record.owner ? { id: record.owner.id, name: record.owner.name } : null, canControl: record.owner?.id === client.id, exitCode: record.exitCode, connection: record.connection };
   }
   activity(name, hostId) {
     const record = this.sessions.get(`${hostId}/${name}`);
@@ -121,6 +156,7 @@ class Terminals {
   async take(client, id) {
     const { record } = this.get(client, id);
     if (record.exitCode !== null) throw new Error('Terminal has exited');
+    if (record.connection !== 'connected') throw new Error('Terminal is reconnecting');
     record.owner = client;
     this.publish(record);
     // A previous desktop controller may have left tmux in copy mode. Finish
@@ -132,6 +168,7 @@ class Terminals {
   assertOwner(client, record) {
     if (record.owner?.id !== client.id) throw new Error('Take control of this session first');
     if (record.exitCode !== null) throw new Error('Terminal has exited');
+    if (record.connection !== 'connected') throw new Error('Terminal is reconnecting');
   }
 
   assertSessionOwner(client, name, hostId) {
@@ -154,7 +191,7 @@ class Terminals {
 
   resize(client, id, cols, rows) {
     const { record } = this.get(client, id);
-    if (record.owner?.id !== client.id || record.exitCode !== null) return;
+    if (record.owner?.id !== client.id || record.exitCode !== null || record.connection !== 'connected') return;
     const size = dimensions(cols, rows);
     if (size.cols === record.cols && size.rows === record.rows) return;
     Object.assign(record, size);
@@ -204,6 +241,7 @@ class Terminals {
   disposeRecord(record) {
     this.sessions.delete(record.key);
     record.disposed = true;
+    if (record.reconnectTimer) clearTimeout(record.reconnectTimer);
     record.control?.close();
     if (record.exitCode === null) record.terminal.kill();
     void record.queue.then(() => record.mirror.dispose());

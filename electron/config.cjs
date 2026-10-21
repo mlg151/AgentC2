@@ -97,15 +97,32 @@ function validateCleanupState(value) {
   });
   return { lastRuns, results };
 }
+function validateCachedUnits(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length > 30) throw new Error('Invalid cached unit inventory');
+  const cached = {};
+  for (const [hostId, units] of Object.entries(value)) {
+    if (!ID.test(hostId) || !Array.isArray(units) || units.length > 200) throw new Error('Invalid cached theater inventory');
+    const keys = new Set();
+    cached[hostId] = units.map((unit) => {
+      if (!unit || typeof unit !== 'object' || validateSessionPin(unit.key, false) !== hostId || keys.has(unit.key) || ![...PROVIDERS, 'terminal'].includes(unit.provider) || !['managed', 'external-tmux', 'unmanaged', 'conversation', 'background'].includes(unit.kind)) throw new Error('Invalid cached unit');
+      keys.add(unit.key);
+      const id = text(unit.id, 200);
+      if (!unit.key.endsWith(`:${id}`)) throw new Error('Cached unit identity changed');
+      const updatedAt = unit.updatedAt && Number.isFinite(Date.parse(unit.updatedAt)) ? text(unit.updatedAt, 80) : null;
+      return { key: unit.key, id, provider: unit.provider, kind: unit.kind, title: text(unit.title || '', 150), cwd: text(unit.cwd || '', 500), updatedAt, state: text(unit.state || '', 40), managed: Boolean(unit.managed), canAttach: Boolean(unit.canAttach), canResume: Boolean(unit.canResume), canInterrupt: Boolean(unit.canInterrupt), canStop: Boolean(unit.canStop), exitCode: Number.isInteger(unit.exitCode) ? unit.exitCode : null, presetName: text(unit.presetName || '', 100), branch: text(unit.branch || '', 200), repository: text(unit.repository || '', 500) };
+    });
+  }
+  return cached;
+}
 class Store {
   constructor(directory) {
     this.file = path.join(directory, 'workspace.json');
     fs.mkdirSync(directory, { recursive: true });
-    this.data = { settings: defaults(), workspace: validateWorkspace({ tabs: [], selectedKey: null, splitKey: null, metadata: {} }), attention: [], attentionCursors: {}, deletedSessions: [], cleanupState: { lastRuns: {}, results: [] } };
+    this.data = { settings: defaults(), workspace: validateWorkspace({ tabs: [], selectedKey: null, splitKey: null, metadata: {} }), attention: [], attentionCursors: {}, deletedSessions: [], cleanupState: { lastRuns: {}, results: [] }, cachedUnits: {} };
     if (fs.existsSync(this.file)) {
       // Do not silently overwrite an unreadable user's configuration.
       const saved = JSON.parse(fs.readFileSync(this.file, 'utf8'));
-      this.data = { ...this.data, settings: validateSettings(saved.settings), workspace: validateWorkspace(saved.workspace), attention: Array.isArray(saved.attention) ? saved.attention.slice(-500) : [], attentionCursors: saved.attentionCursors || {}, deletedSessions: Array.isArray(saved.deletedSessions) ? saved.deletedSessions.slice(-10000).map((key) => text(key, 300)) : [], cleanupState: validateCleanupState(saved.cleanupState || this.data.cleanupState) };
+      this.data = { ...this.data, settings: validateSettings(saved.settings), workspace: validateWorkspace(saved.workspace), attention: Array.isArray(saved.attention) ? saved.attention.slice(-500) : [], attentionCursors: saved.attentionCursors || {}, deletedSessions: Array.isArray(saved.deletedSessions) ? saved.deletedSessions.slice(-10000).map((key) => text(key, 300)) : [], cleanupState: validateCleanupState(saved.cleanupState || this.data.cleanupState), cachedUnits: validateCachedUnits(saved.cachedUnits || {}) };
     }
   }
   save(key, value) {
@@ -150,6 +167,22 @@ class Store {
     this.save('workspace', { ...workspace, metadata });
     return pinned;
   }
+  cacheUnits(hostId, sessions) {
+    if (!ID.test(hostId) || !Array.isArray(sessions)) throw new Error('Invalid host inventory');
+    // Persist only a bounded summary. Terminal output, event details, and
+    // transcripts must never enter workspace.json through inventory caching.
+    const summary = sessions.filter((unit) => !this.data.deletedSessions.includes(unit.key)).slice(0, 200).map((unit) => ({
+      key: unit.key, id: unit.id, provider: unit.provider, kind: unit.kind,
+      title: String(unit.title || '').slice(0, 150), cwd: String(unit.cwd || '').slice(0, 500),
+      updatedAt: unit.updatedAt, state: String(unit.state || '').slice(0, 40),
+      managed: unit.managed, canAttach: unit.canAttach, canResume: unit.canResume,
+      canInterrupt: unit.canInterrupt, canStop: unit.canStop, exitCode: unit.exitCode,
+      presetName: String(unit.presetName || '').slice(0, 100),
+      branch: String(unit.branch || '').slice(0, 200), repository: String(unit.repository || '').slice(0, 500),
+    }));
+    const next = validateCachedUnits({ ...this.data.cachedUnits, [hostId]: summary });
+    if (JSON.stringify(next[hostId]) !== JSON.stringify(this.data.cachedUnits[hostId])) this.save('cachedUnits', next);
+  }
   forgetSessions(keys) {
     const deleted = new Set([...this.data.deletedSessions, ...keys]);
     const workspace = structuredClone(this.data.workspace);
@@ -165,7 +198,8 @@ class Store {
     const attentionCursors = { ...this.data.attentionCursors };
     for (const key of keys) delete attentionCursors[key];
     // One atomic store replacement prevents stale renderer saves resurrecting history.
-    this.update({ deletedSessions: [...deleted].slice(-10000), workspace: validateWorkspace(workspace), attention: this.data.attention.filter((item) => !deleted.has(item.sessionKey)), attentionCursors });
+    const cachedUnits = Object.fromEntries(Object.entries(this.data.cachedUnits).map(([hostId, units]) => [hostId, units.filter((unit) => !deleted.has(unit.key))]));
+    this.update({ deletedSessions: [...deleted].slice(-10000), workspace: validateWorkspace(workspace), attention: this.data.attention.filter((item) => !deleted.has(item.sessionKey)), attentionCursors, cachedUnits });
   }
 }
 module.exports = { Store, defaults, validateSettings, validateWorkspace, validateSessionPin };

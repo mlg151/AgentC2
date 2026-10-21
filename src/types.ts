@@ -52,7 +52,7 @@ export interface SituationWorkspace { version: 1; anchorKey: string | null; targ
 export interface Workspace { tabs: string[]; selectedKey: string | null; splitKey: string | null; metadata: Record<string, SessionMetadata>; situation?: SituationWorkspace }
 export interface AttentionItem { id: string; sessionKey: string; hostId: string; title: string; provider: Provider; createdAt: string; acknowledged: boolean; kind: 'completed' | 'failed' | 'input'; confidence: 'confirmed' | 'inferred'; detail: string; signature: string }
 
-export interface TerminalState { id: string; cols: number; rows: number; controller: { id: string; name: string } | null; canControl: boolean; exitCode: number | null }
+export interface TerminalState { id: string; cols: number; rows: number; controller: { id: string; name: string } | null; canControl: boolean; exitCode: number | null; connection: 'connected' | 'reconnecting' | 'exited' }
 export interface TerminalSnapshot { text: string; sequence: number; state: TerminalState }
 export interface UnitPreview { key: string; text: string; sampledAt: number | null; error: boolean }
 export interface HistoryMatches { matches: { key: string; line: number; excerpt: string }[]; searched: number; total: number; truncated: boolean; errors: string[] }

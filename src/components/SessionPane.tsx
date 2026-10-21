@@ -27,6 +27,11 @@ export function SessionPane({ session, visible, primary, focused, slot, callsign
       idRef.current = null; setTerminalId(null);
     };
   }, [wanted, attempt, session.id, session.hostId, session.canAttach]);
+  useEffect(() => {
+    // An initial attach can fail while a cached host is offline. Retry only
+    // when fresh inventory confirms that the host is reachable again.
+    if (!session.stale && wanted && !terminalId && error) setAttempt((value) => value + 1);
+  }, [session.stale]);
   useEffect(() => window.agentHQ?.onTerminalExit((id, code) => {
     if (id !== idRef.current) return;
     idRef.current = null; setTerminalId(null); setWanted(false);

@@ -177,8 +177,8 @@ export function TerminalView({ terminalId, visible, focused = true }: { terminal
     });
     const offState = window.agentHQ?.onTerminalState((state) => {
       if (state.id !== activeIdRef.current) return;
-      setControl(state); controlRef.current = state.canControl;
-      terminal.options.disableStdin = !state.canControl;
+      setControl(state); controlRef.current = state.canControl && state.connection === 'connected';
+      terminal.options.disableStdin = !controlRef.current;
       if (!state.canControl) terminal.resize(state.cols, state.rows);
     });
     return () => {
@@ -220,8 +220,8 @@ export function TerminalView({ terminalId, visible, focused = true }: { terminal
       void window.agentHQ?.resizeTerminal(terminalId, terminal.cols, terminal.rows).catch(showError);
       void window.agentHQ?.readyTerminal(terminalId).then((snapshot) => {
         if (activeIdRef.current !== terminalId) return;
-        setControl(snapshot.state); controlRef.current = snapshot.state.canControl;
-        terminal.options.disableStdin = !snapshot.state.canControl;
+        setControl(snapshot.state); controlRef.current = snapshot.state.canControl && snapshot.state.connection === 'connected';
+        terminal.options.disableStdin = !controlRef.current;
         terminal.resize(snapshot.state.cols, snapshot.state.rows);
         terminal.write(snapshot.text);
         lastSequence.current = snapshot.sequence;
@@ -258,7 +258,7 @@ export function TerminalView({ terminalId, visible, focused = true }: { terminal
 
   return <div className={`terminal-console${visible ? '' : ' terminal-hidden'}`}>
     <div className="terminal-utilities">
-      {terminalId && control ? <><span className="control-owner">{control.canControl ? 'You control' : `${control.controller?.name || 'No device'} controls`}</span>{!control.canControl ? <button onClick={() => void window.agentHQ?.takeTerminal(terminalId).then((state) => { setControl(state); controlRef.current = true; fitRef.current?.fit(); const terminal = terminalRef.current; if (terminal) { terminal.options.disableStdin = false; void window.agentHQ?.resizeTerminal(terminalId, terminal.cols, terminal.rows).catch(showError); terminal.focus(); } }).catch(showError)}>Take control</button> : null}</> : null}
+      {terminalId && control ? <><span className="control-owner">{control.connection === 'reconnecting' ? 'SSH reconnecting…' : control.canControl ? 'You control' : `${control.controller?.name || 'No device'} controls`}</span>{!control.canControl ? <button disabled={control.connection !== 'connected'} onClick={() => void window.agentHQ?.takeTerminal(terminalId).then((state) => { setControl(state); controlRef.current = true; fitRef.current?.fit(); const terminal = terminalRef.current; if (terminal) { terminal.options.disableStdin = false; void window.agentHQ?.resizeTerminal(terminalId, terminal.cols, terminal.rows).catch(showError); terminal.focus(); } }).catch(showError)}>Take control</button> : null}</> : null}
       <span className="terminal-hint" role="status">{feedback || 'Scroll for history · Drag to select'}</span>
       <button title={`Search retained history (${primaryModifier}+F)`} onClick={() => setSearchOpen(true)}><Search size={14} /> Find</button>
       <button title="Return to the latest output" onClick={() => void latest().catch(showError)}><ArrowDownToLine size={14} /> Latest</button>

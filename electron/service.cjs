@@ -26,7 +26,7 @@ function createService({ directory, home }) {
   const cleanup = createCleanup({ store, events, inventory, runRemote, hostId: (id) => getHost(id).id });
   let inventoryFlight, healthFlight;
 
-  const hostCache = new Map();
+  const hostCache = new Map(Object.entries(store.data.cachedUnits).map(([hostId, units]) => [hostId, units.map((unit) => ({ ...unit, hostId, hostName: store.data.settings.hosts.find((host) => host.id === hostId)?.name || hostId }))]));
   const healthCache = new Map();
   const cpuSamples = new Map();
 
@@ -69,7 +69,9 @@ function createService({ directory, home }) {
       const statuses = results.map((result, index) => {
         const h = hosts[index];
         if (result.status === 'fulfilled') {
-          hostCache.set(h.id, result.value.sessions.map((s) => ({ ...s, hostId: h.id, hostName: h.name, key: `${h.id}/${s.key}` })));
+          const fresh = result.value.sessions.map((s) => ({ ...s, hostId: h.id, hostName: h.name, key: `${h.id}/${s.key}` }));
+          hostCache.set(h.id, fresh);
+          try { store.cacheUnits(h.id, fresh); } catch (error) { console.warn(`Could not cache ${h.name} inventory: ${error.message}`); }
           return { id: h.id, name: h.name, target: h.target, user: result.value.user, connected: true };
         }
         return { id: h.id, name: h.name, target: h.target, connected: false, error: result.reason.message };
@@ -167,7 +169,13 @@ function createService({ directory, home }) {
       const old = store.data.settings.hosts.find((item) => item.id === h.id);
       if (!old || old.target !== h.target || old.port !== h.port) { hostCache.delete(h.id); healthCache.delete(h.id); cpuSamples.delete(h.id); }
     }
-    const result = store.save('settings', settings);
+    const retained = Object.fromEntries(Object.entries(store.data.cachedUnits).filter(([hostId]) => {
+      const old = store.data.settings.hosts.find((host) => host.id === hostId);
+      const next = settings.hosts.find((host) => host.id === hostId);
+      return old && next && next.target === old.target && next.port === old.port;
+    }));
+    const result = settings;
+    store.update({ settings, cachedUnits: retained });
     events.emit('state:updated');
     return result;
   }

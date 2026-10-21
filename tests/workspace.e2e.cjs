@@ -1,6 +1,6 @@
 // Live Electron + SSH fixtures; never submit prompts to provider CLIs.
 const { _electron } = require('playwright-core');
-const { spawn } = require('node:child_process');
+const { spawn, execFileSync } = require('node:child_process');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -41,6 +41,8 @@ if p['action']=='setup':
   run('tmux','new-window','-t',name,'-n','chat','-c',str(fixture_root/('anchor' if i%2==0 else 'target')),shlex.join(['python3','-u','-c',program]))
   run('tmux','kill-window','-t',name+':setup')
  print('{}')
+elif p['action']=='pane-pid':
+ print(run('tmux','display-message','-p','-t',names[0],'#{pane_pid}'))
 elif p['action']=='state':
  print(json.dumps([run('tmux','capture-pane','-p','-t',name) for name in names[:2]]))
 elif p['action']=='cleanup':
@@ -110,6 +112,25 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
     await page.getByRole('combobox', { name: 'Split terminal', exact: true }).selectOption(`default/tmux:${names[1]}`);
     assert.equal(await page.locator('.session-pane:visible').count(), 2);
     console.log('PASS pins, project groups, notes/handoff, persistent terminals, and split panes');
+    if (process.platform === 'linux') {
+      // Kill only this fixture's local SSH attachment. The remote tmux pane must survive.
+      const extra = await page.evaluate((name) => window.agentHQ.openTerminal(name, 100, 32, 'default'), names[0]);
+      const before = await page.evaluate((id) => window.agentHQ.terminalState(id), extra);
+      const panePid = await remote('pane-pid');
+      const alertsBefore = (await state()).attention.filter((item) => item.sessionKey === `default/tmux:${names[0]}`).map((item) => item.id);
+      const candidates = execFileSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8' }).split('\n').filter((line) => line.includes('ssh ') && line.includes('-tt') && line.includes(`tmux attach-session -t ${names[0]}`));
+      assert.equal(candidates.length, 1, `Expected one local SSH PTY attachment, found ${candidates.length}`);
+      process.kill(Number(candidates[0].trim().split(/\s+/)[0]), 'SIGKILL');
+      await poll(async () => (await page.evaluate((id) => window.agentHQ.terminalState(id), extra)).connection === 'reconnecting', 'SSH transport drop was not recognized');
+      await assert.rejects(page.evaluate((id) => window.agentHQ.writeTerminal(id, 'must not be queued'), extra), /reconnecting/);
+      await poll(async () => (await page.evaluate((id) => window.agentHQ.terminalState(id), extra)).connection === 'connected', 'SSH attachment did not reconnect');
+      assert.deepEqual(await page.evaluate((id) => window.agentHQ.terminalState(id), extra), before);
+      assert.equal(await remote('pane-pid'), panePid, 'Reconnect restarted the remote process');
+      assert.deepEqual((await state()).attention.filter((item) => item.sessionKey === `default/tmux:${names[0]}`).map((item) => item.id), alertsBefore, 'Reconnect duplicated attention');
+      await page.evaluate((id) => window.agentHQ.closeTerminal(id), extra);
+      console.log('PASS forced SSH transport drop reconnects one attachment without restarting tmux, queuing input, resizing, or duplicating alerts');
+    }
+
     // Pane B cycling may not focus, remount, or resize the anchor.
     const anchor = page.locator(`[data-session-key="default/tmux:${names[0]}"].session-pane`);
     await anchor.locator('.xterm-helper-textarea').focus();
@@ -291,6 +312,25 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
     assert.ok(saved.attention.every((a) => a.acknowledged));
     await refresh();
     assert.ok((await state()).attention.every((a) => a.acknowledged), 'Restart duplicated attention events');
+    const outageFile = process.env.AGENTC2_SSH_QA_BLOCK_FILE;
+    if (outageFile && process.platform === 'linux') {
+      await app.close(); app = null;
+      fs.writeFileSync(outageFile, 'blocked');
+      try {
+        await launch();
+        const offlineInventory = await page.evaluate(() => window.agentHQ.inventory());
+        assert.equal(offlineInventory.hosts.find((item) => item.id === 'default').connected, false);
+        assert.ok(offlineInventory.sessions.some((unit) => unit.key === `default/tmux:${names[0]}` && unit.stale && unit.title === `${marker} 0`), 'Restart lost its bounded cached unit');
+        assert.equal((await state()).workspace.situation.anchorKey, `default/tmux:${names[0]}`);
+        assert.equal((await state()).workspace.situation.targetKey, `default/tmux:${names[1]}`);
+        assert.ok((await page.locator('.session-row.anchored').innerText()).includes('UNKNOWN'));
+      } finally { fs.rmSync(outageFile, { force: true }); }
+      await poll(async () => (await page.evaluate(() => window.agentHQ.inventory())).hosts.find((item) => item.id === 'default').connected, 'Host did not recover after outage');
+      await poll(async () => await page.locator('.session-pane:visible .terminal-panel.is-attached').count() === 2, 'Cached panes did not reattach after host recovery');
+      assert.ok((await state()).attention.every((item) => item.acknowledged), 'Offline restart duplicated attention');
+      console.log('PASS offline desktop restart preserves stale units and A/B assignments, then reattaches on host recovery');
+    }
+
     // One unavailable host must not hide working hosts or infer task completion.
     const recoveryConfig = saved.settings;
     recoveryConfig.hosts.push({ id: 'offline', name: 'Offline QA', target: '127.0.0.1', port: 1, enabled: true });
@@ -319,6 +359,7 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
     throw error;
   } finally {
     if (page && clipboardBefore !== undefined) await page.evaluate((text) => window.agentHQ.writeClipboard(text), clipboardBefore).catch(() => {});
+    if (process.env.AGENTC2_SSH_QA_BLOCK_FILE) fs.rmSync(process.env.AGENTC2_SSH_QA_BLOCK_FILE, { force: true });
     if (app) await app.close();
     await remote('cleanup');
     fs.rmSync(directory, { recursive: true, force: true });

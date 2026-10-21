@@ -22,7 +22,7 @@ export function PhoneTerminal({ client, session, connected, onResume, onRefresh 
   const [history, setHistory] = useState<{ text: string; truncated: boolean } | null>(null);
   const [query, setQuery] = useState('');
   const [match, setMatch] = useState(0);
-  const canControl = connected && control?.canControl && control.exitCode === null && !session.stale;
+  const canControl = connected && control?.canControl && control.connection === 'connected' && control.exitCode === null && !session.stale;
   writable.current = Boolean(canControl);
   const showError = (cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause));
 
@@ -37,8 +37,8 @@ export function PhoneTerminal({ client, session, connected, onResume, onRefresh 
     const addon = new FitAddon(); term.loadAddon(addon); enableTerminalLinks(term); term.open(node); terminal.current = term; fit.current = addon;
     function apply(state: TerminalState) {
       setControl(state);
-      term.options.disableStdin = !state.canControl;
-      writable.current = state.canControl && state.exitCode === null;
+      term.options.disableStdin = !state.canControl || state.connection !== 'connected';
+      writable.current = state.canControl && state.connection === 'connected' && state.exitCode === null;
       if (!state.canControl) term.resize(state.cols, state.rows);
     }
     const offData = client.on('terminal:data', (value) => {
@@ -112,7 +112,7 @@ export function PhoneTerminal({ client, session, connected, onResume, onRefresh 
   const position = matches.length ? matches[match % matches.length] : -1;
   return <section className="phone-session">
     <div className="phone-session-heading"><h1>{session.title}</h1><p>{session.hostName} · {session.provider} · {session.stale ? 'Stale — host unavailable' : session.state}</p><small>{session.cwd || 'Working directory unavailable'}</small></div>
-    <div className="phone-control"><span>{canControl ? 'You control this session' : `Viewing · ${control?.controller?.name || 'no device'} controls`}</span>{session.canAttach ? <button className="button-primary" disabled={!connected || !control || Boolean(canControl) || control.exitCode !== null || session.stale} onClick={() => void take()}>Take control</button> : null}</div>
+    <div className="phone-control"><span>{control?.connection === 'reconnecting' ? 'SSH reconnecting…' : canControl ? 'You control this session' : `Viewing · ${control?.controller?.name || 'no device'} controls`}</span>{session.canAttach ? <button className="button-primary" disabled={!connected || !control || Boolean(canControl) || control.connection !== 'connected' || control.exitCode !== null || session.stale} onClick={() => void take()}>Take control</button> : null}</div>
     <div className="phone-actions">
       {session.canResume ? <button disabled={!connected || session.stale || busy} onClick={onResume}>Resume</button> : null}
       {session.canAttach ? <><button disabled={!connected} onClick={() => { setAttached(!attached); setAttempt((value) => value + 1); }}>{attached ? 'Detach' : 'Attach'}</button><button disabled={!connected || !handle.current} onClick={() => void client.request<{ text: string; truncated: boolean }>('terminal:history', handle.current).then((value) => { setHistory(value); setQuery(''); setMatch(0); }).catch(showError)}>Find history</button>{control?.exitCode !== null && control ? <button onClick={() => setAttempt((value) => value + 1)}>Reattach</button> : null}</> : null}
