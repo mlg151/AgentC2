@@ -28,7 +28,7 @@ class Attention {
         if (Number.isFinite(eventAt) && eventAt < cursorAt - 1000) continue;
         const signature = `hook:${event.id}`;
         if (items.some((i) => i.sessionKey === session.key && i.signature === signature)) continue;
-        const item = { id: crypto.randomUUID(), sessionKey: session.key, hostId: session.hostId, title: session.title, provider: session.provider, createdAt: event.at || new Date().toISOString(), acknowledged: false, signature, kind: event.kind, confidence: 'confirmed', detail: event.kind === 'completed' ? 'The provider reported that its turn finished. Review the result in the terminal.' : event.kind === 'failed' ? 'The provider reported a failed turn.' : 'The provider reported an input or approval request.' };
+        const item = { id: crypto.randomUUID(), sessionKey: session.key, hostId: session.hostId, title: session.title, provider: session.provider, createdAt: event.at || new Date().toISOString(), acknowledged: Boolean(event.requestId && this.store.data.flashResolved?.includes(event.requestId)), requestId: event.requestId || undefined, signature, kind: event.kind, confidence: 'confirmed', detail: event.kind === 'completed' ? 'The provider reported that its turn finished. Review the result in the terminal.' : event.kind === 'failed' ? 'The provider reported a failed turn.' : event.tool ? `The provider requested permission for ${event.tool}. Review the exact action in Flash Traffic.` : 'The provider reported an input or approval request.' };
         items = [...items, item].slice(-500); added.push(item);
       }
       if (events.length && cursorId !== events.at(-1).id) {
@@ -52,6 +52,13 @@ class Attention {
   }
   acknowledge(id) {
     return this.store.save('attention', this.store.data.attention.map((i) => id === 'all' || i.id === id ? { ...i, acknowledged: true } : i));
+  }
+  resolveRequests(ids) {
+    if (!ids.length) return;
+    const known = new Set([...(this.store.data.flashResolved || []), ...ids]);
+    if (known.size !== (this.store.data.flashResolved || []).length) this.store.save('flashResolved', [...known].slice(-1000));
+    const next = this.store.data.attention.map((item) => item.requestId && known.has(item.requestId) && !item.acknowledged ? { ...item, acknowledged: true } : item);
+    if (next.some((item, index) => item !== this.store.data.attention[index])) this.store.save('attention', next);
   }
 }
 module.exports = { Attention, classify };

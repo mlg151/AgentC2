@@ -80,7 +80,7 @@ def hook_arguments(provider, name, payload):
         profile = next((args[index + 1] for index, arg in enumerate(args[:-1]) if arg in ("-p", "--profile")), "")
         return ["-c", "notify=" + json.dumps(["python3", str(script), provider, "notify", "PROFILE=" + profile])]
     command = shlex.join(["python3", str(script), provider, "hook"])
-    hooks = {event: [{"hooks": [{"type": "command", "command": command, "timeout": 5}]}] for event in ("Stop", "StopFailure", "PermissionRequest", "UserPromptSubmit")}
+    hooks = {event: [{"hooks": [{"type": "command", "command": command, "timeout": 310 if event == "PermissionRequest" else 5}]}] for event in ("Stop", "StopFailure", "PermissionRequest", "UserPromptSubmit")}
     hooks["Notification"] = [{"matcher": "permission_prompt|elicitation_dialog", "hooks": [{"type": "command", "command": command, "timeout": 5}]}]
     hooks["PreToolUse"] = [{"matcher": "AskUserQuestion", "hooks": [{"type": "command", "command": command, "timeout": 5}]}]
     settings = {"hooks": hooks}
@@ -595,6 +595,10 @@ def main():
     elif action == "exercise_promote":
         with cleanup_lock():
             result = exercise_target(payload, True)
+    elif action == "flash_list":
+        result = flash_list(payload)
+    elif action == "flash_decide":
+        result = flash_decide(payload)
     elif action == "diff_files":
         result = diff_files(payload)
     elif action == "diff_detail":

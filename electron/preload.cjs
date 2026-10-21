@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('agentHQ', {
   inspectExercise: (id, contestantId, verify) => ipcRenderer.invoke('exercise:inspect', id, contestantId, verify),
   previewExercisePromotion: (id, contestantId) => ipcRenderer.invoke('exercise:preview', id, contestantId),
   promoteExercise: (id, contestantId, revision) => ipcRenderer.invoke('exercise:promote', id, contestantId, revision),
+  listFlashTraffic: () => ipcRenderer.invoke('flash:list'),
+  decideFlashTraffic: (input) => ipcRenderer.invoke('flash:decide', input),
   saveWorkspace: (workspace) => ipcRenderer.invoke('workspace:save', workspace),
   setSessionPinned: (key, pinned) => ipcRenderer.invoke('session:pin', key, pinned),
   previewCleanup: (input) => ipcRenderer.invoke('cleanup:preview', input),

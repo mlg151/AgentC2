@@ -36,12 +36,15 @@ function remote(source) {
     await page.getByRole('textbox', { name: 'Shared instructions' }).fill('UI QA guidance');
     await page.getByRole('button', { name: 'Preview remote changes' }).click();
     await page.getByText('Ready to apply').waitFor();
+    await page.getByText('AGENTS.md · create', { exact: true }).waitFor();
     assert.equal(await page.getByRole('button', { name: 'Apply and enable sync' }).isEnabled(), true);
     await page.getByRole('button', { name: 'Apply and enable sync' }).click();
-    await page.waitForFunction(() => window.agentHQ.getState().then((value) => value.settings.opOrders?.[0]?.enabled === true));
+    await page.getByRole('button', { name: 'Pause sync' }).waitFor();
+    assert.equal((await page.evaluate(() => window.agentHQ.getState())).settings.opOrders?.[0]?.enabled, true);
     assert.equal(remote('import pathlib,sys; print("UI QA guidance" in (pathlib.Path(sys.argv[1])/"AGENTS.md").read_text())'), 'True');
     await page.getByRole('button', { name: 'Pause sync' }).click();
-    await page.waitForFunction(() => window.agentHQ.getState().then((value) => value.settings.opOrders?.[0]?.enabled === false));
+    await page.waitForFunction(() => document.querySelector('.oporder-settings select option:checked')?.textContent?.includes('· paused'));
+    assert.equal((await page.evaluate(() => window.agentHQ.getState())).settings.opOrders?.[0]?.enabled, false);
     assert.deepEqual(errors, []);
     console.log('PASS Electron OpOrders preview, apply, persisted enrollment, and pause controls');
   } finally {

@@ -6,6 +6,7 @@ import { CreateDialog } from './components/CreateDialog';
 import { SettingsDialog } from './components/SettingsDialog';
 import { SitRepDialog } from './components/SitRepDialog';
 import { ExerciseDialog } from './components/ExerciseDialog';
+import { FlashTraffic } from './components/FlashTraffic';
 import { SessionCleanupDialog } from './components/SessionCleanupDialog';
 import { QuickSwitcher } from './components/QuickSwitcher';
 import { SituationHeader } from './components/SituationHeader';
@@ -16,7 +17,7 @@ import type { CommandActions } from './commands';
 import { useCommandKeys } from './useCommandKeys';
 import { HostMonitor } from './components/HostMonitor';
 import { assignCallsigns, closeWorkspaceTab, emptyMetadata, openInPane, projectFor, situationFor, unitState, updateSituation } from './workspace';
-import type { AttentionItem, CreateInput, Inventory, Session, Settings, SituationWorkspace, Workspace } from './types';
+import type { AttentionItem, CreateInput, FlashRequest, Inventory, Session, Settings, SituationWorkspace, Workspace } from './types';
 
 const emptyWorkspace: Workspace = { tabs: [], selectedKey: null, splitKey: null, metadata: {} };
 function applyPin(workspace: Workspace, key: string, pinned: boolean): Workspace {
@@ -46,6 +47,11 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [sitrepSource, setSitrepSource] = useState<Session | null>(null);
   const [showExercises, setShowExercises] = useState(false);
+  const [flashRequests, setFlashRequests] = useState<FlashRequest[]>([]);
+  const [flashSelectedId, setFlashSelectedId] = useState('');
+  const [showFlash, setShowFlash] = useState(false);
+  const [flashBusy, setFlashBusy] = useState(false);
+  const [flashError, setFlashError] = useState('');
   const [cleanupTarget, setCleanupTarget] = useState<Session | null | undefined>(undefined);
   const [showSwitcher, setShowSwitcher] = useState(false);
   const [showOverwatch, setShowOverwatch] = useState(false);
@@ -106,6 +112,20 @@ export default function App() {
   useEffect(() => {
     if (initialized.current) void window.agentHQ?.saveWorkspace(workspace).catch((cause) => setError(`Could not save workspace: ${String(cause)}`));
   }, [workspace]);
+  useEffect(() => {
+    let current = true;
+    let running = false;
+    async function poll() {
+      if (!window.agentHQ || running) return;
+      running = true;
+      try { const next = await window.agentHQ.listFlashTraffic(); if (current) setFlashRequests(next); }
+      catch { if (current) setFlashRequests((items) => items.map((item) => ({ ...item, connected: false }))); }
+      finally { running = false; }
+    }
+    void poll();
+    const timer = setInterval(() => void poll(), 5000);
+    return () => { current = false; clearInterval(timer); };
+  }, []);
   useEffect(() => {
     if (choseInitial.current || !sessions.length || !initialized.current) return;
     choseInitial.current = true;
@@ -197,6 +217,13 @@ export default function App() {
   }
   function focusPane(pane: 'anchor' | 'target') { const key = pane === 'anchor' ? situation.anchorKey : situation.targetKey; if (!key) return 'This viewport has no unit'; changeSituation({ focusedPane: pane }); return requestFocus(key); }
   function nextUrgent() {
+    const pending = flashRequests.filter((item) => item.connected && item.state === 'pending');
+    if (pending.length) {
+      const index = pending.findIndex((item) => item.id === flashSelectedId);
+      setFlashSelectedId(pending[(index + 1) % pending.length].id);
+      setShowFlash(true);
+      return 'Verified permission request selected';
+    }
     const candidates = sessions.filter((session) => unitState(session, attention).priority <= 1).sort((a, b) => {
       const oldest = (session: Session) => Math.min(...attention.filter((item) => item.sessionKey === session.key && !item.acknowledged && item.confidence === 'confirmed').map((item) => Date.parse(item.createdAt)), Date.parse(session.updatedAt || '') || Date.now());
       return oldest(a) - oldest(b);
@@ -208,6 +235,25 @@ export default function App() {
     if (diffOpenKey === key) { setDiffOpenKey(null); requestFocus(key); }
     else setDiffOpenKey(key);
   }
+  const flashPending = flashRequests.filter((item) => ['pending', 'submitted'].includes(item.state));
+  const flashSelected = flashPending.find((item) => item.id === flashSelectedId) || flashPending[0];
+  async function decideFlash(decision: 'allow' | 'deny') {
+    if (!window.agentHQ || !flashSelected || flashSelected.state !== 'pending' || !flashSelected.connected || flashBusy) return;
+    const focusKey = workspace.selectedKey;
+    setFlashBusy(true); setFlashError('');
+    try {
+      await window.agentHQ.decideFlashTraffic({ hostId: flashSelected.hostId, name: flashSelected.name, id: flashSelected.id, decision });
+      setFlashRequests(await window.agentHQ.listFlashTraffic());
+      requestFocus(focusKey);
+    } catch (cause) { setFlashError(String(cause)); }
+    finally { setFlashBusy(false); }
+  }
+  function jumpFlash() {
+    if (!flashSelected) return;
+    const session = known[`${flashSelected.hostId}/tmux:${flashSelected.name}`];
+    if (session) { openSession(session); requestFocus(session.key); }
+    else setFlashError('The target unit is not in inventory. Refresh its host.');
+  }
   const commands: CommandActions = {
     search: { run: () => setShowSwitcher((value) => !value) }, overwatch: { run: () => setShowOverwatch((value) => !value) },
     cycleNext: { run: () => cycleTarget(1) }, cyclePrevious: { run: () => cycleTarget(-1) },
@@ -215,9 +261,9 @@ export default function App() {
     promote: { run: promoteTarget, available: Boolean(situation.targetKey), reason: 'Pane B is empty' },
     zen: { run: () => changeSituation({ zen: !situation.zen }) }, newUnit: { run: () => setDialog(null) },
     urgent: { run: nextUrgent }, help: { run: () => setShowKeyboardHelp(true) },
-    approve: { run: () => {}, available: false, reason: 'No verified actionable permission request' },
-    deny: { run: () => {}, available: false, reason: 'No verified actionable permission request' },
-    jumpRequest: { run: () => {}, available: false, reason: 'No verified actionable permission request' },
+    approve: { run: () => { void decideFlash('allow'); }, available: Boolean(flashSelected?.state === 'pending' && flashSelected.connected && !flashBusy), reason: 'No connected verified permission request' },
+    deny: { run: () => { void decideFlash('deny'); }, available: Boolean(flashSelected?.state === 'pending' && flashSelected.connected && !flashBusy), reason: 'No connected verified permission request' },
+    jumpRequest: { run: jumpFlash, available: Boolean(flashSelected), reason: 'No verified permission request' },
     diff: { run: () => { if (selected) toggleDiff(selected.key); }, available: Boolean(selected?.worktreeOperation && selected.kind === 'managed'), reason: 'Select an owned worktree unit' },
     exercise: { run: () => setShowExercises(true) },
     handoff: { run: () => { if (selected) setSitrepSource(selected); }, available: Boolean(selected?.worktreeOperation && selected.kind === 'managed' && !selected.stale), reason: 'Select a connected owned worktree unit' },
@@ -248,12 +294,13 @@ export default function App() {
       </main>
     </div>
     {settings ? <HostMonitor hosts={settings.hosts} /> : null}
-    <footer className="statusbar"><span><span className={`connection-dot${inventory?.hosts.some((h) => !h.connected) || error ? ' offline' : ''}`} />{inventory ? `${inventory.hosts.filter((h) => h.connected).length}/${inventory.hosts.length} hosts connected` : 'Connecting…'}</span><span>{sessions.length.toLocaleString()} indexed · {sessions.filter((s) => s.state === 'live' && !s.stale).length} live</span><span className="command-feedback" role="status" aria-live="polite">{commandKeys.prefix !== null ? `COMMAND: ${commandKeys.prefix || "_"} · Esc cancels` : commandKeys.status}</span><span className="status-fill" /><button className="text-button" onClick={() => setShowKeyboardHelp(true)}><kbd>{commandBinding('commandMode', situation.shortcuts) || 'F1'}</kbd> COMMANDS</button><button className="text-button" onClick={() => cycleTarget(1)}><kbd>{commandBinding('cycleNext', situation.shortcuts)}</kbd> CYCLE B</button><button className="text-button" onClick={() => setShowOverwatch(true)}><kbd>{commandBinding('overwatch', situation.shortcuts)}</kbd> OVERWATCH</button></footer>
+    <footer className="statusbar"><span><span className={`connection-dot${inventory?.hosts.some((h) => !h.connected) || error ? ' offline' : ''}`} />{inventory ? `${inventory.hosts.filter((h) => h.connected).length}/${inventory.hosts.length} hosts connected` : 'Connecting…'}</span><span>{sessions.length.toLocaleString()} indexed · {sessions.filter((s) => s.state === 'live' && !s.stale).length} live</span><span className="command-feedback" role="status" aria-live="polite">{commandKeys.prefix !== null ? `COMMAND: ${commandKeys.prefix || "_"} · Esc cancels` : commandKeys.status}</span><span className="status-fill" /><button className="text-button" onClick={() => setShowFlash((value) => !value)}>FLASH TRAFFIC {flashPending.filter((item) => item.state === 'pending').length}</button><button className="text-button" onClick={() => setShowKeyboardHelp(true)}><kbd>{commandBinding('commandMode', situation.shortcuts) || 'F1'}</kbd> COMMANDS</button><button className="text-button" onClick={() => cycleTarget(1)}><kbd>{commandBinding('cycleNext', situation.shortcuts)}</kbd> CYCLE B</button><button className="text-button" onClick={() => setShowOverwatch(true)}><kbd>{commandBinding('overwatch', situation.shortcuts)}</kbd> OVERWATCH</button></footer>
     {error ? <div className="error-banner" role="alert"><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError('')}><X size={15} /></button></div> : null}
     {settings && dialog !== undefined ? <CreateDialog resume={dialog} settings={settings} hostId={hostFilter === 'all' ? settings.hosts.find((h) => h.enabled)?.id || '' : hostFilter} onClose={closeCreate} onSubmit={(input) => void create(input)} busy={busy} /> : null}
     {settings && showSettings ? <SettingsDialog settings={settings} onSave={saveSettings} onExternalSettings={(updated) => { setSettings(updated); void refresh(); }} onClose={closeSettings} /> : null}
     {settings && sitrepSource ? <SitRepDialog source={sitrepSource} settings={settings} initialSummary={workspace.metadata[sitrepSource.key]?.notes || ''} onLaunched={async (name, hostId) => { if (!window.agentHQ) throw new Error('Desktop bridge unavailable'); for (let attempt = 0; attempt < 6; attempt++) { const next = await window.agentHQ.inventory(); acceptInventory(next); const unit = next.sessions.find((item) => item.id === name && item.hostId === hostId); if (unit) { openSession(unit); return; } await new Promise((resolve) => setTimeout(resolve, 350)); } throw new Error('Recipient launched but has not appeared in inventory; refresh to find it.'); }} onClose={() => setSitrepSource(null)} /> : null}
     {settings && showExercises ? <ExerciseDialog settings={settings} hostId={hostFilter === 'all' ? settings.hosts.find((host) => host.enabled)?.id || '' : hostFilter} onLaunched={() => void refresh()} onClose={() => setShowExercises(false)} /> : null}
+    {showFlash ? <FlashTraffic requests={flashPending} selectedId={flashSelectedId} busy={flashBusy} error={flashError} onSelect={setFlashSelectedId} onDecide={(decision) => void decideFlash(decision)} onJump={jumpFlash} onClose={() => setShowFlash(false)} /> : null}
     {settings && cleanupTarget !== undefined ? <SessionCleanupDialog settings={settings} target={cleanupTarget} onSave={saveSettings} onClose={closeCleanup} /> : null}
     {showSwitcher ? <QuickSwitcher sessions={sessions.map((s) => ({ ...s, cwd: `${s.cwd} ${projectFor(s, workspace.metadata)}` }))} callsigns={situation.callsigns} actions={commands} overrides={situation.shortcuts} onSelect={(s) => { openSession(known[s.key] || s); requestFocus(s.key); }} onSettings={() => setShowSettings(true)} onInbox={() => setInbox(true)} onClose={closeSwitcher} /> : null}
     {showKeyboardHelp ? <KeyboardHelp overrides={situation.shortcuts} actions={commands} onSave={(shortcuts) => changeSituation({ shortcuts })} onClose={closeKeyboardHelp} /> : null}

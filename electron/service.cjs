@@ -21,7 +21,7 @@ function createService({ directory, home }) {
   const SSH_ARGS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'StrictHostKeyChecking=yes'];
   const TMUX_NAME = /^hq-[a-f0-9]{12}$/;
   const OTHER_TMUX_NAME = /^[A-Za-z0-9_.:-]{1,80}$/;
-  const helperSource = fs.readFileSync(path.join(__dirname, 'session-cleanup.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktrees.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktree-diff.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'sitrep.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'exercises.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'provider_telemetry.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'oporders.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'remote.py'), 'utf8');
+  const helperSource = fs.readFileSync(path.join(__dirname, 'session-cleanup.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktrees.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktree-diff.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'sitrep.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'exercises.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'flash.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'provider_telemetry.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'oporders.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'remote.py'), 'utf8');
   const hookSource = fs.readFileSync(path.join(__dirname, 'session-hook.py'), 'utf8');
 
 
@@ -33,6 +33,8 @@ function createService({ directory, home }) {
   const opOrderSynced = new Map();
   const opOrderAttempts = new Map();
   const sitrepPreviews = new Map();
+  const flashCache = new Map();
+  let flashFlight;
 
   const hostCache = new Map(Object.entries(store.data.cachedUnits).map(([hostId, units]) => [hostId, units.map((unit) => ({ ...unit, hostId, hostName: store.data.settings.hosts.find((host) => host.id === hostId)?.name || hostId }))]));
   const healthCache = new Map();
@@ -232,6 +234,15 @@ function createService({ directory, home }) {
     const order = { ...validatedOpOrder(input), enabled: true };
     getHost(order.hostId);
     await runRemote({ action: 'oporder_sync', order, revision }, order.hostId);
+    // A separate SSH read must observe every managed file before we advertise
+    // this order as enabled. This also catches a partial or delayed sync.
+    let observed;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      observed = await runRemote({ action: 'oporder_preview', order }, order.hostId);
+      if (observed.ready && observed.changes.every((change) => change.status === 'unchanged')) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    if (!observed?.ready || observed.changes.some((change) => change.status !== 'unchanged')) throw new Error('OpOrder sync is not visible on the SSH host; review before enabling it');
     const settings = validateSettings({ ...store.data.settings, opOrders: [...(store.data.settings.opOrders || []).filter((item) => item.id !== order.id), order] });
     store.save('settings', settings);
     opOrderSynced.set(order.id, JSON.stringify(order));
@@ -273,6 +284,39 @@ function createService({ directory, home }) {
   }
 
   function worktrees(hostId) { return runRemote({ action: 'worktree_list' }, hostId); }
+  async function flashQueue() {
+    if (flashFlight) return flashFlight;
+    flashFlight = (async () => {
+      const hosts = store.data.settings.hosts.filter((host) => host.enabled);
+      const results = await Promise.allSettled(hosts.map((host) => runRemote({ action: 'flash_list' }, host.id)));
+      const queue = results.flatMap((result, index) => {
+        const host = hosts[index];
+        if (result.status === 'fulfilled') {
+          const items = result.value.filter((item) => item?.provider === 'claude' && /^[a-f0-9]{32}$/.test(item.id || '') && TMUX_NAME.test(item.name || '')).map((item) => ({ ...item, hostId: host.id, hostName: host.name, connected: true, branch: item.branch || hostCache.get(host.id)?.find((unit) => unit.id === item.name)?.branch || '' }));
+          flashCache.set(host.id, items);
+          attention.resolveRequests(items.filter((item) => ['resolved', 'expired'].includes(item.state)).map((item) => item.id));
+          return items;
+        }
+        return (flashCache.get(host.id) || []).map((item) => ({ ...item, connected: false }));
+      });
+      return queue.sort((a, b) => a.createdAt - b.createdAt);
+    })().finally(() => { flashFlight = null; });
+    return flashFlight;
+  }
+  async function flashDecide(client, input) {
+    if (!input || !['allow', 'deny'].includes(input.decision) || !TMUX_NAME.test(input.name || '') || !/^[a-f0-9]{32}$/.test(input.id || '')) throw new Error('Invalid Flash Traffic decision');
+    const hostId = getHost(input.hostId).id;
+    terminals.assertSessionOwner(client, input.name, hostId);
+    const terminal = terminals.sessions.get(`${hostId}/${input.name}`);
+    if (terminal && (terminal.connection !== 'connected' || terminal.exitCode !== null)) throw new Error('Target terminal is disconnected or exited');
+    const current = await runRemote({ action: 'flash_list' }, hostId);
+    const request = current.find((item) => item.id === input.id && item.name === input.name);
+    if (!request || !['pending', 'submitted', 'resolved'].includes(request.state)) throw new Error('Permission request is unavailable or expired');
+    if (request.decision && request.decision !== input.decision) throw new Error('Permission request already has a different decision');
+    const result = await runRemote({ action: 'flash_decide', name: input.name, id: input.id, decision: input.decision }, hostId);
+    void flashQueue().catch(() => {});
+    return result;
+  }
   function archiveWorktree(hostId, operationId) {
     if (typeof operationId !== 'string' || !/^[a-f0-9]{32}$/.test(operationId)) throw new Error('Invalid worktree operation ID');
     return runRemote({ action: 'worktree_archive', operationId }, hostId);
@@ -330,11 +374,14 @@ function createService({ directory, home }) {
     } finally { release(); }
   }
 
-  function action(client, action, name, hostId) {
+  async function action(client, action, name, hostId) {
     const host = getHost(hostId);
     if (!['interrupt', 'stop'].includes(action) || !TMUX_NAME.test(name)) throw new Error('Invalid session name');
     terminals.assertSessionOwner(client, name, host.id);
-    return runRemote({ action, name }, host.id);
+    const pending = action === 'stop' ? await runRemote({ action: 'flash_list' }, host.id).catch(() => []) : [];
+    const result = await runRemote({ action, name }, host.id);
+    if (action === 'stop') attention.resolveRequests(pending.filter((item) => item.name === name).map((item) => item.id));
+    return result;
   }
   async function uploadClipboardImage(client, id, png) {
     const { record } = terminals.get(client, id);
@@ -419,6 +466,6 @@ function createService({ directory, home }) {
     }
     return { matches, searched: selected.length, total: sessions.length, truncated, errors };
   }
-  return { store, events, terminals, tunnels, cleanup, exercises, inventory, health, create, worktrees, archiveWorktree, diffRequest, previewSitrep, launchSitrep, action, uploadClipboardImage, devUrls, openDevUrl, saveSettings, previewOpOrder, enrollOpOrder, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
+  return { store, events, terminals, tunnels, cleanup, exercises, inventory, health, create, worktrees, flashQueue, flashDecide, archiveWorktree, diffRequest, previewSitrep, launchSitrep, action, uploadClipboardImage, devUrls, openDevUrl, saveSettings, previewOpOrder, enrollOpOrder, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
 }
 module.exports = { createService };

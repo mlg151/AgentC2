@@ -59,6 +59,7 @@ export interface ExerciseContestant { id: string; provider: Exclude<Provider, 't
 export interface ExerciseRecord { version: 1; id: string; title: string; hostId: string; repository: string; baseCommit: string; prompt: string; testCommand: string; contestants: ExerciseContestant[]; state: string; createdAt: number; promotion: { contestantId: string; revision: string; target: string; branch: string; patchBytes: number; at: number } | null }
 export interface ExerciseInspection { operationId: string; baseCommit: string; branch: string; path: string; active: boolean; headCommit: string; revision: string; patchBytes: number; patch: string; patchTruncated: boolean; untracked: string[]; warnings: string[]; test: ExerciseTest | null; evidence: ExerciseContestant['evidence'] }
 export interface ExercisePromotionPreview { contestantId: string; target: string; branch: string; headCommit: string; revision: string; patchBytes: number; paths: number; ready: boolean; test: ExerciseTest | null }
+export interface FlashRequest { id: string; name: string; provider: 'claude'; tool: string; action: string; session: string; turn: string; createdAt: number; expiresAt: number; state: 'pending' | 'submitted' | 'resolved' | 'expired'; decision: 'allow' | 'deny' | null; resolvedAt?: number; hostId: string; hostName: string; connected: boolean; branch: string }
 export interface CleanupPolicy { hostId: string; provider: Exclude<Provider, 'terminal'>; enabled: boolean; days: number }
 export interface Settings { hosts: HostConfig[]; presets: LaunchPreset[]; notifications: boolean; cleanup?: CleanupPolicy[]; roe?: { version: 1; hostDefaults: Record<string, RoeProfile> }; opOrders?: OpOrder[] }
 export interface CleanupInput { hostId: string; provider: Exclude<Provider, 'terminal'>; days: number; ids?: string[]; allowPinned?: boolean }
@@ -69,7 +70,7 @@ export interface CleanupState { lastRuns: Record<string, string>; results: Clean
 export interface SessionMetadata { pinned: boolean; project: string; notes: string }
 export interface SituationWorkspace { version: 1; anchorKey: string | null; targetKey: string | null; focusedPane: 'anchor' | 'target'; callsigns: Record<string, string>; groupBy: 'host' | 'repository'; collapsedGroups: string[]; urgentFirst: boolean; rosterCollapsed: boolean; zen: boolean; ligatures: boolean; shortcuts: Record<string, string> }
 export interface Workspace { tabs: string[]; selectedKey: string | null; splitKey: string | null; metadata: Record<string, SessionMetadata>; situation?: SituationWorkspace }
-export interface AttentionItem { id: string; sessionKey: string; hostId: string; title: string; provider: Provider; createdAt: string; acknowledged: boolean; kind: 'completed' | 'failed' | 'input'; confidence: 'confirmed' | 'inferred'; detail: string; signature: string }
+export interface AttentionItem { id: string; sessionKey: string; hostId: string; title: string; provider: Provider; createdAt: string; acknowledged: boolean; requestId?: string; kind: 'completed' | 'failed' | 'input'; confidence: 'confirmed' | 'inferred'; detail: string; signature: string }
 
 export interface TerminalState { id: string; cols: number; rows: number; controller: { id: string; name: string } | null; canControl: boolean; exitCode: number | null; connection: 'connected' | 'reconnecting' | 'exited' }
 export interface TerminalSnapshot { text: string; sequence: number; state: TerminalState }
@@ -117,6 +118,8 @@ export interface AgentHQApi {
   inspectExercise(id: string, contestantId: string, verify: boolean): Promise<ExerciseInspection>;
   previewExercisePromotion(id: string, contestantId: string): Promise<ExercisePromotionPreview>;
   promoteExercise(id: string, contestantId: string, revision: string): Promise<ExerciseRecord>;
+  listFlashTraffic(): Promise<FlashRequest[]>;
+  decideFlashTraffic(input: { hostId: string; name: string; id: string; decision: 'allow' | 'deny' }): Promise<{ id: string; state: string; decision: string; duplicate: boolean }>;
   saveWorkspace(workspace: Workspace): Promise<Workspace>;
   setSessionPinned(key: string, pinned: boolean): Promise<boolean>;
   onSessionPinned(callback: (key: string, pinned: boolean) => void): () => void;

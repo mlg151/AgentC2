@@ -183,11 +183,11 @@ class Store {
   constructor(directory) {
     this.file = path.join(directory, 'workspace.json');
     fs.mkdirSync(directory, { recursive: true });
-    this.data = { settings: defaults(), workspace: validateWorkspace({ tabs: [], selectedKey: null, splitKey: null, metadata: {} }), attention: [], attentionCursors: {}, deletedSessions: [], cleanupState: { lastRuns: {}, results: [] }, cachedUnits: {}, exercises: [] };
+    this.data = { settings: defaults(), workspace: validateWorkspace({ tabs: [], selectedKey: null, splitKey: null, metadata: {} }), attention: [], attentionCursors: {}, deletedSessions: [], cleanupState: { lastRuns: {}, results: [] }, cachedUnits: {}, exercises: [], flashResolved: [] };
     if (fs.existsSync(this.file)) {
       // Do not silently overwrite an unreadable user's configuration.
       const saved = JSON.parse(fs.readFileSync(this.file, 'utf8'));
-      this.data = { ...this.data, settings: validateSettings(saved.settings), workspace: validateWorkspace(saved.workspace), attention: Array.isArray(saved.attention) ? saved.attention.slice(-500) : [], attentionCursors: saved.attentionCursors || {}, deletedSessions: Array.isArray(saved.deletedSessions) ? saved.deletedSessions.slice(-10000).map((key) => text(key, 300)) : [], cleanupState: validateCleanupState(saved.cleanupState || this.data.cleanupState), cachedUnits: validateCachedUnits(saved.cachedUnits || {}), exercises: Array.isArray(saved.exercises) ? saved.exercises.filter((item) => item?.version === 1 && /^[a-f0-9]{32}$/.test(item.id) && Array.isArray(item.contestants)).slice(0, 50) : [] };
+      this.data = { ...this.data, settings: validateSettings(saved.settings), workspace: validateWorkspace(saved.workspace), attention: Array.isArray(saved.attention) ? saved.attention.slice(-500) : [], attentionCursors: saved.attentionCursors || {}, deletedSessions: Array.isArray(saved.deletedSessions) ? saved.deletedSessions.slice(-10000).map((key) => text(key, 300)) : [], cleanupState: validateCleanupState(saved.cleanupState || this.data.cleanupState), cachedUnits: validateCachedUnits(saved.cachedUnits || {}), exercises: Array.isArray(saved.exercises) ? saved.exercises.filter((item) => item?.version === 1 && /^[a-f0-9]{32}$/.test(item.id) && Array.isArray(item.contestants)).slice(0, 50) : [], flashResolved: Array.isArray(saved.flashResolved) ? saved.flashResolved.filter((id) => /^[a-f0-9]{32}$/.test(id)).slice(-1000) : [] };
     }
   }
   save(key, value) {

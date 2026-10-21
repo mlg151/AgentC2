@@ -109,6 +109,15 @@ try {
   const oldEvent = { id: 'late-old-turn', kind: 'completed', at: new Date(Date.now() - 60000).toISOString() };
   assert.equal(attention.update([{ ...eventSession, events: [...eventSession.events, { id: 'event-2', kind: 'input' }, { id: 'event-3', kind: 'completed' }, oldEvent] }]).length, 0);
   assert.equal(new Attention(new Store(directory)).update([{ ...eventSession, events: [...eventSession.events, { id: 'event-2', kind: 'input' }, { id: 'event-3', kind: 'completed' }, oldEvent] }]).length, 0);
+  const requestId = 'c'.repeat(32);
+  const flashEvent = { id: 'flash-event', kind: 'input', at: new Date().toISOString(), requestId, tool: 'Bash' };
+  const alerted = attention.update([{ ...eventSession, events: [...eventSession.events, flashEvent] }]);
+  assert.equal(alerted[0].requestId, requestId);
+  attention.acknowledge(alerted[0].id);
+  assert.deepEqual(store.data.flashResolved, [], 'Acknowledging an alert must not answer or resolve a request');
+  attention.resolveRequests([requestId]);
+  assert.deepEqual(new Store(directory).data.flashResolved, [requestId]);
+  assert.equal(new Attention(new Store(directory)).update([{ ...eventSession, key: 'default/tmux:another', events: [flashEvent] }])[0].acknowledged, true);
   console.log('PASS settings, host validation, workspace persistence, attention confidence, transitions, acknowledgement, restart deduplication, and host isolation');
 } finally {
   fs.rmSync(directory, { recursive: true, force: true });

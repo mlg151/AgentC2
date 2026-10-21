@@ -291,3 +291,19 @@ kbd{font:10px Consolas,monospace;background:#29404e;padding:3px 5px;border-radiu
 .exercise-dialog button:not(.icon-button):not(.button-primary):not(.button-secondary):hover:not(:disabled) { background: #213440; border-color: #52707c; }
 .exercise-dialog button:disabled { opacity: .48; cursor: not-allowed; }
 .exercise-dialog .exercise-result pre { background: #0d1921; border: 1px solid #293e4c; border-radius: 4px; padding: 8px; }
+.flash-traffic { position: fixed; z-index: 80; right: 18px; bottom: 42px; width: min(480px, calc(100vw - 36px)); max-height: min(680px, calc(100vh - 90px)); overflow: auto; padding: 14px; background: #14222b; border: 1px solid #52707c; border-radius: 8px; box-shadow: 0 14px 40px #000a; color: #cad7dd; }
+.flash-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.flash-heading>div { display: grid; gap: 3px; }
+.flash-heading strong { color: #e0eff4; font-size: 16px; }
+.flash-heading small { color: #90a9b5; }
+.flash-items { display: flex; gap: 6px; overflow: auto; margin: 12px 0; }
+.flash-items button { min-width: 145px; max-width: 210px; text-align: left; background: #0d1921; color: #c8d8df; border: 1px solid #344d5b; border-radius: 5px; padding: 7px; }
+.flash-items button.selected { border-color: #35c4c7; }
+.flash-items button strong,.flash-items button span { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.flash-items button span { margin-top: 3px; color: #90a9b5; font-size: 11px; }
+.flash-detail { font-size: 12px; line-height: 1.4; }
+.flash-detail p { margin: 8px 0; }
+.flash-detail pre { max-height: 190px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; background: #0b1821; border: 1px solid #344d5b; border-radius: 5px; color: #d7e5ea; }
+.flash-detail .inline-actions { flex-wrap: wrap; }
+.flash-detail .inline-actions button { height: 34px; padding: 0 10px; font-size: 11px; }
+.flash-detail kbd { font-size: 9px; opacity: .8; }
