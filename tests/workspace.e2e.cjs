@@ -43,6 +43,8 @@ if p['action']=='setup':
  print('{}')
 elif p['action']=='pane-pid':
  print(run('tmux','display-message','-p','-t',names[0],'#{pane_pid}'))
+elif p['action']=='repo-path':
+ print(str(fixture_root/'anchor'))
 elif p['action']=='state':
  print(json.dumps([run('tmux','capture-pane','-p','-t',name) for name in names[:2]]))
 elif p['action']=='cleanup':
@@ -256,9 +258,31 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
     });
     config.notifications = true;
     config.presets.push({ id: 'fixture', name: 'Fixture launcher', provider: 'claude', command: 'python3', args: `-u -c 'import sys; print("HQ_PRESET_ARG="+sys.argv[-1],flush=True); sys.exit(7)'`, cwd: '/tmp', instructions: 'literal $(touch /tmp/never-execute-this) "quotes"', fullPermissions: false, attentionHooks: false, hostId: mirror.id });
+    config.presets.push({ id: 'worktree-fixture', name: 'Worktree fixture', provider: 'claude', command: 'python3', args: `-u -c 'import time; time.sleep(30)'`, cwd: '/tmp', instructions: '', fullPermissions: false, attentionHooks: false, hostId: mirror.id });
     await page.evaluate((c) => window.agentHQ.saveSettings(c), config);
     // Reload reads the saved preset exactly as a restart would.
     await page.reload(); await page.locator('.session-row').first().waitFor({ timeout: 60000 });
+    const repositoryPath = (await remote('repo-path')).trim();
+    await page.getByRole('button', { name: 'New unit', exact: true }).click();
+    await page.getByRole('combobox', { name: 'Launch preset' }).selectOption('worktree-fixture');
+    await page.getByLabel('Isolate this task in a Git worktree').check();
+    await page.getByRole('textbox', { name: 'Remote Git repository' }).fill(repositoryPath);
+    await page.getByRole('textbox', { name: 'Task slug' }).fill('parallel-qa');
+    await page.getByRole('textbox', { name: 'Session name', exact: true }).fill(`${marker} isolated`);
+    await page.screenshot({ path: path.join(os.tmpdir(), 'agentc2-worktree-launch.png') });
+    await page.getByRole('button', { name: 'Start session', exact: true }).click();
+    await page.getByRole('dialog', { name: 'New session', exact: true }).waitFor({ state: 'hidden', timeout: 60000 });
+    let isolated;
+    await poll(async () => { isolated = (await page.evaluate(() => window.agentHQ.inventory())).sessions.find((unit) => unit.title === `${marker} isolated` && unit.hostId === mirror.id); return Boolean(isolated?.worktreeOperation && isolated.branch?.startsWith('agentc2/parallel-qa-')); }, 'Isolated task did not appear in its Git worktree');
+    created.push(isolated.id);
+    const owned = await page.evaluate((hostId) => window.agentHQ.listWorktrees(hostId), mirror.id);
+    const worktree = owned.find((item) => item.operationId === isolated.worktreeOperation);
+    assert.ok(worktree?.status.owned && worktree.status.active && worktree.path === isolated.cwd);
+    await page.evaluate((unit) => window.agentHQ.stop(unit.id, unit.hostId), isolated);
+    await poll(async () => !(await page.evaluate((hostId) => window.agentHQ.listWorktrees(hostId), mirror.id)).find((item) => item.operationId === isolated.worktreeOperation)?.status.active, 'Stopped task still owns an active worktree session');
+    const archived = await page.evaluate((value) => window.agentHQ.archiveWorktree(value.hostId, value.operationId), { hostId: mirror.id, operationId: isolated.worktreeOperation });
+    assert.equal(archived.state, 'archived');
+    console.log('PASS desktop worktree launch, Git branch/path association, owned preview, managed stop, and clean archive');
     await page.getByRole('button', { name: 'New unit', exact: true }).click();
     await page.getByRole('combobox', { name: 'Launch preset' }).selectOption('fixture');
     await page.getByRole('textbox', { name: 'Session name', exact: true }).fill(`${marker} failed preset`);

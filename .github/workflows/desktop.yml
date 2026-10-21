@@ -122,6 +122,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: python3 tests/remote-helper.py
+      - run: python3 tests/worktrees.py
       - run: npx playwright-core install chromium
       - name: Terminal, workspace, and companion regressions
         run: xvfb-run -a dbus-run-session -- bash .github/scripts/test-linux-ssh.sh

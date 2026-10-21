@@ -30,6 +30,8 @@ contextBridge.exposeInMainWorld('agentHQ', {
     return () => ipcRenderer.removeListener('health:updated', listener);
   },
   create: (input) => ipcRenderer.invoke('create', input),
+  listWorktrees: (hostId) => ipcRenderer.invoke('worktrees:list', hostId),
+  archiveWorktree: (hostId, operationId) => ipcRenderer.invoke('worktrees:archive', hostId, operationId),
   interrupt: (name, hostId) => ipcRenderer.invoke('interrupt', name, hostId),
   stop: (name, hostId) => ipcRenderer.invoke('stop', name, hostId),
   openTerminal: (name, cols, rows, hostId) => ipcRenderer.invoke('terminal:open', name, cols, rows, hostId),

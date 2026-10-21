@@ -26,6 +26,7 @@ export interface Session {
   presetName?: string;
   branch?: string | null;
   repository?: string | null;
+  worktreeOperation?: string;
   outputActivity?: number[];
   activity?: 'engaged' | 'idle' | 'halted' | 'fault';
   contextPercent?: number | null;
@@ -70,7 +71,10 @@ export interface CreateInput {
   hostId?: string;
   presetId?: string;
   instructions?: string;
+  worktree?: { operationId: string; repository: string; baseRef: string; slug: string };
 }
+
+export interface WorktreeRecord { operationId: string; repository?: string; baseRef?: string; baseCommit?: string; branch?: string; path?: string; name?: string; provider?: Provider; slug?: string; title?: string; presetName?: string; hasInstructions?: boolean; state: string; status: { exists?: boolean; active?: boolean; owned: boolean; dirty?: boolean | null; merged?: boolean | null } }
 
 export interface AgentHQApi {
   readonly platform: string;
@@ -92,6 +96,8 @@ export interface AgentHQApi {
   health(): Promise<HostHealth[]>;
   onHealth(callback: (readings: HostHealth[]) => void): () => void;
   create(input: CreateInput): Promise<{ name: string }>;
+  listWorktrees(hostId: string): Promise<WorktreeRecord[]>;
+  archiveWorktree(hostId: string, operationId: string): Promise<WorktreeRecord>;
   interrupt(name: string, hostId?: string): Promise<void>;
   stop(name: string, hostId?: string): Promise<void>;
   openTerminal(name: string, cols: number, rows: number, hostId?: string): Promise<string>;

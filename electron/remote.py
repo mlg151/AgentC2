@@ -288,6 +288,7 @@ def tmux_sessions():
             "canInterrupt": managed and not dead, "canStop": managed,
             "exitCode": exit_code, "outputTail": output.stdout[-12000:],
             "presetName": tmux_option(name, "@hq_preset") if managed else "",
+            "worktreeOperation": tmux_option(name, "@hq_worktree") if managed else "",
             "events": session_events(name) if managed else [],
         })
     return result
@@ -412,7 +413,9 @@ def create(payload):
     title = " ".join(str(payload.get("title") or "").split())[:100]
     if not title:
         title = f"{provider.title()} session"
-    name = "hq-" + uuid.uuid4().hex[:12]
+    name = payload.get("managedName") or "hq-" + uuid.uuid4().hex[:12]
+    if not TMUX_RE.fullmatch(name):
+        raise ValueError("Invalid managed session name")
     if is_terminal:
         shell = pwd.getpwuid(os.getuid()).pw_shell or "/bin/bash"
         launch = shlex.join([shell, "-l", "-i"])
@@ -437,7 +440,7 @@ def create(payload):
             shutil.rmtree(HOOK_ROOT / name)
         raise RuntimeError(launched.stderr.strip() or "Could not start tmux session")
     try:
-        for key, value in (("provider", provider), ("title", title), ("cwd", str(cwd)), ("preset", preset.get("name", "") if preset else "")):
+        for key, value in (("provider", provider), ("title", title), ("cwd", str(cwd)), ("preset", preset.get("name", "") if preset else ""), ("worktree", payload.get("worktreeOperation") or "")):
             checked(["tmux", "set-option", "-t", name, f"@hq_{key}", value])
         configure_session({"name": name})
         checked(["tmux", "set-window-option", "-t", name, "remain-on-exit", "on"])
@@ -533,6 +536,14 @@ def main():
     elif action == "create":
         with cleanup_lock():
             result = create(payload)
+    elif action == "worktree_list":
+        result = worktree_list(payload)
+    elif action == "worktree_launch":
+        with cleanup_lock():
+            result = worktree_launch(payload)
+    elif action == "worktree_archive":
+        with cleanup_lock():
+            result = worktree_archive(payload)
     elif action == "cleanup_preview":
         result = cleanup_preview(payload)
     elif action == "cleanup_delete":

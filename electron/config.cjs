@@ -109,7 +109,7 @@ function validateCachedUnits(value) {
       const id = text(unit.id, 200);
       if (!unit.key.endsWith(`:${id}`)) throw new Error('Cached unit identity changed');
       const updatedAt = unit.updatedAt && Number.isFinite(Date.parse(unit.updatedAt)) ? text(unit.updatedAt, 80) : null;
-      return { key: unit.key, id, provider: unit.provider, kind: unit.kind, title: text(unit.title || '', 150), cwd: text(unit.cwd || '', 500), updatedAt, state: text(unit.state || '', 40), managed: Boolean(unit.managed), canAttach: Boolean(unit.canAttach), canResume: Boolean(unit.canResume), canInterrupt: Boolean(unit.canInterrupt), canStop: Boolean(unit.canStop), exitCode: Number.isInteger(unit.exitCode) ? unit.exitCode : null, presetName: text(unit.presetName || '', 100), branch: text(unit.branch || '', 200), repository: text(unit.repository || '', 500) };
+      return { key: unit.key, id, provider: unit.provider, kind: unit.kind, title: text(unit.title || '', 150), cwd: text(unit.cwd || '', 500), updatedAt, state: text(unit.state || '', 40), managed: Boolean(unit.managed), canAttach: Boolean(unit.canAttach), canResume: Boolean(unit.canResume), canInterrupt: Boolean(unit.canInterrupt), canStop: Boolean(unit.canStop), exitCode: Number.isInteger(unit.exitCode) ? unit.exitCode : null, presetName: text(unit.presetName || '', 100), branch: text(unit.branch || '', 200), repository: text(unit.repository || '', 500), worktreeOperation: text(unit.worktreeOperation || '', 32) };
     });
   }
   return cached;
@@ -178,7 +178,7 @@ class Store {
       managed: unit.managed, canAttach: unit.canAttach, canResume: unit.canResume,
       canInterrupt: unit.canInterrupt, canStop: unit.canStop, exitCode: unit.exitCode,
       presetName: String(unit.presetName || '').slice(0, 100),
-      branch: String(unit.branch || '').slice(0, 200), repository: String(unit.repository || '').slice(0, 500),
+      branch: String(unit.branch || '').slice(0, 200), repository: String(unit.repository || '').slice(0, 500), worktreeOperation: String(unit.worktreeOperation || '').slice(0, 32),
     }));
     const next = validateCachedUnits({ ...this.data.cachedUnits, [hostId]: summary });
     if (JSON.stringify(next[hostId]) !== JSON.stringify(this.data.cachedUnits[hostId])) this.save('cachedUnits', next);

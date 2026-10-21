@@ -218,6 +218,10 @@ kbd{font:10px Consolas,monospace;background:#29404e;padding:3px 5px;border-radiu
 .form-grid{display:flex;gap:12px}.form-grid>label{flex:1;min-width:0}
 .create-dialog .checkbox-label,.checkbox-label{display:flex;flex-direction:row;align-items:center;gap:8px;font-size:12px;color:#b3cad5;font-weight:400}
 .checkbox-label input{height:15px;width:15px;accent-color:#35c4c7;flex:none}
+.worktree-list{display:flex;flex-direction:column;gap:8px;border:1px solid #35505f;border-radius:5px;padding:10px;max-height:180px;overflow:auto}
+.worktree-list>strong{font-size:12px}.worktree-list small{font-size:11px;color:#9fb9c5;overflow-wrap:anywhere}
+.worktree-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;border-top:1px solid #294251;padding-top:8px}
+.worktree-row span{display:flex;flex-direction:column;gap:3px;min-width:0;overflow-wrap:anywhere}.worktree-row button{flex:none}
 .grow{flex:1;min-width:0}
 .form-error{color:#ffaaa5;font-size:12px;overflow-wrap:anywhere}
 .quick-results{display:flex;flex-direction:column;gap:3px;max-height:440px;overflow:auto}
