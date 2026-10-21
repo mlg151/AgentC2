@@ -106,6 +106,7 @@ function createCleanup({ store, events, inventory, runRemote, hostId }) {
     try {
       for (const policy of store.data.settings.cleanup || []) {
         const scope = `${policy.hostId}/${policy.provider}`;
+        if (policy.provider === 'antigravity') continue;
         if (!policy.enabled || !store.data.settings.hosts.some((host) => host.id === policy.hostId && host.enabled) || Date.now() - (Date.parse(store.data.cleanupState.lastRuns[scope]) || 0) < DAY) continue;
         // Persist before dispatch: one bounded catch-up per day after restart,
         // including failed/unreachable hosts. Never replay an uncertain action.

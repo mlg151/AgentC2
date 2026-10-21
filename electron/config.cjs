@@ -58,7 +58,9 @@ function validateSettings(input) {
     const key = `${policy.hostId}/${policy.provider}`;
     if (!hosts.some((host) => host.id === policy.hostId) || !PROVIDERS.includes(policy.provider) || scopes.has(key) || typeof policy.enabled !== 'boolean' || !Number.isInteger(policy.days) || policy.days < 1 || policy.days > 36500) throw new Error('Cleanup policies need a unique host/provider and an age between 1 and 36500 days');
     scopes.add(key);
-    return { hostId: policy.hostId, provider: policy.provider, enabled: policy.enabled, days: policy.days };
+    // Older versions could save an enabled Antigravity policy even though its
+    // deletion adapter always excluded every history. Retire that no-op policy.
+    return { hostId: policy.hostId, provider: policy.provider, enabled: policy.provider !== 'antigravity' && policy.enabled, days: policy.days };
   });
   const roe = input.roe || { version: 1, hostDefaults: {} };
   if (roe.version !== 1 || !roe.hostDefaults || typeof roe.hostDefaults !== 'object' || Array.isArray(roe.hostDefaults)) throw new Error('Unsupported Rules of Engagement settings');
