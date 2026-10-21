@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
-const { spawnSync } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
+const { EventEmitter } = require('node:events');
 const { Tunnels } = require('../electron/tunnels.cjs');
 const { sshBinary } = require('../electron/platform.cjs');
 
@@ -25,13 +26,24 @@ child=subprocess.Popen([sys.executable,'-m','http.server',str(port),'--bind','12
 sock=socket.socket();sock.bind(('127.0.0.1',0));closed=sock.getsockname()[1];sock.close()
 print(json.dumps({'port':port,'closed':closed,'pid':child.pid,'root':str(root)}))`);
   const updates = [];
-  const tunnels = new Tunnels({ binary, argsForHost: () => args, onUpdate: (key, urls) => updates.push({ key, urls }) });
+  let launchAttempts = 0;
+  const tunnels = new Tunnels({ binary, argsForHost: () => args, onUpdate: (key, urls) => updates.push({ key, urls }), spawnProcess: (command, invocation, options) => {
+    launchAttempts++;
+    assert.ok(invocation[invocation.indexOf('-L') + 1].startsWith('127.0.0.1:'));
+    if (launchAttempts > 1) return spawn(command, invocation, options);
+    const child = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = () => {};
+    process.nextTick(() => { child.stderr.emit('data', Buffer.from('bind: Address already in use')); child.emit('exit', 255); });
+    return child;
+  } });
   const host = { id: 'fixture', target, enabled: true, autoForward: false };
   try {
     const url = `http://localhost:${fixture.port}/index.html?token=fixture`;
     tunnels.feed(host, 'fixture/tmux:one', `Ready at ${url}\n`);
     assert.equal(tunnels.list('fixture/tmux:one')[0].status, 'available');
     const first = await tunnels.open(host, 'fixture/tmux:one', url);
+    assert.ok(launchAttempts >= 2, 'Occupied local port was not retried');
     assert.equal(new URL(first).pathname, '/index.html');
     assert.equal(new URL(first).search, '?token=fixture');
     assert.equal(await (await fetch(first)).text(), 'AgentC2 tunnel fixture');
