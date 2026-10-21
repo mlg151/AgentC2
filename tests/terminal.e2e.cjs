@@ -298,10 +298,12 @@ async function waitForInput(pane) {
     await page.keyboard.press('Enter');
     await poll(async () => (await pane.locator('.xterm-rows').innerText()).includes('https://example.com/agent-hq?from=desktop'), 'Link output did not render');
     await app.evaluate(({ shell }) => { globalThis.qaExternalLinks = []; shell.openExternal = async (url) => { globalThis.qaExternalLinks.push(url); }; });
-    const linkScreen = await pane.locator('.xterm-screen').boundingBox();
-    await page.mouse.move(linkScreen.x + 40, linkScreen.y + 8);
-    await page.waitForTimeout(250);
-    await page.mouse.click(linkScreen.x + 40, linkScreen.y + 8);
+    const linkRow = pane.locator('.xterm-rows > div').filter({ hasText: /^https:\/\/example\.com\/agent-hq\?from=desktop/ }).first();
+    const linkBounds = await linkRow.boundingBox();
+    assert.ok(linkBounds, 'Rendered URL row is visible');
+    await page.mouse.move(linkBounds.x + 40, linkBounds.y + linkBounds.height / 2);
+    await page.waitForTimeout(500);
+    await page.mouse.click(linkBounds.x + 40, linkBounds.y + linkBounds.height / 2);
     await poll(async () => (await app.evaluate(() => globalThis.qaExternalLinks)).includes('https://example.com/agent-hq?from=desktop'), 'Desktop URL did not open in the system browser');
     await page.evaluate(() => { window.open('file:///C:/Windows/win.ini'); window.open('javascript:alert(1)'); });
     await page.waitForTimeout(200);

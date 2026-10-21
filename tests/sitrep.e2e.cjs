@@ -124,6 +124,7 @@ function remote(action) {
     await page.locator('.session-pane.is-focused:not(.pane-hidden)[aria-label="Session Source QA"]').waitFor();
     await page.getByRole('button', { name: 'Notes & handoff' }).click();
     await page.getByRole('button', { name: 'SitRep handoff' }).click();
+    assert.equal(await page.getByRole('textbox', { name: 'Recipient title' }).inputValue(), 'Handoff: Source QA');
     await page.getByRole('combobox', { name: 'Target SSH host' }).selectOption('recipient');
     await page.getByRole('textbox', { name: 'Primary Git checkout on target host' }).fill(setup.target);
     await page.getByRole('combobox', { name: 'Recipient provider' }).selectOption('claude');
@@ -137,7 +138,17 @@ function remote(action) {
     await page.screenshot({ path: path.join(screenshotDirectory, 'agentc2-sitrep-preview.png') });
     await page.getByRole('button', { name: 'Send and launch recipient' }).click();
     await page.getByRole('dialog', { name: 'SitRep handoff' }).waitFor({ state: 'hidden', timeout: 30000 });
-    await page.locator('.session-pane.is-focused:not(.pane-hidden)[aria-label="Session Handoff: Source QA"]').waitFor({ timeout: 15000 });
+    try {
+      await page.locator('.session-pane.is-focused:not(.pane-hidden)[aria-label="Session Handoff: Source QA"]').waitFor({ timeout: 15000 });
+    } catch (error) {
+      const state = await page.evaluate(async () => ({
+        panes: [...document.querySelectorAll('.session-pane')].map((pane) => ({ label: pane.getAttribute('aria-label'), className: pane.className })),
+        alerts: [...document.querySelectorAll('[role="alert"]')].map((alert) => alert.textContent),
+        inventoryTitles: (await window.agentHQ.inventory()).sessions.map((session) => session.title),
+      }));
+      console.error('SitRep recipient UI diagnostic:', JSON.stringify(state));
+      throw error;
+    }
     console.log('PASS Electron SitRep review, target selection, and recipient launch');
   } finally {
     if (app) await app.close();
