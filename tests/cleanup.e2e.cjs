@@ -128,9 +128,9 @@ async function launch() {
     assert.equal(await page.getByLabel('Enable automatic history cleanup', { exact: true }).isChecked(), true);
     await page.getByRole('combobox', { name: 'History provider', exact: true }).selectOption('antigravity');
     assert.equal(await page.getByLabel('Enable automatic history cleanup', { exact: true }).isChecked(), false);
-    assert.equal(await page.getByLabel('Enable automatic history cleanup', { exact: true }).isDisabled(), true);
-    assert.equal(await page.getByRole('button', { name: 'Preview retention / run now', exact: true }).isDisabled(), true);
-    await page.getByText('Automatic retention is unavailable for Antigravity', { exact: false }).waitFor();
+    assert.equal(await page.getByLabel('Enable automatic history cleanup', { exact: true }).isEnabled(), true);
+    assert.equal(await page.getByRole('button', { name: 'Preview retention / run now', exact: true }).isEnabled(), true);
+    await page.getByText('Antigravity cleanup uses the provider’s exact-ID', { exact: false }).waitFor();
     await page.screenshot({ path: path.join(os.tmpdir(), 'agentc2-cleanup-antigravity.png') });
     await page.getByRole('combobox', { name: 'History provider', exact: true }).selectOption('claude');
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1000, 760));

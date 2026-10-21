@@ -105,12 +105,12 @@ class Cleanup(unittest.TestCase):
         self.home = Path(self.temporary.name)
         self.helper = {"__name__": "cleanup_test"}
         root = Path(__file__).resolve().parents[1] / "electron"
-        exec((root / "session-cleanup.py").read_text() + "\n" + (root / "provider_telemetry.py").read_text() + "\n" + (root / "remote.py").read_text(), self.helper)
+        exec((root / "antigravity-cleanup.py").read_text() + "\n" + (root / "session-cleanup.py").read_text() + "\n" + (root / "provider_telemetry.py").read_text() + "\n" + (root / "remote.py").read_text(), self.helper)
         self.helper["HOME"] = self.home
         environment = patch.dict(os.environ, {"CODEX_HOME": str(self.home / '.codex'), "CODEX_SQLITE_HOME": str(self.home / '.codex')})
         environment.start()
         self.addCleanup(environment.stop)
-        self.helper["cleanup_activity"] = lambda provider: ""
+        self.helper["cleanup_activity"] = lambda provider, ignore_pid=None: ""
         self.one = "12345678-1234-4234-8234-123456789012"
         self.two = "12345678-1234-4234-8234-123456789013"
 
@@ -154,7 +154,7 @@ class Cleanup(unittest.TestCase):
         items = self.preview()
         transcript.write_text(transcript.read_text() + '{}\n')
         self.assertEqual(self.delete(items)[0]['status'], 'changed')
-        self.helper['cleanup_activity'] = lambda provider: 'Live provider fixture'
+        self.helper['cleanup_activity'] = lambda provider, ignore_pid=None: 'Live provider fixture'
         self.assertFalse(self.preview()[0]['eligible'])
         self.assertTrue(transcript.exists())
 
@@ -171,7 +171,9 @@ class Cleanup(unittest.TestCase):
         linked.unlink()
         self.write('.claude/projects/project/sessions-index.json', '{"version": 999, "entries": []}')
         self.assertFalse(self.preview()[0]['eligible'])
-        self.assertFalse(self.preview(provider='antigravity')[0]['eligible'])
+        with patch.dict(self.helper, {'run': lambda args, **kwargs: subprocess.CompletedProcess(args, 0, '1.4.4\n', '')}):
+            antigravity = self.preview(provider='antigravity')[0]
+        self.assertTrue(antigravity['eligible'] and antigravity['missing'])
         self.assertFalse(self.preview(ids=['../../escape'])[0]['eligible'])
         self.assertEqual(secret.read_text(), 'keep')
 
@@ -241,6 +243,76 @@ class Cleanup(unittest.TestCase):
             connection.execute('DROP TABLE threads')
             connection.execute('CREATE TABLE threads (id TEXT)')
         self.assertFalse(self.preview(provider='codex')[0]['eligible'])
+
+    def test_antigravity_versioned_picker_scopes_deletion(self):
+        root = self.home / '.gemini/antigravity-cli'
+        conversations = root / 'conversations'
+        conversations.mkdir(parents=True)
+        trajectory = conversations / f'{self.one}.db'
+        with sqlite3.connect(trajectory) as connection:
+            for table in ('trajectory_meta', 'steps', 'parent_references', 'battle_mode_infos'):
+                connection.execute(f'CREATE TABLE {table} (value TEXT)')
+        brain = root / 'brain' / self.one
+        brain.mkdir(parents=True)
+        (brain / 'transcript.jsonl').write_text('{}\n')
+        unrelated = conversations / f'{self.two}.db'
+        unrelated.write_bytes(b'unrelated history')
+        summary = root / 'conversation_summaries.db'
+        with sqlite3.connect(summary) as connection:
+            connection.execute('CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY, title TEXT, step_count INTEGER, workspace_uris TEXT, parent_conversation_id TEXT, nesting_depth INTEGER, battle_id TEXT, winning_conversation_id TEXT, group_id TEXT, not_fully_idle INTEGER)')
+            connection.execute('INSERT INTO conversation_summaries VALUES (?, ?, ?, ?, NULL, 0, NULL, NULL, NULL, 0)',
+                               (self.one, 'Fixture title', 2, json.dumps([self.home.as_uri()])))
+        self.helper['run'] = lambda args, **kwargs: subprocess.CompletedProcess(args, 0, '1.4.4\n', '')
+        item = self.preview(provider='antigravity')[0]
+        self.assertTrue(item['eligible'], item)
+        self.assertTrue(item['estimated'])
+        self.assertEqual(item['method'], 'Antigravity CLI picker')
+        self.assertNotIn(str(summary.relative_to(self.home)), item['files'])
+        with patch.dict(self.helper, {'run': lambda args, **kwargs: subprocess.CompletedProcess(args, 0, '1.4.5\n', '')}):
+            self.assertFalse(self.preview(provider='antigravity')[0]['eligible'])
+        (self.home / '.system_generated/worktrees').mkdir(parents=True)
+        self.assertFalse(self.preview(provider='antigravity')[0]['eligible'])
+        shutil.rmtree(self.home / '.system_generated')
+
+        class FixturePicker:
+            def __init__(self, deadline):
+                self.pid = None
+
+            def delete(self, session_id, title, steps):
+                assert (session_id, title, steps) == (self_outer.one, 'Fixture title', 2)
+                trajectory.unlink()
+                shutil.rmtree(brain)
+                with sqlite3.connect(summary) as connection:
+                    connection.execute('DELETE FROM conversation_summaries WHERE conversation_id = ?', (session_id,))
+
+            def close(self):
+                pass
+
+        self_outer = self
+        with patch.dict(self.helper, {'AntigravityPicker': FixturePicker}):
+            outcome = self.delete([item], provider='antigravity')[0]
+        self.assertEqual(outcome['status'], 'deleted', outcome)
+        self.assertTrue(outcome['estimated'])
+        self.assertTrue(unrelated.exists())
+        self.assertEqual(self.delete(self.preview(provider='antigravity'), provider='antigravity')[0]['status'], 'missing')
+
+    def test_antigravity_picker_rejects_ambiguous_selection_before_f4(self):
+        picker = self.helper['AntigravityPicker'].__new__(self.helper['AntigravityPicker'])
+        picker.deadline = time.monotonic() + 20
+        picker.usable = True
+        keys = []
+        picker.keys = lambda *args: keys.append(args)
+        picker.screen = lambda: (f'Search: {self.one}\n> Fixture 2 steps\n> Other 2 steps\nf4 Delete\n'
+                                 if keys else 'Type to search conversations\nf4 Delete\n')
+        def wait_for(predicate, message, seconds):
+            screen = picker.screen()
+            if not predicate(screen):
+                raise ValueError(message)
+            return screen
+        picker.wait_for = wait_for
+        with self.assertRaisesRegex(ValueError, 'Exact Antigravity conversation'):
+            picker.delete(self.one, 'Fixture', 2)
+        self.assertEqual(keys, [('-l', self.one)])
 
     @unittest.skipUnless(os.environ.get('AGENTC2_TEST_NATIVE_CLEANUP') == '1' and shutil.which('codex'), 'Opt in to disposable native Codex deletion with AGENTC2_TEST_NATIVE_CLEANUP=1')
     def test_installed_codex_native_contract_in_disposable_home(self):

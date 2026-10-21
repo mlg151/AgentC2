@@ -28,7 +28,7 @@ def cleanup_file(path):
             "inode": info.st_ino, "device": info.st_dev, "hash": digest.hexdigest()}
 
 
-def cleanup_activity(provider):
+def cleanup_activity(provider, ignore_pid=None):
     """Without a proven conversation ID, a live provider protects its histories."""
     names = {"codex": {"codex"}, "claude": {"claude", "claude3"}, "antigravity": {"agy", "antigravity"}}[provider]
     try:
@@ -36,7 +36,7 @@ def cleanup_activity(provider):
     except OSError:
         return "Process activity cannot be verified"
     for process in processes:
-        if not process.name.isdigit() or int(process.name) == os.getpid():
+        if not process.name.isdigit() or int(process.name) in (os.getpid(), ignore_pid):
             continue
         try:
             if process.stat().st_uid != os.getuid():
@@ -172,18 +172,21 @@ def cleanup_codex(session_id):
     return files, {}, path, [row["id"], row["rollout_path"], row["updated_at_ms"], bool(row["is_pinned"])]
 
 
-def cleanup_plan(provider, session_id):
+def cleanup_plan(provider, session_id, ignore_pid=None):
     result = {"id": session_id, "provider": provider, "eligible": False, "reason": "", "bytes": None,
-              "updatedAt": None, "fingerprint": "", "files": [], "estimated": provider == "codex"}
+              "updatedAt": None, "fingerprint": "", "files": [], "estimated": provider in ("codex", "antigravity")}
     try:
         if provider not in PROVIDERS or not isinstance(session_id, str) or not ID_RE.fullmatch(session_id):
             raise ValueError("Invalid conversation ID or provider")
-        if provider == "antigravity":
-            raise ValueError("Antigravity CLI has no verified scoped deletion adapter; opaque histories are retained")
-        reason = cleanup_activity(provider)
+        reason = cleanup_activity(provider, ignore_pid)
         if reason:
             raise ValueError(reason)
-        files, rewrites, transcript, row = cleanup_codex(session_id) if provider == "codex" else cleanup_claude(session_id)
+        if provider == "codex":
+            files, rewrites, transcript, row = cleanup_codex(session_id)
+        elif provider == "antigravity":
+            files, rewrites, transcript, row = antigravity_snapshot(session_id)
+        else:
+            files, rewrites, transcript, row = cleanup_claude(session_id)
         owned = [cleanup_file(path) for path in sorted(set(files))]
         shared = [cleanup_file(path) for path in sorted(rewrites)]
         if len(owned) > 10000 or sum(item["size"] for item in owned) > 512 * 1024 * 1024:
@@ -191,14 +194,14 @@ def cleanup_plan(provider, session_id):
         snapshot = {"owned": owned, "shared": shared, "row": row}
         fingerprint = hashlib.sha256(json.dumps(snapshot, sort_keys=True).encode()).hexdigest()
         timestamps = [item["mtime"] / 1e9 for item in owned]
-        if row and row[2]:
+        if provider == "codex" and row and row[2]:
             timestamps.append(row[2] / 1000)
         result.update(eligible=True, bytes=sum(item["size"] for item in owned), files=[item["path"] for item in owned] + [item["path"] + " (matching entries only)" for item in shared],
                       updatedAt=iso_from_epoch(max(timestamps)) if timestamps else None, fingerprint=fingerprint,
-                      missing=transcript is None, method="Codex native delete" if provider == "codex" else "Claude session files")
-        result["providerPinned"] = bool(row and row[3])
+                      missing=transcript is None, method={"codex": "Codex native delete", "claude": "Claude session files", "antigravity": "Antigravity CLI picker"}[provider])
+        result["providerPinned"] = bool(provider == "codex" and row and row[3])
         return result, (files, rewrites, transcript, snapshot)
-    except (OSError, ValueError, sqlite3.Error, TypeError) as error:
+    except (OSError, ValueError, sqlite3.Error, TypeError, subprocess.TimeoutExpired) as error:
         # Paths and transcript contents are not echoed in failure records.
         result["reason"] = str(error) if isinstance(error, ValueError) else "Provider storage is unreadable, locked, or unsupported"
         return result, None
@@ -230,9 +233,9 @@ def cleanup_replace(path, content, expected):
             os.unlink(temporary)
 
 
-def cleanup_delete_one(payload):
+def cleanup_delete_one(payload, picker=None):
     provider, session_id = payload.get("provider"), payload.get("id")
-    current, plan = cleanup_plan(provider, session_id)
+    current, plan = cleanup_plan(provider, session_id, picker.pid if picker else None)
     if not current["eligible"]:
         return {"id": session_id, "status": "excluded", "detail": current["reason"]}
     if current["fingerprint"] != payload.get("fingerprint"):
@@ -242,6 +245,11 @@ def cleanup_delete_one(payload):
     try:
         if current["missing"]:
             return {"id": session_id, "status": "missing", "detail": "Already absent", "bytes": 0}
+        if provider == "antigravity":
+            if picker is None:
+                raise ValueError("Antigravity picker was not started")
+            picker.delete(session_id, snapshot["row"][1], snapshot["row"][2])
+            return {"id": session_id, "status": "deleted", "detail": "Antigravity confirmed picker deletion; reviewed bytes are an estimate", "bytes": current["bytes"], "estimated": True}
         if provider == "codex":
             deleted = run(["codex", "delete", "--force", session_id], timeout=max(1, min(10, int(payload["deadline"] - time.monotonic()))))
             if deleted.returncode != 0:
@@ -275,7 +283,11 @@ def cleanup_delete_one(payload):
             path.unlink()
             removed_bytes += expected["size"]
         return {"id": session_id, "status": "deleted", "detail": "Removed reviewed session files and matching index/history entries", "bytes": removed_bytes, "estimated": False}
+    except AntigravityUncertain:
+        return {"id": session_id, "status": "unknown", "detail": "Antigravity confirmation was sent but deletion was not verified. Refresh and preview before retrying", "bytes": removed_bytes}
     except (OSError, ValueError, sqlite3.Error):
+        if provider == "antigravity":
+            return {"id": session_id, "status": "failed", "detail": "The Antigravity picker did not verify this history; no deletion confirmation was sent", "bytes": 0}
         return {"id": session_id, "status": "failed", "detail": "Deletion was not fully confirmed. Some reviewed data may have been removed; preview remaining history before retrying", "bytes": removed_bytes}
 
 
@@ -284,7 +296,7 @@ def cleanup_delete(payload):
     if provider not in PROVIDERS or not isinstance(items, list) or not items or len(items) > 50:
         raise ValueError("Delete accepts up to 50 reviewed conversation IDs")
     results, approved, shared = [], {}, {}
-    deadline = time.monotonic() + 20
+    deadline = time.monotonic() + (270 if provider == "antigravity" else 20)
     with cleanup_lock():
         # Validate the complete batch before the first mutation. Later entries
         # can share an index/history file that our earlier deletions rewrite.
@@ -295,20 +307,33 @@ def cleanup_delete(payload):
             else:
                 approved[item["id"]] = plan[3]
                 shared.update({entry["path"]: entry for entry in plan[3]["shared"]})
-        for session_id, original in approved.items():
-            current, plan = cleanup_plan(provider, session_id)
-            try:
-                if time.monotonic() > deadline:
-                    raise ValueError("Batch time limit reached; preview remaining history")
-                if not current["eligible"] or plan[3]["owned"] != original["owned"] or plan[3]["row"] != original["row"]:
-                    raise ValueError("History changed after preview; preview again")
-                for item in original["shared"]:
-                    if cleanup_file(HOME / item["path"]) != shared[item["path"]]:
-                        raise ValueError("Shared history changed after preview; preview again")
-                result = cleanup_delete_one({"provider": provider, "id": session_id, "fingerprint": current["fingerprint"], "deadline": deadline})
-                for item in original["shared"]:
-                    shared[item["path"]] = cleanup_file(HOME / item["path"])
-                results.append(result)
-            except (OSError, ValueError):
-                results.append({"id": session_id, "status": "changed", "detail": "History changed or the batch time limit was reached; preview remaining history"})
+        picker = None
+        try:
+            if provider == "antigravity" and any(item["owned"] for item in approved.values()):
+                try:
+                    picker = AntigravityPicker(deadline)
+                except (OSError, ValueError, subprocess.TimeoutExpired):
+                    results.extend({"id": session_id, "status": "missing" if not original["owned"] else "failed",
+                                    "detail": "Already absent" if not original["owned"] else "The version-gated Antigravity picker could not be verified; no deletion was sent"}
+                                   for session_id, original in approved.items())
+                    return {"items": results}
+            for session_id, original in approved.items():
+                current, plan = cleanup_plan(provider, session_id, picker.pid if picker else None)
+                try:
+                    if time.monotonic() > deadline:
+                        raise ValueError("Batch time limit reached; preview remaining history")
+                    if not current["eligible"] or plan[3]["owned"] != original["owned"] or plan[3]["row"] != original["row"]:
+                        raise ValueError("History changed after preview; preview again")
+                    for item in original["shared"]:
+                        if cleanup_file(HOME / item["path"]) != shared[item["path"]]:
+                            raise ValueError("Shared history changed after preview; preview again")
+                    result = cleanup_delete_one({"provider": provider, "id": session_id, "fingerprint": current["fingerprint"], "deadline": deadline}, picker)
+                    for item in original["shared"]:
+                        shared[item["path"]] = cleanup_file(HOME / item["path"])
+                    results.append(result)
+                except (OSError, ValueError):
+                    results.append({"id": session_id, "status": "changed", "detail": "History changed or the batch time limit was reached; preview remaining history"})
+        finally:
+            if picker:
+                picker.close()
     return {"items": results}
