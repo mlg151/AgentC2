@@ -1,0 +1,9 @@
+# Saved conversation cleanup
+
+AgentC2 can preview and delete verified inactive Codex and Claude conversation histories on a configured SSH host. The desktop cleanup dialog handles single or bulk deletion, shows eligibility and estimated bytes, requires an explicit confirmation, and reports partial or uncertain outcomes. Optional retention runs while AgentC2 is open, in bounded daily batches, and excludes pinned, live, stale, ambiguous, or unknown-format records. Deleting history is separate from detaching or stopping a managed terminal and from archiving a Git worktree.
+
+Codex uses its native `codex delete --force` operation for supported local thread storage. Claude uses a version-aware adapter for verified session transcripts and supported per-session sidecars and index entries. Unknown layouts and shared/unscoped data are retained. AgentC2 never calls arbitrary deletion paths or deletes a project repository, credentials, or a worktree as part of history cleanup. These operations are not secure erasure.
+
+Antigravity CLI 1.4.4 has no documented noninteractive, conversation-ID deletion command. AgentC2 therefore marks it unsupported for automated cleanup and does not remove opaque `.pb` files or sidecars. The provider [documents deletion in its `/resume` session picker](https://antigravity.google/docs/cli/commands/resume/): open `agy` from the original project directory, select the conversation, press Ctrl+Delete, and confirm. Refresh AgentC2 afterward. This manual provider action is outside AgentC2’s automated retention policy.
+
+Validation for the supported adapters includes disposable-home Python fixtures, isolated SSH/Electron cleanup checks, and the desktop/companion regression suite. Antigravity manual TUI deletion was not run because the available CLI has no authenticated disposable conversation; its supported instructions were checked against the provider documentation and local `agy --help`/version output.
