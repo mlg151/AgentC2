@@ -15,7 +15,7 @@ const root = path.resolve(__dirname, '..');
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-hq-companion-test-'));
 const host = process.env.AGENTC2_HOST || process.env.AGENT_HQ_HOST;
 if (!host) throw new Error('Set AGENTC2_HOST to an explicitly configured SSH test host');
-const ssh = process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'OpenSSH', 'ssh.exe') : 'ssh';
+const ssh = require('../electron/platform.cjs').sshBinary();
 const name = `hq-${crypto.randomBytes(6).toString('hex')}`;
 const marker = `HQ_PHONE_${crypto.randomBytes(4).toString('hex')}`;
 const created = [];
@@ -87,7 +87,7 @@ async function freePort() {
     const pair = await desktop.evaluate(() => window.agentHQ.pairRemote());
     browser = process.env.AGENT_HQ_COMPANION_BROWSER === 'webkit'
       ? await webkit.launch({ headless: true })
-      : await chromium.launch({ headless: true, channel: process.platform === 'win32' ? 'msedge' : undefined });
+      : await chromium.launch({ headless: true, channel: process.platform === 'win32' && process.env.AGENTC2_COMPANION_CHROMIUM !== '1' ? 'msedge' : undefined });
     // Service-worker installation bypasses Playwright's local HTTP proxy routes.
     // Its static source is checked separately; real installation needs Tailscale.
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, serviceWorkers: 'block' });
@@ -149,9 +149,9 @@ async function freePort() {
     await poll(async () => (await page.locator('.phone-control').innerText()).includes('Desktop controls'), 'Phone did not show desktop reclaim');
     console.log('PASS mobile pairing, responsive session list, live terminal, composer, retained-history search, server-enforced handoff, and desktop reclaim');
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
-    assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()), false);
+    assert.equal(await app.evaluate(({ BrowserWindow }) => process.platform === 'linux' ? BrowserWindow.getAllWindows()[0].isMinimized() : !BrowserWindow.getAllWindows()[0].isVisible()), true);
     assert.equal((await desktop.evaluate(() => window.agentHQ.remoteStatus())).running, true);
-    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].show());
+    await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].restore(); BrowserWindow.getAllWindows()[0].show(); });
     await desktop.evaluate((value) => window.agentHQ.saveRemote({ ...value, enabled: false }), config);
     await poll(async () => (await page.locator('.phone-connection').innerText()) !== 'Connected', 'Phone did not notice gateway shutdown');
     await desktop.evaluate((value) => window.agentHQ.saveRemote(value), config);
@@ -160,8 +160,18 @@ async function freePort() {
     assert.equal(await page.getByRole('button', { name: 'Send', exact: true }).isEnabled(), false);
     const state = await desktop.evaluate((id) => window.agentHQ.terminalState(id), handle);
     assert.equal(state.canControl, true);
+    const sleepingSocket = [...proxySockets].find((socket) => socket.readyState === WebSocket.OPEN);
+    assert.ok(sleepingSocket);
+    const disconnectForSleep = once(sleepingSocket, 'close', { signal: AbortSignal.timeout(15000) });
+    await app.evaluate(({ powerMonitor }) => powerMonitor.emit('suspend'));
+    const [sleepCode] = await disconnectForSleep;
+    assert.equal(sleepCode, 4004);
+    await app.evaluate(({ powerMonitor }) => powerMonitor.emit('resume'));
+    await poll(async () => (await page.locator('.phone-connection').innerText()) === 'Connected', 'Phone did not reconnect after simulated sleep');
+    await poll(() => page.getByRole('button', { name: 'Take control', exact: true }).isEnabled(), 'Sleep reconnect did not restore observation');
+    assert.equal(await page.getByRole('button', { name: 'Send', exact: true }).isEnabled(), false);
     await desktop.evaluate((id) => window.agentHQ.closeTerminal(id), handle);
-    console.log('PASS tray window close keeps gateway active, disable disconnects clients, and reconnect restores viewing without reclaiming input');
+    console.log('PASS platform window close keeps gateway accessible and active, disable disconnects clients, and reconnect/simulated sleep restore viewing without reclaiming input');
     const savedSettings = (await desktop.evaluate(() => window.agentHQ.getState())).settings;
     await desktop.evaluate((settings) => window.agentHQ.saveSettings({ ...settings, presets: [] }), savedSettings);
     await page.getByRole('button', { name: 'New', exact: true }).click();

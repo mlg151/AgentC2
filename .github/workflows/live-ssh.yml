@@ -1,0 +1,66 @@
+name: Optional desktop SSH QA
+
+on:
+  workflow_dispatch:
+    inputs:
+      providers:
+        description: 'Also launch installed provider CLIs without submitting prompts'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    # Configure this environment with a dedicated Linux SSH test account first.
+    environment: ssh-qa
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-2022, ubuntu-22.04, macos-15-intel, macos-15]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      AGENTC2_HOST: agentc2-live-qa
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Configure dedicated QA SSH credentials
+        env:
+          QA_SSH_TARGET: ${{ vars.AGENTC2_QA_TARGET }}
+          QA_SSH_PRIVATE_KEY: ${{ secrets.AGENTC2_QA_PRIVATE_KEY }}
+          QA_SSH_KNOWN_HOSTS: ${{ secrets.AGENTC2_QA_KNOWN_HOSTS }}
+        run: node .github/scripts/configure-qa-ssh.cjs
+      - name: Linux prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb openbox libnotify4 dunst dbus-x11 libglib2.0-bin
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright-core install chromium
+      - name: Desktop, terminal, workspace, and companion checks
+        if: runner.os != 'Linux'
+        run: |
+          npm run test:desktop
+          node tests/terminal.e2e.cjs
+          node tests/workspace.e2e.cjs
+          node tests/companion.e2e.cjs
+        env:
+          # Use the downloaded browser, including on Windows runners without Edge.
+          AGENTC2_COMPANION_CHROMIUM: '1'
+      - name: Linux desktop and SSH checks
+        if: runner.os == 'Linux'
+        run: |
+          xvfb-run -a npm run test:desktop
+          xvfb-run -a dbus-run-session -- bash .github/scripts/test-linux-ssh.sh
+      - name: Provider argv and adapter checks (explicit opt-in)
+        if: inputs.providers
+        run: npm run test:launch-modes
+      - name: Remove QA credentials
+        if: always()
+        run: node .github/scripts/configure-qa-ssh.cjs --clean

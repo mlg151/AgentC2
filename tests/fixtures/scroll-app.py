@@ -34,14 +34,18 @@ try:
         pending += os.read(sys.stdin.fileno(), 4096)
         while pending:
             matched = next((key for key in keys if pending.startswith(key)), None)
-            mouse = re.match(rb"\x1b\[<(64|65);\d+;\d+M", pending)
+            mouse = re.match(rb"\x1b\[<(\d+);\d+;\d+[Mm]", pending)
             if matched:
                 delta, last_input = keys[matched]
                 pending = pending[len(matched):]
             elif mouse:
+                pending = pending[mouse.end():]
+                # Unix PTYs also deliver pointer motion/release reports. Consume
+                # them so they cannot block the following wheel sequence.
+                if mouse[1] not in (b"64", b"65"):
+                    continue
                 delta = 3 if mouse[1] == b"64" else -3
                 last_input = "wheel-up" if delta > 0 else "wheel-down"
-                pending = pending[mouse.end():]
             elif any(key.startswith(pending) for key in keys) or pending.startswith(b"\x1b[<"):
                 break
             else:

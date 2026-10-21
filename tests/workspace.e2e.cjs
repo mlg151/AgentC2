@@ -10,7 +10,7 @@ const root = path.resolve(__dirname, '..');
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-hq-workspace-test-'));
 const host = process.env.AGENTC2_HOST || process.env.AGENT_HQ_HOST;
 if (!host) throw new Error('Set AGENTC2_HOST to an explicitly configured SSH test host');
-const ssh = process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'OpenSSH', 'ssh.exe') : 'ssh';
+const ssh = require('../electron/platform.cjs').sshBinary();
 const names = [0, 1].map(() => `hq-${crypto.randomBytes(6).toString('hex')}`);
 const created = [];
 const marker = `HQ_WORKSPACE_${crypto.randomBytes(4).toString('hex')}`;
@@ -45,7 +45,7 @@ elif p['action']=='cleanup':
   });
 }
 async function launch() {
-  app = await _electron.launch({ executablePath: require('electron'), args: ['.', `--user-data-dir=${path.join(directory, 'browser')}`], cwd: root, env: { ...process.env, NODE_ENV: 'production', AGENTC2_HOST: host, AGENT_HQ_DATA_DIR: directory } });
+  app = await _electron.launch({ executablePath: process.env.AGENT_HQ_QA_EXECUTABLE || require('electron'), args: [...(process.env.AGENT_HQ_QA_EXECUTABLE ? [] : ['.']), `--user-data-dir=${path.join(directory, 'browser')}`], cwd: root, env: { ...process.env, NODE_ENV: 'production', AGENTC2_HOST: host, AGENT_HQ_DATA_DIR: directory } });
   page = await app.firstWindow(); page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
   await page.getByRole('textbox', { name: 'Search sessions' }).waitFor();
@@ -112,7 +112,7 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
     await page.getByRole('button', { name: 'Previous', exact: true }).click();
     await page.getByRole('button', { name: 'Close history search' }).click();
     await page.locator('.session-pane:visible .xterm-helper-textarea').focus();
-    await page.keyboard.press('Control+k');
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+k' : 'Control+k');
     await page.getByRole('textbox', { name: 'Quick switcher search' }).fill(`${marker} 1`);
     await page.keyboard.press('Enter');
     assert.equal(await page.locator('.session-pane:visible .detail-footer code').innerText(), names[1]);
@@ -140,6 +140,8 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
     const config = saved.settings;
     await app.evaluate(({ Notification }) => {
       globalThis.qaNotifications = [];
+      if (!Notification.isSupported()) throw new Error('Notification QA requires libnotify and a desktop notification service (CI uses Dunst in a private D-Bus session)');
+      // Keep native availability/construction, but record display and clicks.
       Notification.prototype.show = function() { globalThis.qaNotifications.push(this); };
     });
     config.notifications = true;
@@ -218,6 +220,10 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
     console.log(`Screenshots: ${path.join(os.tmpdir(), 'agent-hq-workspace.png')}, ${path.join(os.tmpdir(), 'agent-hq-workspace-narrow.png')}, ${path.join(os.tmpdir(), 'agent-hq-attention.png')}`);
   } catch (error) {
     if (page) await page.screenshot({ path: path.join(os.tmpdir(), 'agent-hq-workspace-failure.png') }).catch(() => {});
+    if (page) {
+      const snapshot = await page.evaluate(() => window.agentHQ.inventory()).catch(() => null);
+      if (snapshot) console.error('Workspace fixture diagnostics:', snapshot.hosts, snapshot.sessions.filter((session) => names.includes(session.id) || created.includes(session.id)).map(({ id, hostId, state, exitCode, outputTail }) => ({ id, hostId, state, exitCode, outputTail })), snapshot.attention.map(({ sessionKey, kind, confidence }) => ({ sessionKey, kind, confidence })));
+    }
     throw error;
   } finally {
     if (page && clipboardBefore !== undefined) await page.evaluate((text) => window.agentHQ.writeClipboard(text), clipboardBefore).catch(() => {});

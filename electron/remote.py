@@ -233,7 +233,7 @@ def tmux_sessions():
     result = []
     listed = run([
         "tmux", "list-sessions", "-F",
-        "#{session_name}\t#{session_created}\t#{session_attached}\t#{pane_current_command}\t#{pane_current_path}\t#{pane_dead}\t#{pane_dead_status}\t#{session_activity}",
+        "#{session_name}\t#{session_created}\t#{session_attached}\t#{pane_current_command}\t#{pane_current_path}\t#{pane_dead}\t#{pane_dead_status}\t#{session_activity}\t#{pane_pid}\t#{@hq_process_exit}",
     ], timeout=5)
     if listed.returncode != 0:
         return result
@@ -251,6 +251,13 @@ def tmux_sessions():
         title = tmux_option(name, "@hq_title") if managed else name
         dead = len(fields) > 5 and fields[5] == "1"
         exit_code = int(fields[6]) if dead and len(fields) > 6 and fields[6].isdigit() else None
+        if dead and managed and exit_code is None and len(fields) > 9:
+            # Some tmux builds can retain a dead pane without its wait status.
+            # Our launch wrapper records the actual child result before exit.
+            # Match the pane's process ID so a respawn cannot reuse old evidence.
+            recorded = re.fullmatch(r"([0-9]+):([0-9]+)", fields[9])
+            if recorded and recorded[1] == fields[8] and 0 <= int(recorded[2]) <= 255:
+                exit_code = int(recorded[2])
         output = run(["tmux", "capture-pane", "-p", "-J", "-t", name, "-S", "-40"], timeout=3)
         result.append({
             "key": f"tmux:{name}", "provider": provider, "id": name,
@@ -388,7 +395,11 @@ def create(payload):
         launch = (preset["command"] + " " + shlex.join(command)) if preset else shlex.join(command)
         # bash -lic supports aliases/functions such as the user's claude3.
         launch = shlex.join(["bash", "-lic", launch])
-    launch = 'tmux set-window-option -t "$TMUX_PANE" remain-on-exit on; exec ' + launch
+    launch = ('tmux set-window-option -t "$TMUX_PANE" remain-on-exit on; '
+              'tmux set-option -pu -t "$TMUX_PANE" @hq_process_exit; '
+              f'if {launch}; then hq_exit=0; else hq_exit=$?; fi; '
+              'tmux set-option -p -t "$TMUX_PANE" @hq_process_exit "$$:$hq_exit" || :; '
+              'exit "$hq_exit"')
     # Set the session history limit before creating the actual chat pane. tmux
     # applies this limit to new panes; changing it after launch is too late.
     launched = run(["tmux", "new-session", "-d", "-s", name, "-n", "setup", "-c", str(cwd)], timeout=10)

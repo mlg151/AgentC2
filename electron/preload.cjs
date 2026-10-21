@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('agentHQ', {
+  platform: process.platform,
   getState: () => ipcRenderer.invoke('state:get'),
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
   saveWorkspace: (workspace) => ipcRenderer.invoke('workspace:save', workspace),
