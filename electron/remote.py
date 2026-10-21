@@ -290,6 +290,7 @@ def tmux_sessions():
             "title": title or name,
             "cwd": tmux_option(name, "@hq_cwd") if managed else cwd,
             "updatedAt": iso_from_epoch(fields[7] if len(fields) > 7 else created),
+            "startedAt": iso_from_epoch(created),
             "state": "exited" if dead else "live", "kind": "managed" if managed else "external-tmux",
             "managed": managed, "attached": attached != "0", "canAttach": True,
             "canInterrupt": managed and not dead, "canStop": managed,
@@ -299,6 +300,7 @@ def tmux_sessions():
             "roeProfile": (tmux_option(name, "@hq_roe") or "unknown") if managed else "unknown",
             "worktreeOperation": tmux_option(name, "@hq_worktree") if managed else "",
             "events": events,
+            "providerSessionId": provider_session,
             "telemetry": provider_telemetry(provider, provider_session, HOME),
         })
     return result
@@ -365,7 +367,7 @@ def inventory():
     return {"host": socket.gethostname(), "user": getpass.getuser(), "sessions": sessions}
 
 
-def health():
+def health(payload=None):
     # Return counters; the desktop computes CPU utilization between samples.
     # Guest ticks are already included in user/nice, so exclude them from total.
     cpu = [int(value) for value in Path("/proc/stat").read_text().splitlines()[0].split()[1:9]]
@@ -382,7 +384,25 @@ def health():
     for directory in paths:
         usage = shutil.disk_usage(directory)
         disks.append({"path": str(directory), "total": usage.total, "used": usage.used, "free": usage.free})
-    return {"cpuTotal": sum(cpu), "cpuIdle": cpu[3] + cpu[4], "memoryTotal": total, "memoryUsed": max(0, total - available), "disks": disks, "sampledAt": time.time() * 1000}
+    result = {"cpuTotal": sum(cpu), "cpuIdle": cpu[3] + cpu[4], "memoryTotal": total, "memoryUsed": max(0, total - available), "disks": disks, "sampledAt": time.time() * 1000}
+    if payload and payload.get("includeGpu"):
+        if not shutil.which("nvidia-smi"):
+            result["gpu"] = {"status": "unsupported", "sampledAt": None, "devices": []}
+        else:
+            probe = run(["nvidia-smi", "--query-gpu=name,memory.total,memory.used", "--format=csv,noheader,nounits"], timeout=2)
+            devices = []
+            if probe.returncode == 0:
+                for line in probe.stdout.splitlines()[:16]:
+                    fields = [field.strip() for field in line.rsplit(",", 2)]
+                    try:
+                        if len(fields) == 3 and fields[0]:
+                            total_mib, used_mib = int(fields[1]), int(fields[2])
+                            if 0 <= used_mib <= total_mib:
+                                devices.append({"name": fields[0][:100], "memoryTotal": total_mib * 1024 * 1024, "memoryUsed": used_mib * 1024 * 1024})
+                    except ValueError:
+                        pass
+            result["gpu"] = {"status": "reported" if devices else "unknown", "sampledAt": time.time() * 1000 if devices else None, "devices": devices}
+    return result
 
 
 def agent_command(provider, conversation_id=None, agent_id=None, preset=None, instructions="", roe_profile=None):
@@ -564,7 +584,7 @@ def main():
     if action == "inventory":
         result = inventory()
     elif action == "health":
-        result = health()
+        result = health(payload)
     elif action == "create":
         with cleanup_lock():
             result = create(payload)

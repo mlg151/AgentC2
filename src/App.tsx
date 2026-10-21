@@ -16,6 +16,7 @@ import { commandBinding } from './commands';
 import type { CommandActions } from './commands';
 import { useCommandKeys } from './useCommandKeys';
 import { HostMonitor } from './components/HostMonitor';
+import { fleetReadiness } from './readiness';
 import { assignCallsigns, closeWorkspaceTab, emptyMetadata, openInPane, projectFor, situationFor, unitState, updateSituation } from './workspace';
 import type { AttentionItem, CreateInput, FlashRequest, Inventory, Session, Settings, SituationWorkspace, Workspace } from './types';
 
@@ -70,6 +71,7 @@ export default function App() {
   const selected = known[workspace.selectedKey || ''];
   const situation = situationFor(workspace);
   const unread = attention.filter((a) => !a.acknowledged);
+  const readiness = useMemo(() => fleetReadiness(inventory, flashRequests), [inventory, flashRequests]);
 
   const acceptInventory = useCallback((next: Inventory) => {
     setInventory(next); setAttention(next.attention);
@@ -277,7 +279,7 @@ export default function App() {
   } });
 
   return <div className={`app-shell situation-room${situation.rosterCollapsed || situation.zen ? ' roster-hidden' : ''}${situation.zen ? ' is-zen' : ''}${situation.ligatures ? ' font-ligatures' : ''}`}>
-    <SituationHeader inventory={inventory} hosts={settings?.hosts || []} hostFilter={hostFilter} onHostFilter={setHostFilter} onSearch={() => setShowSwitcher(true)} onSettings={() => setShowSettings(true)} onNew={() => setDialog(null)} collapsed={situation.rosterCollapsed || situation.zen} onToggleRoster={() => changeSituation({ rosterCollapsed: !situation.rosterCollapsed, zen: false })} />
+    <SituationHeader inventory={inventory} readiness={readiness} missionStartedAt={situation.missionStartedAt} hosts={settings?.hosts || []} hostFilter={hostFilter} onHostFilter={setHostFilter} onSearch={() => setShowSwitcher(true)} onSettings={() => setShowSettings(true)} onNew={() => setDialog(null)} collapsed={situation.rosterCollapsed || situation.zen} onToggleRoster={() => changeSituation({ rosterCollapsed: !situation.rosterCollapsed, zen: false })} />
     <div className="workspace" inert={showOverwatch}>
       <SessionList sessions={scoped} selectedKey={workspace.selectedKey} onSelect={openSession} providerFilter={providerFilter} onProviderFilter={setProviderFilter} stateFilter={stateFilter} onStateFilter={setStateFilter} onRefresh={() => void refresh()} onNew={() => setDialog(null)} loading={loading} metadata={workspace.metadata} pinning={pinning} onPin={(session) => void togglePin(session)} situation={situation} onSituation={changeSituation} attention={attention} projects={projects} projectFilter={projectFilter} onProjectFilter={setProjectFilter} pinnedOnly={pinnedOnly} onPinnedOnly={() => setPinnedOnly((value) => !value)} onInbox={() => setInbox((value) => !value)} onCleanup={() => setCleanupTarget(null)} onSettings={() => setShowSettings(true)} />
       <main className="detail-panel">

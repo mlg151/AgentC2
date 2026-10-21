@@ -102,7 +102,23 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
       return readings.some((h) => h.hostId === 'default' && h.connected && h.cpuPercent !== null && h.cpuPercent >= 0 && h.cpuPercent <= 100 && h.memoryUsed >= 0 && h.memoryUsed <= h.memoryTotal && h.disks.length && h.disks.every((d) => d.free >= 0 && d.total > 0));
     }, 'Live CPU, memory, and disk measurements missing');
     assert.ok((await page.getByRole('complementary', { name: 'Live host resources' }).innerText()).includes('GiB'));
+    const fleetClock = (await state()).workspace.situation.missionStartedAt;
+    assert.ok(fleetClock > 0);
+    const fleet = page.getByRole('button', { name: /Fleet readiness:/ });
+    await fleet.waitFor();
+    await fleet.click();
+    await page.getByRole('complementary', { name: 'Fleet readiness evidence' }).getByText(/live process has no recent confirmed execution/i).first().waitFor();
+    if (process.env.AGENTC2_QA_SCREENSHOT_DIR) {
+      fs.mkdirSync(process.env.AGENTC2_QA_SCREENSHOT_DIR, { recursive: true });
+      await page.screenshot({ path: path.join(process.env.AGENTC2_QA_SCREENSHOT_DIR, 'fleet-readiness.png') });
+    }
+    await page.getByRole('button', { name: 'Close', exact: true }).click();
     const firstSample = (await page.evaluate(() => window.agentHQ.health()))[0].sampledAt;
+    const hostSample = (await page.evaluate(() => window.agentHQ.health()))[0];
+    assert.ok(hostSample.sshRoundTripMs > 0);
+    assert.equal(typeof hostSample.activeChannels, 'number');
+    assert.ok(['reported', 'unsupported', 'unknown'].includes(hostSample.gpu.status));
+    assert.match(await page.getByRole('complementary', { name: 'Live host resources' }).innerText(), /SSH probe.*Channels.*GPU \/ VRAM/s);
     await poll(async () => (await page.evaluate(() => window.agentHQ.health()))[0].sampledAt > firstSample, 'Host resources did not refresh');
     console.log('PASS always-visible live CPU utilization, memory usage, disk capacity/free space, and refreshed sample timestamps');
     clipboardBefore = await page.evaluate(() => window.agentHQ.readClipboard());
@@ -380,6 +396,7 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
     assert.equal(saved.settings.presets.find((p) => p.name === 'Claude OpenRouter QA').command, 'claude3');
     assert.equal(saved.workspace.situation.shortcuts.cycleNext, 'Alt+U');
     assert.equal(saved.workspace.situation.callsigns[`default/tmux:${names[1]}`], room.callsigns[`default/tmux:${names[1]}`]);
+    assert.equal(saved.workspace.situation.missionStartedAt, fleetClock, 'Mission clock must survive desktop restart');
     assert.ok(saved.attention.every((a) => a.acknowledged));
     await refresh();
     assert.ok((await state()).attention.every((a) => a.acknowledged), 'Restart duplicated attention events');
@@ -395,6 +412,7 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
         assert.equal((await state()).workspace.situation.anchorKey, `default/tmux:${names[0]}`);
         assert.equal((await state()).workspace.situation.targetKey, `default/tmux:${names[1]}`);
         assert.ok((await page.locator('.session-row.anchored').innerText()).includes('UNKNOWN'));
+        await page.getByRole('button', { name: /Fleet readiness: DEFCON 1/ }).waitFor();
       } finally { fs.rmSync(outageFile, { force: true }); }
       await poll(async () => (await page.evaluate(() => window.agentHQ.inventory())).hosts.find((item) => item.id === 'default').connected, 'Host did not recover after outage');
       await poll(async () => await page.locator('.session-pane:visible .terminal-panel.is-attached').count() === 2, 'Cached panes did not reattach after host recovery');

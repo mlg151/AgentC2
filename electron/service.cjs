@@ -35,6 +35,7 @@ function createService({ directory, home }) {
   let inventoryFlight, healthFlight;
   const opOrderSynced = new Map();
   const opOrderAttempts = new Map();
+  const opOrderConflicts = new Map();
   const sitrepPreviews = new Map();
   const flashCache = new Map();
   let flashFlight;
@@ -43,22 +44,29 @@ function createService({ directory, home }) {
   const hostCache = new Map(Object.entries(store.data.cachedUnits).map(([hostId, units]) => [hostId, units.map((unit) => ({ ...unit, hostId, hostName: store.data.settings.hosts.find((host) => host.id === hostId)?.name || hostId }))]));
   const healthCache = new Map();
   const cpuSamples = new Map();
+  const gpuProbedAt = new Map();
 
   async function health() {
     if (healthFlight) return healthFlight;
     healthFlight = (async () => {
       const hosts = store.data.settings.hosts.filter((h) => h.enabled);
-      const results = await Promise.allSettled(hosts.map(async (h) => ({ sample: await runRemote({ action: 'health' }, h.id), receivedAt: Date.now() })));
+      const results = await Promise.allSettled(hosts.map(async (h) => {
+        const startedAt = Date.now();
+        const sample = await runRemote({ action: 'health', includeGpu: startedAt - (gpuProbedAt.get(h.id) || 0) >= 30000 }, h.id);
+        return { sample, receivedAt: Date.now(), roundTripMs: Date.now() - startedAt };
+      }));
       const readings = results.map((result, index) => {
         const host = hosts[index];
-        if (result.status === 'rejected') return { ...healthCache.get(host.id), hostId: host.id, name: host.name, connected: false, error: result.reason.message };
-        const { sample, receivedAt } = result.value;
+        if (result.status === 'rejected') { cpuSamples.delete(host.id); return { ...healthCache.get(host.id), hostId: host.id, name: host.name, connected: false, error: result.reason.message }; }
+        const { sample, receivedAt, roundTripMs } = result.value;
         const previous = cpuSamples.get(host.id);
         const totalDelta = previous ? sample.cpuTotal - previous.cpuTotal : 0;
         const idleDelta = previous ? sample.cpuIdle - previous.cpuIdle : 0;
         const cpuPercent = totalDelta > 0 && idleDelta >= 0 ? Math.max(0, Math.min(100, (1 - idleDelta / totalDelta) * 100)) : null;
         cpuSamples.set(host.id, sample);
-        const reading = { hostId: host.id, name: host.name, connected: true, cpuPercent, memoryTotal: sample.memoryTotal, memoryUsed: sample.memoryUsed, disks: sample.disks, sampledAt: receivedAt };
+        if (sample.gpu) gpuProbedAt.set(host.id, receivedAt);
+        const activeChannels = [...terminals.sessions.values()].filter((record) => record.hostId === host.id && !record.disposed && record.connection === 'connected').reduce((count, record) => count + record.handles.size, 0);
+        const reading = { hostId: host.id, name: host.name, connected: true, cpuPercent, memoryTotal: sample.memoryTotal, memoryUsed: sample.memoryUsed, disks: sample.disks, sampledAt: receivedAt, sshRoundTripMs: roundTripMs, activeChannels, gpu: sample.gpu || healthCache.get(host.id)?.gpu || { status: 'unknown', sampledAt: null, devices: [] } };
         healthCache.set(host.id, reading);
         return reading;
       });
@@ -103,6 +111,7 @@ function createService({ directory, home }) {
         if (fault.autoInterrupt) void interruptFault({ id: 'desktop' }, fault.sessionKey).catch((error) => console.warn(`Automatic interrupt failed: ${error.message}`));
       }
       const snapshot = { hosts: statuses, sessions, attention: store.data.attention, faults: loopBreaker.faults() };
+      snapshot.conflicts = [...opOrderConflicts.values()];
       events.emit('inventory:updated', snapshot);
       return snapshot;
     })().finally(() => { inventoryFlight = null; });
@@ -118,7 +127,9 @@ function createService({ directory, home }) {
       try {
         await runRemote({ action: 'oporder_sync', order }, hostId);
         opOrderSynced.set(order.id, fingerprint);
+        opOrderConflicts.delete(order.id);
       } catch (error) {
+        opOrderConflicts.set(order.id, { id: order.id, hostId, detail: error.message.slice(0, 300), at: new Date().toISOString() });
         console.warn(`OpOrder ${order.id} needs review: ${error.message}`);
         events.emit('oporder:conflict', { id: order.id, hostId, error: error.message });
       }
@@ -214,7 +225,7 @@ function createService({ directory, home }) {
     }
     for (const h of settings.hosts) {
       const old = store.data.settings.hosts.find((item) => item.id === h.id);
-      if (!old || old.target !== h.target || old.port !== h.port) { hostCache.delete(h.id); healthCache.delete(h.id); cpuSamples.delete(h.id); }
+      if (!old || old.target !== h.target || old.port !== h.port) { hostCache.delete(h.id); healthCache.delete(h.id); cpuSamples.delete(h.id); gpuProbedAt.delete(h.id); }
     }
     const retained = Object.fromEntries(Object.entries(store.data.cachedUnits).filter(([hostId]) => {
       const old = store.data.settings.hosts.find((host) => host.id === hostId);
@@ -223,7 +234,8 @@ function createService({ directory, home }) {
     }));
     const result = settings;
     store.update({ settings, cachedUnits: retained });
-    for (const order of store.data.settings.opOrders || []) if (!order.enabled) { opOrderSynced.delete(order.id); opOrderAttempts.delete(order.id); }
+    for (const order of store.data.settings.opOrders || []) if (!order.enabled) { opOrderSynced.delete(order.id); opOrderAttempts.delete(order.id); opOrderConflicts.delete(order.id); }
+    for (const id of opOrderConflicts.keys()) if (!store.data.settings.opOrders.some((order) => order.id === id)) opOrderConflicts.delete(id);
     events.emit('state:updated');
     return result;
   }

@@ -6,7 +6,7 @@ export function projectFor(session: Session, metadata: Record<string, SessionMet
 }
 
 export function situationFor(workspace: Workspace): SituationWorkspace {
-  return workspace.situation || { version: 1, anchorKey: workspace.selectedKey, targetKey: workspace.splitKey, focusedPane: 'anchor', callsigns: {}, groupBy: 'host', collapsedGroups: [], urgentFirst: false, rosterCollapsed: false, zen: false, ligatures: false, shortcuts: {} };
+  return workspace.situation || { version: 1, anchorKey: workspace.selectedKey, targetKey: workspace.splitKey, focusedPane: 'anchor', callsigns: {}, groupBy: 'host', collapsedGroups: [], urgentFirst: false, rosterCollapsed: false, zen: false, ligatures: false, shortcuts: {}, missionStartedAt: Date.now() };
 }
 
 export function updateSituation(workspace: Workspace, patch: Partial<SituationWorkspace>): Workspace {

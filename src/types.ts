@@ -8,6 +8,8 @@ export interface Session {
   title: string;
   cwd: string;
   updatedAt: string | null;
+  startedAt?: string | null;
+  events?: { id: string; kind: string; at: string; source?: string }[];
   state: string;
   kind: 'managed' | 'external-tmux' | 'unmanaged' | 'conversation' | 'background';
   managed?: boolean;
@@ -26,6 +28,8 @@ export interface Session {
   outputTail?: string;
   presetName?: string;
   presetId?: string;
+  providerSessionId?: string | null;
+  headCommit?: string | null;
   branch?: string | null;
   repository?: string | null;
   worktreeOperation?: string;
@@ -41,13 +45,14 @@ export interface Inventory {
   sessions: Session[];
   attention: AttentionItem[];
   faults: FaultRecord[];
+  conflicts?: { id: string; hostId: string; detail: string; at: string }[];
 }
 export interface FaultRecord { sessionKey: string; id: string; at: string; label: string; count: number; status: 'pending' | 'review' | 'attempted' | 'interrupted' | 'failed' | 'unknown'; detail: string; autoInterrupt: boolean; result?: string }
 
 export interface HostConfig { id: string; name: string; target: string; port: number; enabled: boolean; autoForward?: boolean }
 export type RoeProfile = 'full' | 'gated' | 'provider-default';
 export interface DevUrl { url: string; hostId: string; port: number; status: 'available' | 'opening' | 'ready' | 'failed'; localUrl: string | null; error: string | null }
-export interface HostHealth { hostId: string; name: string; connected: boolean; cpuPercent?: number | null; memoryTotal?: number; memoryUsed?: number; disks?: { path: string; total: number; used: number; free: number }[]; sampledAt?: number; error?: string }
+export interface HostHealth { hostId: string; name: string; connected: boolean; cpuPercent?: number | null; memoryTotal?: number; memoryUsed?: number; disks?: { path: string; total: number; used: number; free: number }[]; sampledAt?: number; sshRoundTripMs?: number; activeChannels?: number; gpu?: { status: 'reported' | 'unknown' | 'unsupported'; sampledAt: number | null; devices: { name: string; memoryTotal: number; memoryUsed: number }[] }; error?: string }
 export interface LaunchPreset { id: string; name: string; provider: Provider; command: string; args: string; cwd: string; instructions: string; fullPermissions: boolean; roeProfile?: RoeProfile | ''; attentionHooks: boolean; hostId: string; loopBreaker?: { enabled: boolean; autoInterrupt: boolean; threshold: number; windowMinutes: number; cooldownMinutes: number } }
 export interface OpOrderMcp { name: string; transport: 'stdio' | 'http'; providers: Exclude<Provider, 'terminal'>[]; command: string; args: string[]; url: string; env: string[]; headers: Record<string, string> }
 export interface OpOrder { version: 1; id: string; hostId: string; repository: string; enabled: boolean; instructions: string; overrides: { codex: string; claude: string; antigravity: string }; mcp: OpOrderMcp[] }
@@ -71,7 +76,7 @@ export interface CleanupPreview { token: string; hostId: string; provider: Provi
 export interface CleanupResult { key?: string; hostId: string; provider: Provider; at: string; automatic: boolean; status: string; detail: string; bytes?: number; estimated?: boolean }
 export interface CleanupState { lastRuns: Record<string, string>; results: CleanupResult[] }
 export interface SessionMetadata { pinned: boolean; project: string; notes: string }
-export interface SituationWorkspace { version: 1; anchorKey: string | null; targetKey: string | null; focusedPane: 'anchor' | 'target'; callsigns: Record<string, string>; groupBy: 'host' | 'repository'; collapsedGroups: string[]; urgentFirst: boolean; rosterCollapsed: boolean; zen: boolean; ligatures: boolean; shortcuts: Record<string, string> }
+export interface SituationWorkspace { version: 1; anchorKey: string | null; targetKey: string | null; focusedPane: 'anchor' | 'target'; callsigns: Record<string, string>; groupBy: 'host' | 'repository'; collapsedGroups: string[]; urgentFirst: boolean; rosterCollapsed: boolean; zen: boolean; ligatures: boolean; shortcuts: Record<string, string>; missionStartedAt: number }
 export interface Workspace { tabs: string[]; selectedKey: string | null; splitKey: string | null; metadata: Record<string, SessionMetadata>; situation?: SituationWorkspace }
 export interface AttentionItem { id: string; sessionKey: string; hostId: string; title: string; provider: Provider; createdAt: string; acknowledged: boolean; requestId?: string; kind: 'completed' | 'failed' | 'input'; confidence: 'confirmed' | 'inferred'; detail: string; signature: string }
 

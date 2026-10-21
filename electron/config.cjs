@@ -144,7 +144,8 @@ function validateWorkspace(w) {
   const selectedKey = focusedPane === 'anchor' ? anchorKey : targetKey;
   const splitKey = focusedPane === 'anchor' ? targetKey : anchorKey;
   const collapsedGroups = Array.isArray(source.collapsedGroups) ? [...new Set(source.collapsedGroups.slice(0, 300).map((value) => text(value, 4096)))] : [];
-  const situation = { version: 1, anchorKey, targetKey, focusedPane, callsigns, groupBy: source.groupBy === 'repository' ? 'repository' : 'host', collapsedGroups, urgentFirst: Boolean(source.urgentFirst), rosterCollapsed: Boolean(source.rosterCollapsed), zen: Boolean(source.zen), ligatures: Boolean(source.ligatures), shortcuts };
+  const missionStartedAt = Number.isInteger(source.missionStartedAt) && source.missionStartedAt >= 1577836800000 && source.missionStartedAt <= Date.now() + 60000 ? source.missionStartedAt : Date.now();
+  const situation = { version: 1, anchorKey, targetKey, focusedPane, callsigns, groupBy: source.groupBy === 'repository' ? 'repository' : 'host', collapsedGroups, urgentFirst: Boolean(source.urgentFirst), rosterCollapsed: Boolean(source.rosterCollapsed), zen: Boolean(source.zen), ligatures: Boolean(source.ligatures), shortcuts, missionStartedAt };
   return { tabs, selectedKey, splitKey, metadata, situation };
 }
 function validateSessionPin(key, pinned) {

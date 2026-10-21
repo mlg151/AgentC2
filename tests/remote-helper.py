@@ -42,6 +42,23 @@ class ExitEvidence(unittest.TestCase):
                 self.assertIsNone(self.session(**values)["exitCode"])
 
 
+class HostHealth(unittest.TestCase):
+    def test_optional_gpu_probe_and_unsupported_status(self):
+        original_run = scope["run"]
+        try:
+            with patch.object(shutil, "which", return_value=None):
+                unsupported = scope["health"]({"includeGpu": True})
+            self.assertEqual(unsupported["gpu"]["status"], "unsupported")
+            self.assertNotIn("gpu", scope["health"]({"includeGpu": False}))
+            scope["run"] = lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0, "Fixture GPU, 8192, 1024\n", "")
+            with patch.object(shutil, "which", return_value="/usr/bin/nvidia-smi"):
+                reported = scope["health"]({"includeGpu": True})
+            self.assertEqual(reported["gpu"]["devices"][0]["memoryUsed"], 1024 * 1024 * 1024)
+            self.assertEqual(reported["gpu"]["status"], "reported")
+        finally:
+            scope["run"] = original_run
+
+
 class RulesOfEngagement(unittest.TestCase):
     def test_provider_flags_and_resume_order(self):
         command = scope["agent_command"]("codex", "12345678-1234-4234-8234-123456789012", roe_profile="gated")
