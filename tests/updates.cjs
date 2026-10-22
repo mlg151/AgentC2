@@ -1,0 +1,23 @@
+const assert = require('node:assert/strict');
+const { createUpdates, newerVersion } = require('../electron/updates.cjs');
+const revision = 'a'.repeat(40);
+const current = { version: '0.4.1', revision };
+(async () => {
+  for (const [next, value] of [['v0.4.2', true], ['1.0.0', true], ['v0.4.1', false], ['0.3.9', false], ['v0.5.0-beta', false], ['garbage', false]]) assert.equal(newerVersion(next, current.version), value);
+  const make = (release, comparison) => createUpdates({ ...current, fetchJson: async (url) => url.includes('/releases/') ? release : comparison });
+  assert.equal((await make({ tag_name: 'v0.4.2' }, { ahead_by: 3, status: 'ahead' }).check()).kind, 'release');
+  assert.equal((await make({ tag_name: 'v0.4.2', prerelease: true }, { ahead_by: 1, status: 'ahead' }).check()).kind, 'main');
+  for (const comparison of [null, { ahead_by: 0, status: 'identical' }, { ahead_by: 0, status: 'behind' }]) assert.equal((await make(null, comparison).check()).available, false);
+  assert.equal((await make(null, { ahead_by: 2, status: 'diverged' }).check()).url, `https://github.com/mlg151/AgentC2/compare/${revision}...main`);
+  let calls = 0, clock = 0, offline = false;
+  const updates = createUpdates({ ...current, now: () => clock, fetchJson: async () => { calls++; if (offline) throw new Error('Rate limited'); return { tag_name: 'v0.4.2' }; } });
+  const [first, second] = await Promise.all([updates.check(), updates.check()]);
+  assert.deepEqual(first, second); assert.equal(calls, 2);
+  await updates.check(); assert.equal(calls, 2);
+  clock = 6 * 60000; offline = true;
+  assert.equal((await updates.check()).available, true, 'Outages must preserve a known update');
+  assert.equal((await createUpdates({ ...current, fetchJson: async () => { throw new Error('Offline'); } }).check()).available, false);
+  const archive = createUpdates({ version: '0.4.1', revision: 'not-a-commit', fetchJson: async (url) => { assert.ok(url.endsWith('/releases/latest')); return { tag_name: 'v0.4.2' }; } });
+  assert.equal((await archive.check()).kind, 'release');
+  console.log('PASS release/main update detection, version ordering, trusted URLs, request deduplication, cache, offline preservation, and source archives');
+})().catch((error) => { console.error(error); process.exitCode = 1; });

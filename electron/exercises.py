@@ -10,7 +10,7 @@ EXERCISE_COMMIT = re.compile(r"^[a-f0-9]{40,64}$")
 
 
 def exercise_capabilities(_payload):
-    return {"codex": bool(shutil.which("codex")), "claude": bool(shutil.which("claude")), "antigravity": bool(shutil.which("agy"))}
+    return {"codex": bool(shutil.which("codex")), "claude": bool(shutil.which("claude")), "antigravity": bool(shutil.which("agy")), "opencode": bool(shutil.which("opencode"))}
 
 
 def exercise_base(payload):

@@ -77,6 +77,9 @@ class Worker:
             result["pendingRequests"] = self.journal.pending_requests(request["sessionId"])
             result["session"]["canStop"] = request["sessionId"] in self.adapters
             return result
+        if action == "rename":
+            fields(request, ["protocolVersion", "action", "sessionId", "managedName", "title"])
+            return self.journal.rename(request["sessionId"], request["managedName"], request["title"])
         if action == "receipt":
             fields(request, ["protocolVersion", "action", "commandId"])
             return self.journal.receipt(request["commandId"])

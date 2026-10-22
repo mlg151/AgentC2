@@ -31,7 +31,7 @@ def probe_capabilities(provider):
         from chat_claude import cli_binary
         binary = cli_binary()
     else:
-        binary = shutil.which("codex")
+        binary = shutil.which("opencode" if provider == "opencode" else "codex")
     if binary is None:
         return unavailable_capabilities(provider, reason="Provider CLI is not available on this host")
     try:
@@ -40,6 +40,10 @@ def probe_capabilities(provider):
         version = match.group(0) if result.returncode == 0 and match else None
     except (OSError, subprocess.TimeoutExpired):
         version = None
+    if provider == "opencode":
+        from chat_opencode import SUPPORTED_VERSIONS
+        if version in SUPPORTED_VERSIONS:
+            return dict(provider=provider, version=version, status="supported", reason="OpenCode ACP; host credentials and project configuration apply. Gated launch is unavailable.", **{name: name in ("streaming", "history", "resume", "interrupt", "approvals", "questions") for name in CONTRACT["capabilities"]})
     if provider == "codex":
         from chat_codex_schema import BUNDLE
         if version == BUNDLE["version"]:
@@ -59,6 +63,11 @@ def probe_capabilities(provider):
 
 
 def create_adapter(session, journal):
+    if session["provider"] == "opencode":
+        from chat_opencode import OpenCodeAdapter
+        if probe_capabilities("opencode")["status"] != "supported":
+            raise ProviderRejected("OpenCode version is unverified; use terminal mode")
+        return OpenCodeAdapter(session, journal)
     if session["provider"] == "codex":
         from chat_codex import CodexAdapter
         if probe_capabilities("codex")["status"] != "supported":

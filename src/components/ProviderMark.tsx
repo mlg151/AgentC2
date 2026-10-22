@@ -1,7 +1,7 @@
 import type { Provider } from '../types';
 
 const names: Record<Provider, string> = {
-  codex: 'C', claude: '✳', antigravity: 'A', terminal: '>_',
+  codex: 'C', claude: '✳', antigravity: 'A', opencode: 'O', terminal: '>_',
 };
 
 export function ProviderMark({ provider, small = false }: { provider: Provider; small?: boolean }) {
