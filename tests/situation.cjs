@@ -48,6 +48,9 @@ assert.deepEqual(validateWorkspace(workspace).situation.callsigns, before);
 assert.equal(unitState({ kind: 'managed', state: 'live' }, []).code, 'LIVE');
 assert.equal(unitState({ kind: 'managed', state: 'live', stale: true, exitCode: 1 }, []).code, 'UNKNOWN');
 assert.equal(unitState({ key: a }, [{ sessionKey: a, kind: 'input', confidence: 'confirmed', acknowledged: false }]).code, 'HALT');
+for (const [chatState, code] of [['starting', 'UNKNOWN'], ['unknown', 'UNKNOWN'], ['idle', 'STBY'], ['running', 'ENG'], ['waiting', 'HALT'], ['stopped', 'STBY'], ['failed', 'FAULT']]) {
+  assert.equal(unitState({ key: a, transport: 'chat', chatState, state: 'live' }, [{ sessionKey: a, kind: 'input', confidence: 'confirmed', acknowledged: false }]).code, code, `Structured ${chatState} must override old attention and generic process hints`);
+}
 assert.equal(normalizeBinding('option+control+j'), 'Ctrl+Alt+J');
 assert.equal(resolvedBinding('Primary+K', true), 'Meta+K');
 assert.equal(resolvedBinding('Primary+K', false), 'Ctrl+K');

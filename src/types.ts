@@ -1,4 +1,4 @@
-import type { ChatCapabilities, ChatClientState, ChatCommand, ChatPage, ChatReceipt, ChatSnapshot, ChatUpdate } from './chatTypes';
+import type { ChatCapabilities, ChatSessionState, ChatClientState, ChatCommand, ChatPage, ChatReceipt, ChatSnapshot, ChatUpdate } from './chatTypes';
 export type { ChatProvider, ChatSessionState, ChatCommandState, ChatCapabilities, ChatUsage, ChatQuestion, ChatAnswer, ChatEvent, ChatCommand, ChatReceipt, ChatSession, ChatPage, ChatPendingRequest, ChatClientState, ChatSnapshot, ChatUpdate, ChatApi } from './chatTypes';
 export type Provider = 'codex' | 'claude' | 'antigravity' | 'terminal';
 export interface ProviderTelemetry { status: 'reported' | 'stale' | 'unknown' | 'unsupported'; sampledAt: string | null; source: string | null; context: { usedTokens: number; capacityTokens: number; percent: number } | null; totalTokens: number | null; tokensPerMinute: number | null; costUsd: number | null; costBasis: string | null }
@@ -9,6 +9,7 @@ export interface Session {
   id: string;
   transport?: 'terminal' | 'chat';
   chatSessionId?: string;
+  chatState?: ChatSessionState;
   title: string;
   cwd: string;
   updatedAt: string | null;

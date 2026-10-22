@@ -51,6 +51,13 @@ export function closeWorkspaceTab(workspace: Workspace, key: string): Workspace 
 
 export function unitState(session: Session, attention: AttentionItem[]) {
   if (session.stale || session.missing) return { code: 'UNKNOWN', label: 'Last known state; host unavailable', tone: 'unknown', priority: 3 };
+  if (session.transport === 'chat' && session.chatState) {
+    if (session.chatState === 'unknown' || session.chatState === 'starting') return { code: 'UNKNOWN', label: session.chatState === 'starting' ? 'Provider is starting or importing history' : 'Worker cannot confirm the provider state; inspect before resuming', tone: 'unknown', priority: 3 };
+    if (session.chatState === 'failed') return { code: 'FAULT', label: 'Provider session failed', tone: 'fault', priority: 0 };
+    if (session.chatState === 'waiting') return { code: 'HALT', label: 'Provider is waiting for a correlated decision or answer', tone: 'halt', priority: 1 };
+    if (session.chatState === 'running') return { code: 'ENG', label: 'Provider reports an active turn', tone: 'nominal', priority: 2 };
+    return { code: 'STBY', label: session.chatState === 'stopped' ? 'Managed provider stopped; transcript available' : 'Provider reports idle', tone: 'standby', priority: 4 };
+  }
   if (session.activity === 'fault' || session.exitCode != null && session.exitCode !== 0) return { code: 'FAULT', label: 'Confirmed process or provider failure', tone: 'fault', priority: 0 };
   if (session.activity === 'halted' || session.state === 'blocked' || attention.some((item) => item.sessionKey === session.key && item.kind === 'input' && item.confidence === 'confirmed' && !item.acknowledged)) return { code: 'HALT', label: 'Confirmed request for input', tone: 'halt', priority: 1 };
   if (session.activity === 'engaged') return { code: 'ENG', label: 'Confirmed agent execution', tone: 'nominal', priority: 2 };

@@ -41,6 +41,11 @@ const path = require('node:path');
     await page.getByRole('combobox', { name: 'Filter project' }).selectOption('External project'); assert.equal(await rows.count(), 1);
     await page.getByRole('combobox', { name: 'Filter project' }).selectOption(''); await page.getByRole('button', { name: 'Managed only', exact: true }).click();
     await page.getByRole('button', { name: /^Attention/ }).click(); assert.equal(await page.locator('.phone-attention').count(), 1); assert.equal(await page.locator('.phone-attention').filter({ hasText: 'External session' }).count(), 0);
+    await page.getByRole('button', { name: 'New', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'New session', exact: true });
+    assert.equal(await dialog.getByRole('combobox', { name: 'SSH host' }).count(), 1, 'Interaction-mode help text must not create a second SSH-host accessible name');
+    assert.equal(await dialog.getByRole('combobox', { name: 'Interaction mode', exact: true }).count(), 1);
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true); assert.deepEqual(errors, []);
     console.log('PASS built companion managed defaults, opt-in external inventory, search, combined host/provider/project/pin filters, unknown entries, scoped attention, and phone layout');
   } finally { await browser?.close(); await gateway.dispose(); fs.rmSync(directory, { recursive: true, force: true }); }

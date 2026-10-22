@@ -319,7 +319,7 @@ def tmux_sessions():
     return result
 
 
-def unmanaged_processes():
+def unmanaged_processes(worker_pid=None):
     listed = run(["ps", "-eo", "pid=,ppid=,comm=,tty="], timeout=5)
     if listed.returncode != 0:
         return []
@@ -337,7 +337,7 @@ def unmanaged_processes():
         while pid in processes and pid not in seen:
             seen.add(pid)
             parent, command, _ = processes[pid]
-            if command.startswith("tmux"):
+            if command.startswith("tmux") or pid == worker_pid:
                 return True
             pid = parent
         return False
@@ -357,12 +357,38 @@ def unmanaged_processes():
     return result
 
 
+
+def chat_inventory_events(journal_events, chat):
+    """Translate confirmed chat lifecycle evidence for existing fleet policies."""
+    events, tool_inputs = [], {}
+    for event in journal_events:
+        kind, data = None, event["data"]
+        if event["type"] in ("approval.requested", "question.requested"):
+            kind = "input"
+        elif event["type"] == "turn.completed":
+            kind = "completed" if data["outcome"] in ("completed", "interrupted") else "failed"
+        elif event["type"] == "session.updated" and data["state"] == "running":
+            kind = "working"
+        elif event["type"] == "tool.completed":
+            kind = "tool_failed" if data["isError"] else "tool_ok"
+        if event["type"] == "tool.started":
+            tool_inputs[event["itemId"]] = (data["name"], data["input"])
+        if kind:
+            normalized = {"id": hashlib.sha256((chat["id"] + ":" + str(event["sequence"])).encode()).hexdigest()[:32], "at": event["timestamp"], "kind": kind, "source": chat["provider"], "requestId": data.get("requestId"), "session": chat["providerSessionId"]}
+            if kind == "tool_failed" and event["itemId"] in tool_inputs:
+                normalized.update(failureSignature=hashlib.sha256(json.dumps(tool_inputs[event["itemId"]]).encode()).hexdigest()[:32], failureLabel=data["name"][:80] + " tool failed")
+            events.append(normalized)
+    return events
+
+
 def inventory(payload=None):
     sessions = (
-        tmux_sessions() + unmanaged_processes() + codex_sessions()
+        tmux_sessions() + codex_sessions()
         + claude_sessions() + antigravity_sessions()
     )
+    worker_pid = None
     if payload and (HOME / ".cache" / "agentc2" / "chat-v1" / "worker.sock").exists():
+        worker_pid = chat_remote({**payload, "request": {"protocolVersion": 1, "action": "health"}})["pid"]
         chats = chat_remote({**payload, "request": {"protocolVersion": 1, "action": "list"}})
         by_name = {session["id"]: session for session in sessions if session.get("kind") == "managed"}
         for chat in chats:
@@ -376,16 +402,16 @@ def inventory(payload=None):
             page = chat_remote({**payload, "request": {"protocolVersion": 1, "action": "history", "sessionId": chat["id"], "after": 0, "limit": 1}})
             latest = page["latestCursor"]
             page = chat_remote({**payload, "request": {"protocolVersion": 1, "action": "history", "sessionId": chat["id"], "after": max(0, latest - 60), "limit": 100}})
-            events = []
-            for event in page["events"]:
-                kind = "input" if event["type"] in ("approval.requested", "question.requested") else ("completed" if event["data"].get("outcome") == "completed" else "failed") if event["type"] == "turn.completed" else None
-                if kind:
-                    events.append({"id": chat["id"] + ":" + str(event["sequence"]), "at": event["timestamp"], "kind": kind, "source": chat["provider"], "requestId": event["data"].get("requestId"), "session": chat["providerSessionId"]})
+            events = chat_inventory_events(page["events"], chat)
             session.update({"transport": "chat", "chatSessionId": chat["id"], "providerSessionId": chat["providerSessionId"], "provider": chat["provider"], "cwd": chat["cwd"], "title": chat["title"], "roeProfile": chat["roeProfile"], "state": "waiting_for_input" if chat["state"] == "waiting" else "exited" if chat["state"] in ("stopped", "failed") else "live", "chatState": chat["state"], "updatedAt": chat["updatedAt"], "startedAt": chat["createdAt"], "canAttach": True, "canStop": chat["canStop"] and chat["state"] != "stopped", "canInterrupt": chat["canStop"] and chat["state"] in ("running", "waiting") and chat["capabilities"]["interrupt"], "canResume": chat["state"] in ("stopped", "failed", "unknown") and bool(chat["providerSessionId"]) and chat["capabilities"]["resume"], "events": events, "outputTail": "", "exitCode": None})
             usage = next((event for event in reversed(page["events"]) if event["type"] == "usage.updated"), None)
             values = usage["data"] if usage else {}
             used, capacity = values.get("contextUsedTokens"), values.get("contextCapacityTokens")
             session["telemetry"] = {"status": "reported" if usage else "unknown", "sampledAt": usage["timestamp"] if usage else None, "source": "structured-chat", "context": {"usedTokens": used, "capacityTokens": capacity, "percent": min(100, used * 100 / capacity)} if used is not None and capacity else None, "totalTokens": values.get("totalTokens"), "tokensPerMinute": None, "costUsd": values.get("costUsd"), "costBasis": "provider estimate" if values.get("costUsd") is not None else None}
+            session["resolvedRequestIds"] = [event["data"]["requestId"] for event in page["events"] if event["type"] == "request.resolved"]
+            if chat["state"] in ("starting", "unknown"):
+                session["state"] = chat["state"]
+    sessions += unmanaged_processes(worker_pid)
     sessions.sort(key=lambda s: str(s.get("updatedAt") or ""), reverse=True)
     repositories = {}
     for session in sessions:

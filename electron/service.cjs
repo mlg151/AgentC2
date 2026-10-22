@@ -107,6 +107,7 @@ function createService({ directory, home }) {
       });
       const sessions = hosts.flatMap((h) => (hostCache.get(h.id) || []).map((s) => ({ ...s, stale: !statuses.find((status) => status.id === h.id).connected }))).filter((session) => !store.data.deletedSessions.includes(session.key));
       for (const session of sessions) if (session.key.startsWith(`${session.hostId}/tmux:`)) session.outputActivity = terminals.activity(session.id, session.hostId);
+      attention.resolveRequests(sessions.filter((s) => !s.stale).flatMap((s) => s.resolvedRequestIds || []));
       attention.update(sessions.filter((s) => !s.stale));
       const raised = loopBreaker.observe(sessions.filter((s) => !s.stale));
       for (const fault of raised) {
@@ -142,6 +143,7 @@ function createService({ directory, home }) {
   }
 
   function runRemote(payload, hostId) {
+    if (payload.action === 'inventory' && !payload.sourceDigest) payload = { ...payload, sourceDigest: chatDigest, chatFiles, allowUpgrade: true };
     const host = getHost(hostId);
     return new Promise((resolve, reject) => {
       const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
@@ -473,15 +475,27 @@ function createService({ directory, home }) {
     faultFlights.add(sessionKey);
     const [, hostId, name] = match;
     try {
-      terminals.assertSessionOwner(client, name, hostId);
+      assertManagedOwner(client, name, hostId);
       const host = getHost(hostId);
       const fresh = await runRemote({ action: 'inventory' }, host.id);
       const unit = fresh.sessions.find((item) => item.key === `tmux:${name}`);
       if (!unit || unit.kind !== 'managed' || unit.provider !== 'claude' || unit.state !== 'live' || !unit.canInterrupt || !unit.presetId || unit.presetId !== (hostCache.get(hostId) || []).find((item) => item.key === sessionKey)?.presetId) throw new Error('Faulted managed unit changed or exited; refresh and review');
-      terminals.assertSessionOwner(client, name, hostId);
-      loopBreaker.record(sessionKey, 'attempted', 'A scoped Ctrl+C was sent; awaiting remote acceptance');
-      await runRemote({ action: 'interrupt', name }, hostId);
-      return loopBreaker.record(sessionKey, 'interrupted', 'Remote tmux accepted one scoped Ctrl+C');
+      assertManagedOwner(client, name, hostId);
+      loopBreaker.record(sessionKey, 'attempted', 'A scoped interrupt was requested; awaiting remote acceptance');
+      const response = await action(client, 'interrupt', name, hostId);
+      if (unit.transport === 'chat') {
+        const record = chats.assertSessionOwner(client, unit.chatSessionId, hostId);
+        const handle = [...record.handles].find((id) => chats.handles.get(id)?.client.id === client.id);
+        let receipt = response;
+        const deadline = Date.now() + 20000;
+        while (['accepted', 'dispatching'].includes(receipt.state) && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          try { receipt = await chats.receipt(client, handle, receipt.commandId); }
+          catch { return loopBreaker.record(sessionKey, 'unknown', 'Interrupt receipt could not be read; no action was resent'); }
+        }
+        if (receipt.state !== 'completed') return loopBreaker.record(sessionKey, receipt.state === 'failed' ? 'failed' : 'unknown', receipt.error || 'Provider interrupt acknowledgement is unresolved; inspect the chat');
+      }
+      return loopBreaker.record(sessionKey, 'interrupted', unit.transport === 'chat' ? 'Managed provider acknowledged one scoped interrupt' : 'Remote tmux accepted one scoped Ctrl+C');
     } catch (error) {
       if (loopBreaker.faults().some((item) => item.sessionKey === sessionKey && item.status !== 'interrupted')) loopBreaker.record(sessionKey, 'failed', error.message);
       throw error;
