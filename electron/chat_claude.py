@@ -106,10 +106,10 @@ class ClaudeAdapter:
         receiver = None
         try:
             if self.session["providerSessionId"]:
-                info = await asyncio.to_thread(self.sdk.get_session_info, self.native_id)
+                info = await asyncio.to_thread(self.sdk.get_session_info, self.native_id, directory=self.session["cwd"])
                 if info is None:
                     raise ProviderRejected("Saved Claude conversation is unavailable on this host")
-                history = await asyncio.to_thread(self.sdk.get_session_messages, self.native_id)
+                history = await asyncio.to_thread(self.sdk.get_session_messages, self.native_id, directory=self.session["cwd"])
                 for message in history:
                     self.historical(message)
             # AnyIO cancellation scopes created by connect/disconnect must stay
@@ -173,26 +173,24 @@ class ClaudeAdapter:
         return self.call(submit())
 
     async def await_request(self, kind, tool_name, tool_input, tool_use_id):
-        if self.active is None or not tool_use_id:
+        if self.active is None or not tool_use_id or not isinstance(tool_input, dict):
             raise ProviderRejected("Interactive request is not associated with an active managed turn")
         request_id = "claude-" + uuid.uuid4().hex
         future = asyncio.get_running_loop().create_future()
         record = dict(future=future, turnId=self.active, itemId=tool_use_id, kind=kind)
         self.callbacks[request_id] = record
-        if kind == "approval.requested":
-            detail = json.dumps(dict(tool=tool_name, input=tool_input), ensure_ascii=False, indent=2)
-            if len(detail.encode("utf-16-le")) // 2 > 200000:
-                self.callbacks.pop(request_id)
-                raise ProviderRejected("Tool input exceeded the approval review limit and was denied")
-            data = dict(requestId=request_id, action=display(tool_name, 2000), detail=detail)
-        else:
-            questions = tool_input.get("questions", [])
-            if not isinstance(questions, list) or not questions or len({question["question"] for question in questions}) != len(questions):
-                self.callbacks.pop(request_id)
-                raise ProviderRejected("Provider questions were invalid or ambiguous")
-            normalized = [dict(id="q" + str(index), question=question["question"], options=[option["label"] for option in question.get("options", [])], multiple=bool(question.get("multiSelect", False))) for index, question in enumerate(questions)]
-            data = dict(requestId=request_id, questions=normalized)
         try:
+            if kind == "approval.requested":
+                detail = json.dumps(dict(tool=tool_name, input=tool_input), ensure_ascii=False, indent=2)
+                if len(detail.encode("utf-16-le")) // 2 > 200000:
+                    raise ProviderRejected("Tool input exceeded the approval review limit and was denied")
+                data = dict(requestId=request_id, action=display(tool_name, 2000), detail=detail)
+            else:
+                questions = tool_input.get("questions", [])
+                if not isinstance(questions, list) or not questions or len({question["question"] for question in questions}) != len(questions):
+                    raise ProviderRejected("Provider questions were invalid or ambiguous")
+                normalized = [dict(id="q" + str(index), question=question["question"], options=[option["label"] for option in question.get("options", [])], multiple=bool(question.get("multiSelect", False))) for index, question in enumerate(questions)]
+                data = dict(requestId=request_id, questions=normalized)
             self.event(kind, data, tool_use_id)
             self.event("provider.event", dict(method="claude/interactiveRequest", payload=dict(requestId=request_id, tool=tool_name, input=tool_input)), tool_use_id)
         except (ValueError, TypeError, KeyError) as error:

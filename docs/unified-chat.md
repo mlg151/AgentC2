@@ -52,7 +52,7 @@ The remote Python environment must contain `claude-agent-sdk==0.2.172`, and the 
 
 SDK options explicitly load user/project/local settings and the Claude Code system preset in the requested working directory. Gated mode retains session ask rules for Bash/Edit/Write/NotebookEdit; full retains bypassPermissions. Approvals use the SDK callback. AskUserQuestion uses a PreToolUse hook so it remains interactive in full mode, with the SDK stdio permission channel enabled. Decisions bind to the exact tool-use ID and managed turn. Requests expire if cancelled or after the configured provider-hook waiting period, and their UI replies cannot authorize another tool.
 
-The installed SDK/CLI loopback tests verify that gated denial prevents an actual disposable file write, approval permits that exact write, project instructions reach the model request, and a full-mode question answer reaches the tool result. They use a local model-response fixture, an isolated Claude configuration directory, and a dummy API key. No external Anthropic model turn or user credentials are used. Run `PYTHONPATH=<isolated SDK dependency directory> python3 tests/chat-claude-native.py` with the pinned SDK/CLI available. The normal suite explicitly skips this provider-boundary test when they are absent.
+Eight installed SDK/CLI loopback tests verify exact gated allow/deny, project instructions, full-mode questions, native history import/resume with retained context, interruption of a pending permission followed by another turn, independent one-shot decisions for a batch of tools, and malformed-question cleanup. A synthetic SDK background-result event injected during the native permission flow verifies that background notifications cannot complete the foreground turn or inflate its usage; this is routing evidence rather than a claim of native background-agent integration. They use a local model-response fixture, an isolated Claude configuration directory, and a dummy API key. No external Anthropic model turn or user credentials are used. Run `PYTHONPATH=<isolated SDK dependency directory> python3 tests/chat-claude-native.py` with the pinned SDK/CLI available. The normal suite explicitly skips this provider-boundary test when they are absent.
 
 Claude usage normalization reads the latest cumulative `model_usage` and cost estimate, including cache-input tokens. It does not sum cumulative results across turns. Per-turn `usage` is retained in provider metadata. Unknown pricing remains unknown; reported SDK cost is an estimate. Context usage is shown only when the last main-agent message provides the necessary fields.
 
@@ -84,7 +84,7 @@ A failed submission checks its durable receipt. The view never automatically res
 - `python3 tests/chat-claude-native.py`: optional pinned SDK/CLI against a loopback model fixture; reports skips if unavailable.
 - `npm run test:chat:sdk-evaluation`: optional pinned Antigravity SDK persistence/resume probe.
 
-Live authenticated provider turns, Claude resume/interrupt/background edge coverage, native packaging checks, the complete existing terminal/workspace/companion/launch-mode matrix, and user-facing coordinated transcript cleanup remain release gates. Fixture success does not close these gaps.
+Live authenticated provider turns, native packaging checks, the complete existing terminal/workspace/companion/launch-mode matrix, and user-facing coordinated transcript cleanup remain release gates. Fixture success does not close these gaps.
 
 Fixture screenshots show the shared presentation and contain no real user transcript:
 
