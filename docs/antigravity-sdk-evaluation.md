@@ -1,29 +1,19 @@
-# Antigravity SDK evaluation
+# Antigravity SDK deployment and compatibility
 
-Decision: defer production SDK adoption. Keep the pinned Antigravity CLI stream adapter for this delivery. The SDK is a separate runtime with useful richer controls; compatibility with existing CLI authentication and conversations remains unverified.
+Production structured chat now uses `google-antigravity==0.1.22`, superseding the earlier CLI-only delivery and SDK deferral. The host daemon automatically prepares a private Python environment and installs the pinned PyPI wheel, including its compiled runtime. No manual SDK or `agy` installation is needed for structured chat. Terminal launches continue to use the host CLI.
 
-Evaluated on 2026-10-22: `google-antigravity==0.1.22`, installed into an isolated temporary Python target. Production CLI adapter: `agy 1.4.4`. The SDK is not a production dependency.
+SDK authentication uses a Gemini API key or Vertex configuration on the execution host. CLI cached credentials and CLI conversation databases are separate and are not represented as compatible. SDK-native resume requires a conversation created in AgentC2's SDK storage; CLI-native resumes direct the user to Terminal without creating another conversation.
 
-| Area | Evidence and conclusion |
-| --- | --- |
-| Authentication | The official SDK quickstart uses a Gemini API key; Enterprise configuration uses Vertex and Google Cloud credentials. Local OpenAI-compatible endpoints work without cloud credentials in the isolated test. CLI cached-login/subscription parity is **unknown** and must not be inferred. |
-| Streaming and tools | Package source exposes streamed responses, builtin/custom tools, hooks, policies, MCP, and subagents. These are SDK capabilities, not capabilities enabled in AgentC2's CLI adapter. |
-| Approvals | SDK policies and hooks support decisions before tools execute. Production adoption needs correlated one-shot decisions, cancellation, and stale-response tests through the worker. |
-| Attachments | Official structured-output documentation and SDK types expose richer content. AgentC2 currently accepts text only; attachments remain disabled. |
-| Persistence | A real installed SDK harness created a private fixture conversation database and transcript files. A second harness resumed the same ID and included the first prompt in its next loopback model request. |
-| CLI history | Import/export or direct CLI conversation reuse has **not** been verified. No real user CLI history or credentials were used. Native SDK persistence is not evidence of CLI compatibility. |
-| Operational impact | SDK deployment adds a Python package and bundled harness, explicit policy configuration, authentication setup, and separate storage management. These requirements differ from launching the installed CLI. |
+Full mode explicitly allows SDK tools; gated chat uses SDK safe-default policies with one-shot AgentC2 approval callbacks. Provider-default retains SDK default policy. Streaming, tool events/results, question-option mapping, interruption, native persistence/resume, cumulative token usage, and unknown cost/context are connected to the worker journal. Attachments, steering, and forks remain disabled.
 
-Reproduce the persistence evidence with `python3 tests/antigravity-sdk-evaluation.py` in an isolated environment containing the pinned package. The test uses a disposable directory and loopback HTTP model fixture, disables tools, closes both SDK harnesses, and removes its fixtures. Without the package it reports a skip. It does not contact a live model service, verify billing, or establish production CLI interoperability.
+`python3 tests/chat-runtime.py` boots a disposable daemon, installs both provider SDKs in its private environment, verifies pinned versions and reuse, then runs four Antigravity SDK/harness and eight Claude SDK/bundled-CLI boundary tests against loopback models. Antigravity cases include streaming/resume context, gated deny/allow file witnesses, stale decisions, question mapping, pending-approval interruption, and rejection of CLI history. These checks use no cloud model calls or user credentials. They do not establish live Gemini/Vertex account support or native macOS/WSL runtime validation.
 
-An exploratory negative check also found that passing a nonexistent conversation ID to the default SDK continuation path attempts resume and fails. Create without an ID, persist the returned native ID, and resume explicitly.
+Sources checked October 22, 2026:
 
-Before adoption, validate supported account authentication on an explicitly chosen test host, round-trip disposable CLI/SDK conversations, test approval/attachment cancellation and reconnect, verify configuration/ROE parity, and document storage migration and rollback. Until then, keep SDK capabilities separate and use the CLI adapter's honest unsupported states for approval responses, attachments, forks, and native-history import.
+- [Official SDK product and wheel deployment](https://antigravity.google/product/antigravity-sdk/)
+- [SDK overview and authentication](https://antigravity.google/docs/sdk/overview/)
+- [SDK policies](https://antigravity.google/docs/sdk/policies/)
+- [SDK persistence and lifecycle](https://antigravity.google/docs/sdk/lifecycle/)
+- [SDK streaming](https://antigravity.google/docs/sdk/structured-output)
 
-Sources checked on 2026-10-22:
-
-- [Official SDK overview and authentication setup](https://www.antigravity.google/docs/sdk/overview/)
-- [SDK local models](https://www.antigravity.google/docs/sdk/local-models/)
-- [SDK policies](https://www.antigravity.google/docs/sdk/policies/)
-- [SDK lifecycle and persistence](https://www.antigravity.google/docs/sdk/lifecycle/)
-- Installed 0.1.22 source: `Agent`, `AgentConfig`, `LocalOpenAIAgentConfig`, `SessionContinuationMode`, and local connection strategy.
+The earlier `tests/antigravity-sdk-evaluation.py` persistence probe is retained as historical evidence. CLI-only adapter regression fixtures do not establish SDK behavior.

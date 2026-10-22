@@ -38,14 +38,18 @@ if p['action']=='setup':
  program="import os; [print('PHONE_HISTORY_%05d'%i,flush=True) for i in range(1,2001)]; os.execvpe('bash',['bash','--noprofile','--norc'],dict(os.environ,PS1='PHONE_FIXTURE> '))"
  run('tmux','new-window','-t',name,'-n','chat',shlex.join(['python3','-u','-c',program]))
  run('tmux','kill-window','-t',name+':setup')
- # A disposable sleep executable named codex is recognized as an external
- # provider pane without launching a provider or giving it AgentC2 ownership.
+ # A renamed Python executable acts as an external provider pane without
+ # launching a provider. Multicall coreutils cannot be renamed portably.
  from pathlib import Path
  import shutil
  fixture=Path.home()/('agentc2-phone-'+p['marker']);fixture.mkdir()
- shutil.copyfile(shutil.which('sleep'),fixture/'codex');(fixture/'codex').chmod(0o700)
+ shutil.copyfile(sys.executable,fixture/'codex');(fixture/'codex').chmod(0o700)
  ext='external-'+p['marker']
- run('tmux','new-session','-d','-s',ext,'-c','/tmp',shlex.join([str(fixture/'codex'),'600']))
+ run('tmux','new-session','-d','-s',ext,'-c','/tmp',shlex.join([str(fixture/'codex'),'-c','import time; time.sleep(600)']))
+ import time
+ time.sleep(0.2)
+ observed=run('tmux','display-message','-p','-t',ext,'#{pane_current_command}')
+ if observed!='codex': raise RuntimeError('External fixture command is '+observed)
  print('{}')
 elif p['action']=='cleanup':
  for n in [name,'external-'+p['marker']]+p['created']: subprocess.run(['tmux','kill-session','-t',n],capture_output=True)
@@ -317,6 +321,11 @@ async function freePort() {
     await page.getByRole('button', { name: 'New', exact: true }).click();
     await page.getByRole('combobox', { name: 'Launch preset', exact: true }).selectOption('phone-qa');
     await page.getByRole('textbox', { name: 'Session name', exact: true }).fill(`${marker} launched`);
+    await page.getByRole('textbox', { name: 'Working directory', exact: true }).fill(`/tmp/${marker}-missing`);
+    await page.getByRole('button', { name: 'Start session', exact: true }).click();
+    await page.getByRole('dialog', {name:'New session',exact:true}).getByRole('alert').filter({hasText:'working directory does not exist'}).waitFor();
+    assert.equal((await desktop.evaluate(() => window.agentHQ.inventory())).sessions.some((session) => session.title === `${marker} launched`), false, 'Failed phone launch left a session');
+    await page.getByRole('textbox', { name: 'Working directory', exact: true }).fill('/tmp');
     await page.getByRole('button', { name: 'Start session', exact: true }).click();
     await page.getByRole('dialog', { name: 'New session', exact: true }).waitFor({ state: 'hidden', timeout: 60000 });
     let inventory = await desktop.evaluate(() => window.agentHQ.inventory());

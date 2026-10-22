@@ -5,6 +5,7 @@ import { DiffDrawer } from './DiffDrawer';
 import type { DevUrl, Session } from '../types';
 import { elapsedClock } from '../readiness';
 import { desktopChatApi } from '../chatClient';
+import { isManagedSession } from '../workspace';
 
 const ChatView = lazy(() => import('./ChatView').then((module) => ({ default: module.ChatView })));
 
@@ -14,7 +15,7 @@ function ElapsedBadge({ startedAt }: { startedAt?: string | null }) {
   return <span title={startedAt ? `Managed tmux session started ${new Date(startedAt).toLocaleString()}` : 'Start time unavailable'}>Unit elapsed {elapsedClock(startedAt, now)}</span>;
 }
 
-export function SessionPane({ session, visible, primary, focused, slot, callsign, diffOpen, onToggleDiff, onFocus, onAnchor, onCycle, onResume, onRefresh, onDeleteHistory }: { session: Session; visible: boolean; primary: boolean; focused: boolean; slot: 'anchor' | 'target'; callsign?: string; diffOpen: boolean; onToggleDiff: () => void; onFocus: () => void; onAnchor: () => void; onCycle: (direction: number) => void; onResume: (s: Session) => void; onRefresh: () => void; onDeleteHistory: (session: Session) => void }) {
+export function SessionPane({ session, visible, primary, focused, slot, callsign, diffOpen, onToggleDiff, onFocus, onAnchor, onCycle, onResume, onRefresh, onDeleteHistory, onDeleteSession }: { session: Session; visible: boolean; primary: boolean; focused: boolean; slot: 'anchor' | 'target'; callsign?: string; diffOpen: boolean; onToggleDiff: () => void; onFocus: () => void; onAnchor: () => void; onCycle: (direction: number) => void; onResume: (s: Session) => void; onRefresh: () => void; onDeleteHistory: (session: Session) => void; onDeleteSession: (session: Session) => void }) {
   const isChat = session.transport === 'chat';
   const [terminalId, setTerminalId] = useState<string | null>(null);
   const [wanted, setWanted] = useState(Boolean(session.canAttach));
@@ -74,6 +75,7 @@ export function SessionPane({ session, visible, primary, focused, slot, callsign
       {session.canInterrupt && !isChat ? <button className="toolbar-button" disabled={session.stale || busy} onClick={() => void window.agentHQ?.interrupt(session.id, session.hostId).catch(showError)}><Zap size={15} />Interrupt</button> : null}
       {session.canAttach && !isChat ? <button className="toolbar-button" disabled={!terminalId || busy} onClick={() => setWanted(false)}><Link2Off size={15} />Detach</button> : null}
       {session.canStop && !isChat ? <button className="toolbar-button danger" disabled={session.stale || busy} onClick={() => void stop()}><Square size={14} />Stop</button> : null}
+      {isManagedSession(session) ? <button className="toolbar-button danger" disabled={session.stale || session.missing || busy} onClick={() => onDeleteSession(session)}><Trash2 size={14} />Delete session</button> : null}
       {session.worktreeOperation ? <button className="toolbar-button" aria-pressed={diffOpen} onClick={onToggleDiff}>{diffOpen ? 'Hide diff' : 'Diff'}</button> : null}
       {devUrls.map((item) => <button key={item.url} className="toolbar-button" title={`${item.url}${item.error ? ` — ${item.error}` : ''}`} disabled={(!isChat && !terminalId) || session.stale || item.status === 'opening'} onClick={() => void window.agentHQ?.openDevUrl(isChat ? session.key : terminalId!, item.url).catch(showError)}><ExternalLink size={13} />{item.status === 'ready' ? 'Open' : item.status === 'opening' ? 'Opening' : item.status === 'failed' ? 'Retry' : 'Tunnel'} :{item.port}</button>)}
     </div>

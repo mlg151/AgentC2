@@ -25,7 +25,8 @@ def installed():
         sdk = importlib.metadata.version("claude-agent-sdk")
     except importlib.metadata.PackageNotFoundError:
         return False
-    binary = shutil.which("claude")
+    from chat_claude import cli_binary
+    binary = cli_binary()
     return sys.platform.startswith("linux") and sdk == SUPPORTED_SDK_VERSION and binary is not None and subprocess.run([binary, "--version"], capture_output=True, text=True, check=False).stdout.strip().startswith(SUPPORTED_CLI_VERSION + " ")
 
 

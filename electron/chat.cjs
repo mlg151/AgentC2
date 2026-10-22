@@ -20,8 +20,9 @@ class Chats {
     return this.remote(this.resolveHost(hostId), { protocolVersion: contract.version, action, ...args });
   }
 
-  async capabilities(hostId) {
-    const result = await this.request(hostId, 'capabilities');
+  async capabilities(hostId, prepareProvider) {
+    if (prepareProvider !== undefined && !contract.providers.includes(prepareProvider)) throw new Error('Invalid provider runtime');
+    const result = await this.request(hostId, 'capabilities', prepareProvider ? { prepareProvider } : {});
     if (!Array.isArray(result) || result.length !== contract.providers.length || new Set(result.map((item) => item.provider)).size !== result.length) throw new Error('Invalid provider capability response');
     return result.map(validateCapabilities);
   }

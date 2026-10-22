@@ -32,6 +32,7 @@ class Worker:
         self.probe = probe
         self.adapters = {}
         self.retiring = False
+        self.preparations = 0
         self.locks = {}
         self.lock = threading.RLock()
         self.pool = ThreadPoolExecutor(max_workers=16, thread_name_prefix="chat-command")
@@ -42,16 +43,30 @@ class Worker:
         action = request.get("action")
         if action == "health":
             fields(request, ["protocolVersion", "action"])
-            return dict(protocolVersion=CONTRACT["version"], pid=os.getpid(), bootId=self.boot_id, sourceDigest=self.source_digest, canRetire=self.journal.can_retire())
+            return dict(protocolVersion=CONTRACT["version"], pid=os.getpid(), bootId=self.boot_id, sourceDigest=self.source_digest, canRetire=not self.preparations and self.journal.can_retire())
         if action == "retire":
             fields(request, ["protocolVersion", "action"])
             with self.lock:
-                if not self.journal.can_retire():
+                if self.preparations or not self.journal.can_retire():
                     raise ValueError("Stop all managed chat sessions and settle pending commands before upgrading the worker")
                 self.retiring = True
                 return dict(retiring=True)
         if action == "capabilities":
-            fields(request, ["protocolVersion", "action"])
+            fields(request, ["protocolVersion", "action", "prepareProvider"], ["protocolVersion", "action"])
+            provider = request.get("prepareProvider")
+            if provider is not None:
+                if provider not in CONTRACT["providers"]:
+                    raise ValueError("Invalid provider runtime")
+                from chat_runtime import ensure_sdk
+                with self.lock:
+                    if self.retiring:
+                        raise ValueError("Worker is retiring; reconnect before preparing an SDK")
+                    self.preparations += 1
+                try:
+                    ensure_sdk(provider)
+                finally:
+                    with self.lock:
+                        self.preparations -= 1
             return [self.probe(provider) for provider in CONTRACT["providers"]]
         if action == "list":
             fields(request, ["protocolVersion", "action"])

@@ -73,6 +73,7 @@ contextBridge.exposeInMainWorld('agentHQ', {
   diffHunk: (input) => ipcRenderer.invoke('diff:hunk', input),
   interrupt: (name, hostId) => ipcRenderer.invoke('interrupt', name, hostId),
   stop: (name, hostId) => ipcRenderer.invoke('stop', name, hostId),
+  deleteSession: (key) => ipcRenderer.invoke('session:delete', key),
   openTerminal: (name, cols, rows, hostId) => ipcRenderer.invoke('terminal:open', name, cols, rows, hostId),
   terminalHistory: (id) => ipcRenderer.invoke('terminal:history', id),
   readyTerminal: (id) => ipcRenderer.invoke('terminal:ready', id),

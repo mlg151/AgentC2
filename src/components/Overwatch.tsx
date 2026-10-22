@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import type { AttentionItem, Session, SituationWorkspace, UnitPreview } from '../types';
-import { unitState } from '../workspace';
+import { isManagedSession, unitState } from '../workspace';
 import { Modal } from './Modal';
 
 const hints = ['A', 'S', 'D', 'F', 'J', 'K', 'L', 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O'];
@@ -14,7 +14,7 @@ export function Overwatch({ sessions, situation, attention, onSelect, onClose }:
   const selected = useRef(onSelect); selected.current = onSelect;
   const restoreFocus = useRef(true);
   function inspect(session: Session) { restoreFocus.current = false; selected.current(session); }
-  const units = useMemo(() => sessions.filter((session) => session.kind !== 'conversation').sort((a, b) => Number(situation.callsigns[a.key] || 100) - Number(situation.callsigns[b.key] || 100) || a.key.localeCompare(b.key)), [sessions, situation.callsigns]);
+  const units = useMemo(() => sessions.filter(isManagedSession).sort((a, b) => Number(situation.callsigns[a.key] || 100) - Number(situation.callsigns[b.key] || 100) || a.key.localeCompare(b.key)), [sessions, situation.callsigns]);
   const pages = Math.max(1, Math.ceil(units.length / size));
   const currentPage = Math.min(page, pages - 1);
   const visible = useMemo(() => units.slice(currentPage * size, (currentPage + 1) * size), [units, currentPage, size]);

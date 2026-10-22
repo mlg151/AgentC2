@@ -35,7 +35,9 @@ try {
   assert.doesNotThrow(() => validateRoeLaunch('claude', { command: 'claude', args: '--model sonnet' }, 'gated'));
   assert.throws(() => validateSettings({ ...config, roe: { version: 2, hostDefaults: {} } }), /Unsupported Rules/);
   assert.throws(() => validateSettings({ ...config, roe: { version: 1, hostDefaults: { missing: 'gated' } } }), /Invalid host Rules/);
-  assert.throws(() => validateSettings({ ...config, presets: config.presets.map((preset) => preset.provider === 'antigravity' ? { ...preset, roeProfile: 'gated' } : preset) }), /Antigravity/);
+  assert.doesNotThrow(() => validateSettings({ ...config, presets: config.presets.map((preset) => preset.provider === 'antigravity' ? { ...preset, roeProfile: 'gated' } : preset) }));
+  assert.doesNotThrow(() => validateRoeLaunch('antigravity', {command: 'agy', args: ''}, 'gated', 'chat'));
+  assert.throws(() => validateRoeLaunch('antigravity', {command: 'agy', args: ''}, 'gated', 'terminal'), /verified session-scoped/);
   for (const target of ['-oProxyCommand=bad', 'host with spaces', 'host;echo', 'host\nother']) {
     assert.throws(() => validateSettings({ ...config, hosts: [{ ...config.hosts[0], target }] }));
   }

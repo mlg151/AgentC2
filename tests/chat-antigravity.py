@@ -10,7 +10,7 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "electron"))
 from chat_adapters import ProviderRejected
-from chat_antigravity import AntigravityAdapter
+from chat_antigravity_cli import AntigravityAdapter
 from chat_journal import Journal
 from chat_protocol import CONTRACT
 

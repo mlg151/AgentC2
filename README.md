@@ -6,7 +6,7 @@ AgentC2 is a Windows, Linux, and macOS desktop SSH manager for Codex, Claude Cod
 
 Install a package from [GitHub Releases](https://github.com/mlg151/AgentC2/releases), or download a package artifact from the **Desktop CI and releases** Actions workflow. Windows x64 uses NSIS, Linux x64 uses AppImage/Debian packages, and macOS 13+ uses separate Intel and Apple Silicon DMG/ZIP packages. See [platform setup and troubleshooting](docs/platforms.md) for prerequisites, desktop behavior, and unsigned-build limitations. See [release instructions](docs/releases.md) for the build matrix, artifact names, and signing configuration.
 
-AgentC2 needs local OpenSSH and working key/agent authentication to your configured hosts. Configure Settings → SSH hosts, or set `AGENTC2_HOST` before first launch. Remote hosts remain Linux and need Python 3, `tmux`, and the provider CLIs you use. AgentC2 uses existing SSH config and known hosts; it does not store passwords or private keys.
+AgentC2 needs local OpenSSH and working key/agent authentication to your configured hosts. Configure Settings → SSH hosts, or set `AGENTC2_HOST` before first launch. Remote hosts remain Linux and need Python 3.10+, `tmux`, and the Codex CLI or any CLIs used in Terminal mode. Claude and Antigravity structured chat automatically prepare their pinned SDKs and bundled runtimes in a private host environment; first setup needs access to PyPI. Provider authentication stays on the execution host. AgentC2 uses existing SSH config and known hosts; it does not store passwords or private keys.
 
 Build from source with Node.js 22 LTS and the platform's native compiler tools:
 
@@ -41,7 +41,7 @@ Settings, session metadata, workspace layout, and up to 500 inbox events persist
 
 Before first use, replace the `your-ssh-host` placeholder in Settings → SSH hosts with your own SSH config alias or `user@hostname`, or set `AGENTC2_HOST` before launching. Live SSH tests require `AGENTC2_HOST` explicitly; `AGENT_HQ_HOST` remains supported for existing setups. Internal session IDs, bridge names, cookies, and remote cache paths retain their legacy identifiers for compatibility.
 
-Structured chat is available for pinned, capability-checked provider versions on the selected SSH host. The shared desktop/phone view supports Markdown, tool results, questions, approvals where supported, and replay. Select **Terminal** in the launch dialog for custom commands or unsupported versions. See [unified chat setup, support, recovery, and validation limits](docs/unified-chat.md).
+Structured chat is available for pinned, capability-checked provider versions on the selected SSH host. The shared desktop/phone view supports Markdown, tool results, questions, approvals where supported, and replay. Antigravity chat uses its SDK; Terminal mode retains the CLI. Select **Terminal** in the launch dialog for custom commands or unsupported versions. See [unified chat setup, support, recovery, and validation limits](docs/unified-chat.md).
 
 ## Phone companion and remote control
 
@@ -101,10 +101,10 @@ Provider references: [Codex notifications](https://learn.chatgpt.com/docs/config
 
 ## How sessions work
 
-- **Managed:** Opening a managed chat automatically attaches it. The first managed chat attaches on a new workspace; saved tabs reconnect on startup. Use Attach after explicitly detaching. Closing AgentC2 leaves remote processes running. Interrupt sends Ctrl-C. Stop ends that `tmux` session and its CLI process. Newly launched managed sessions retain exited panes so exit status and output can be reviewed.
-- **External tmux:** Existing `tmux` sessions running one of the CLIs can be attached or detached. AgentC2 does not stop them.
-- **Unmanaged process:** A running CLI process outside `tmux` is listed read-only. SSH cannot take over its existing terminal. Find the saved conversation and use Resume to start a managed copy.
-- **Saved conversation:** Codex records come from its local SQLite state; Claude records from its project JSONL files; Antigravity CLI IDs from its conversation files. Resume launches the provider's CLI with that conversation ID in a new managed terminal. Antigravity conversation titles and working directories are not available from the CLI files, so enter a working directory when resuming if needed.
+- **Managed:** ORBAT and Overwatch show only AgentC2-managed sessions, with the session name taking priority over unknown context telemetry. Choose **Delete session** to stop active work and remove the entry, tabs, and notes permanently from this AgentC2 workspace; repository files and provider history are kept. Opening a managed chat automatically attaches it. The first managed chat attaches on a new workspace; saved tabs reconnect on startup. Use Attach after explicitly detaching. Closing AgentC2 leaves remote processes running. Interrupt sends Ctrl-C. Stop ends that `tmux` session and its CLI process. Newly launched managed sessions retain exited panes so exit status and output can be reviewed.
+- **External tmux:** External sessions remain in diagnostic inventory and the companion’s explicit external-session opt-in. They are excluded from desktop ORBAT, Overwatch, callsigns, and cycling. AgentC2 does not stop them.
+- **Unmanaged process:** A running CLI process outside `tmux` is excluded from the desktop runtime views. SSH cannot take over its existing terminal. Find the saved conversation and use Resume to start a managed copy.
+- **Saved conversation:** Codex records come from its local SQLite state; Claude records from its project JSONL files; Antigravity CLI IDs from its conversation files. Saved resumable conversations are accessible through search. SDK-native Antigravity conversations resume through the SDK; choose Terminal for existing Antigravity CLI history. Antigravity conversation titles and working directories are not available from the CLI files, so enter a working directory when resuming if needed.
 
 Default presets start new and resumed agents with full permissions: Codex uses `--dangerously-bypass-approvals-and-sandbox`, and Claude and Antigravity use `--dangerously-skip-permissions`. Turn off Full permissions in a preset to use that command's configured defaults. Attaching an existing process retains its launch mode.
 
