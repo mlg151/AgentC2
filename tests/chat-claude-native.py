@@ -12,7 +12,6 @@ import tempfile
 import threading
 import time
 import unittest
-from unittest.mock import patch
 import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "electron"))
@@ -61,9 +60,6 @@ class NativeTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="a2-claude-native-")
         self.root = Path(self.temp.name)
         (self.root / "CLAUDE.md").write_text("SDK_FIXTURE_INSTRUCTION: operate only in this disposable repository.\n")
-        self.config_environment = patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(self.root / "config")})
-        self.config_environment.start()
-        self.addCleanup(self.config_environment.stop)
         self.requests = []
         self.question = False
         self.parallel = False

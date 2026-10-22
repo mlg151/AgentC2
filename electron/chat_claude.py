@@ -6,9 +6,13 @@ from dataclasses import asdict, is_dataclass
 import importlib
 import json
 import math
+import os
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 import threading
+from types import SimpleNamespace
 import uuid
 
 from chat_adapters import ProviderRejected
@@ -55,13 +59,13 @@ class ClaudeAdapter:
         import os
         environment = self.env if self.env is not None else os.environ
         if not auth_available(environment):
-            raise ProviderRejected("Claude SDK requires API or supported cloud-provider authentication on the SSH host; CLI subscription sign-in is not used")
+            raise ProviderRejected("Claude SDK requires API or supported cloud-provider authentication on the selected host; CLI subscription sign-in is not used")
         if not Path(self.session["cwd"]).is_dir():
             raise ProviderRejected("Remote working directory is unavailable")
         try:
             self.sdk = self.sdk or importlib.import_module("claude_agent_sdk")
         except ImportError as error:
-            raise ProviderRejected("Install the pinned Claude Agent SDK and its dependencies on the SSH host") from error
+            raise ProviderRejected("Install the pinned Claude Agent SDK and its dependencies on the selected host") from error
         try:
             valid_id = str(uuid.UUID(self.native_id)) == self.native_id
         except ValueError:
@@ -100,16 +104,33 @@ class ClaudeAdapter:
             env=environment,
         )
 
+    def native_history(self):
+        config = (self.env or {}).get("CLAUDE_CONFIG_DIR")
+        if not config or config == os.environ.get("CLAUDE_CONFIG_DIR"):
+            info = self.sdk.get_session_info(self.native_id, directory=self.session["cwd"])
+            return None if info is None else self.sdk.get_session_messages(self.native_id, directory=self.session["cwd"])
+        # The pinned public history helpers resolve CLAUDE_CONFIG_DIR from the
+        # process environment, unlike ClaudeAgentOptions.env. Read in a short
+        # subprocess so concurrent profiles never mutate the worker's globals.
+        source = """import json,sys
+from claude_agent_sdk import get_session_info,get_session_messages
+identifier,directory=sys.argv[1:]
+info=get_session_info(identifier,directory=directory)
+print(json.dumps(None if info is None else [dict(uuid=m.uuid,type=m.type,message=m.message) for m in get_session_messages(identifier,directory=directory)]))
+"""
+        result = subprocess.run([sys.executable, "-c", source, self.native_id, self.session["cwd"]], env={**os.environ, **self.env}, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=self.timeout, check=True)
+        messages = json.loads(result.stdout)
+        return None if messages is None else [SimpleNamespace(**message) for message in messages]
+
     async def run(self):
         self.loop = asyncio.get_running_loop()
         self.stop_event = asyncio.Event()
         receiver = None
         try:
             if self.session["providerSessionId"]:
-                info = await asyncio.to_thread(self.sdk.get_session_info, self.native_id, directory=self.session["cwd"])
-                if info is None:
+                history = await asyncio.to_thread(self.native_history)
+                if history is None:
                     raise ProviderRejected("Saved Claude conversation is unavailable on this host")
-                history = await asyncio.to_thread(self.sdk.get_session_messages, self.native_id, directory=self.session["cwd"])
                 for message in history:
                     self.historical(message)
             # AnyIO cancellation scopes created by connect/disconnect must stay

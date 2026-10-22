@@ -112,7 +112,7 @@ function remote(action) {
     const page = await app.firstWindow();
     await page.getByRole('button', { name: 'New unit' }).click();
     const newUnit = page.getByRole('dialog', { name: 'New session' });
-    await newUnit.getByRole('combobox', { name: 'SSH host' }).selectOption('recipient');
+    await newUnit.getByRole('combobox', { name: 'Host' }).selectOption('recipient');
     await newUnit.getByRole('checkbox', { name: 'Isolate this task in a Git worktree' }).check();
     await newUnit.getByRole('button', { name: 'Recover SitRep' }).click();
     await newUnit.getByRole('textbox', { name: 'Starting instructions' }).fill('Continue the reviewed SitRep objective after restart.');
@@ -125,7 +125,7 @@ function remote(action) {
     await page.getByRole('button', { name: 'Notes & handoff' }).click();
     await page.getByRole('button', { name: 'SitRep handoff' }).click();
     assert.equal(await page.getByRole('textbox', { name: 'Recipient title' }).inputValue(), 'Handoff: Source QA');
-    await page.getByRole('combobox', { name: 'Target SSH host' }).selectOption('recipient');
+    await page.getByRole('combobox', { name: 'Target host' }).selectOption('recipient');
     await page.getByRole('textbox', { name: 'Primary Git checkout on target host' }).fill(setup.target);
     await page.getByRole('combobox', { name: 'Recipient provider' }).selectOption('claude');
     await page.getByRole('combobox', { name: 'Launch preset' }).selectOption('sitrep-claude-qa');

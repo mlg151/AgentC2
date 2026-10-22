@@ -54,7 +54,7 @@ export interface Inventory {
 }
 export interface FaultRecord { sessionKey: string; id: string; at: string; label: string; count: number; status: 'pending' | 'review' | 'attempted' | 'interrupted' | 'failed' | 'unknown'; detail: string; autoInterrupt: boolean; result?: string }
 
-export interface HostConfig { id: string; name: string; target: string; port: number; enabled: boolean; autoForward?: boolean }
+export interface HostConfig { id: string; kind?: 'ssh' | 'local'; name: string; target: string; port: number; enabled: boolean; autoForward?: boolean }
 export type RoeProfile = 'full' | 'gated' | 'provider-default';
 export interface DevUrl { url: string; hostId: string; port: number; status: 'available' | 'opening' | 'ready' | 'failed'; localUrl: string | null; error: string | null }
 export interface HostHealth { hostId: string; name: string; connected: boolean; cpuPercent?: number | null; memoryTotal?: number; memoryUsed?: number; disks?: { path: string; total: number; used: number; free: number }[]; sampledAt?: number; sshRoundTripMs?: number; activeChannels?: number; gpu?: { status: 'reported' | 'unknown' | 'unsupported'; sampledAt: number | null; devices: { name: string; memoryTotal: number; memoryUsed: number }[] }; error?: string }

@@ -130,3 +130,5 @@ The app sends a Python helper over SSH for inventory, metrics, and lifecycle req
 ## Safety and scope
 
 AgentC2 never reads provider authentication tokens or SSH private keys. Electron isolates the renderer from Node.js; narrow validated APIs cross the preload bridge. The companion uses short-lived pairing links and revocable HttpOnly device cookies over private Tailscale connections, with origin validation on mutations and WebSocket upgrades. HTTPS cookies retain their Secure and __Host protections; private-IP mode uses a separate cookie name. OpenSSH host-key verification remains mandatory. Stop is limited to sessions created by AgentC2 and requires confirmation. This app supports Antigravity **CLI** conversations, not Antigravity IDE windows.
+
+Local sessions: **Settings → Hosts → Add this computer** runs agents without an SSH server. Linux uses local Python 3/tmux; Windows uses the default WSL distribution. See [local setup and validation limits](docs/unified-chat.md#local-sessions).

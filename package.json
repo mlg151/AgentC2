@@ -30,11 +30,12 @@
     "test:platform": "node tests/platform.cjs",
     "test:desktop": "node tests/desktop.e2e.cjs",
     "test:package": "node tests/desktop.e2e.cjs --packaged",
-    "test:ci": "npm run build && node tests/chat-protocol.cjs && node tests/chat-service.cjs && node tests/chat-timeline.cjs && npm run test:productivity && node tests/loop-breaker.cjs && node tests/readiness.cjs && node tests/exercises.cjs && node tests/cleanup.cjs && node tests/situation.cjs && node tests/reconnect.cjs && node tests/remote-control.cjs && node tests/image-upload.cjs && node tests/tunnels.cjs && npm run test:platform && node tests/packaging.cjs && node tests/native-pty.cjs",
+    "test:ci": "npm run build && node tests/chat-protocol.cjs && node tests/chat-service.cjs && node tests/chat-timeline.cjs && npm run test:productivity && node tests/loop-breaker.cjs && node tests/readiness.cjs && node tests/exercises.cjs && node tests/cleanup.cjs && node tests/situation.cjs && node tests/reconnect.cjs && node tests/remote-control.cjs && node tests/image-upload.cjs && node tests/tunnels.cjs && node tests/local.cjs && node tests/companion-client.cjs && npm run test:platform && node tests/packaging.cjs && node tests/native-pty.cjs",
     "test:chat:ui": "node tests/chat-ui.e2e.cjs",
     "test:chat:ssh": "npm run build && node tests/chat-launch.e2e.cjs",
     "test:chat:sdk-evaluation": "python3 tests/antigravity-sdk-evaluation.py",
-    "test:companion:filters": "npm run build && node tests/companion-filters.e2e.cjs"
+    "test:companion:filters": "npm run build && node tests/companion-filters.e2e.cjs",
+    "test:chat:local": "npm run build && cross-env AGENTC2_CHAT_TEST_LOCAL=1 node tests/chat-launch.e2e.cjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",

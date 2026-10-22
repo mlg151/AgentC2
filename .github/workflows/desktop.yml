@@ -136,6 +136,7 @@ jobs:
           node tests/chat-ui.e2e.cjs
           node tests/companion-filters.e2e.cjs
           xvfb-run -a node tests/chat-launch.e2e.cjs
+          AGENTC2_CHAT_TEST_LOCAL=1 xvfb-run -a node tests/chat-launch.e2e.cjs
         env:
           AGENTC2_QA_SCREENSHOT_DIR: ${{ runner.temp }}/agentc2-chat-screenshots
       - name: Upload structured chat screenshots

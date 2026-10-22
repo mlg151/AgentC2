@@ -43,7 +43,7 @@ const path = require('node:path');
     await page.getByRole('button', { name: /^Attention/ }).click(); assert.equal(await page.locator('.phone-attention').count(), 1); assert.equal(await page.locator('.phone-attention').filter({ hasText: 'External session' }).count(), 0);
     await page.getByRole('button', { name: 'New', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'New session', exact: true });
-    assert.equal(await dialog.getByRole('combobox', { name: 'SSH host' }).count(), 1, 'Interaction-mode help text must not create a second SSH-host accessible name');
+    assert.equal(await dialog.getByRole('combobox', { name: 'Host' }).count(), 1, 'Interaction-mode help text must not create a second SSH-host accessible name');
     assert.equal(await dialog.getByRole('combobox', { name: 'Interaction mode', exact: true }).count(), 1);
     await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true); assert.deepEqual(errors, []);

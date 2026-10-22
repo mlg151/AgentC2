@@ -38,11 +38,11 @@ def probe_capabilities(provider):
         try:
             sdk_version = importlib.metadata.version("claude-agent-sdk")
         except importlib.metadata.PackageNotFoundError:
-            return unavailable_capabilities(provider, version, "Install claude-agent-sdk==" + SUPPORTED_SDK_VERSION + " in the remote worker's Python environment")
+            return unavailable_capabilities(provider, version, "Install claude-agent-sdk==" + SUPPORTED_SDK_VERSION + " in the worker's Python environment")
         observed = str(version) + "; SDK " + sdk_version
         if version == SUPPORTED_CLI_VERSION and sdk_version == SUPPORTED_SDK_VERSION:
             if not auth_available(os.environ):
-                return unavailable_capabilities(provider, observed, "Configure Claude API or supported cloud-provider authentication on the SSH host; CLI subscription sign-in is not used")
+                return unavailable_capabilities(provider, observed, "Configure Claude API or supported cloud-provider authentication on the selected host; CLI subscription sign-in is not used")
             return dict(provider=provider, version=observed, status="supported", reason=None, **{name: name in ("streaming", "history", "resume", "interrupt", "approvals", "questions") for name in CONTRACT["capabilities"]})
     return unavailable_capabilities(provider, version, "Structured adapter has not been verified for this provider/version; use terminal mode")
 

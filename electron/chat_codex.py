@@ -98,7 +98,7 @@ class CodexAdapter:
             self.write(dict(method="initialized", params={}))
             account = self.request("account/read", dict(refreshToken=False))
             if account["requiresOpenaiAuth"] and account["account"] is None:
-                raise ProviderRejected("Sign in with codex login on the selected SSH host, then create or resume this conversation again")
+                raise ProviderRejected("Sign in with codex login on the selected host, then create or resume this conversation again")
             params = dict(cwd=self.session["cwd"])
             profile = self.session["roeProfile"]
             if profile == "full":
@@ -254,7 +254,7 @@ class CodexAdapter:
                 self.write(dict(id=native_id, error=dict(code=-32602, message="Secrets must be configured directly on the provider host")))
                 with self.lock:
                     self.requests.pop(request_id, None)
-                self.event("error", dict(code="secret_input_unsupported", message="A provider requested secret input; configure it directly on the SSH host", retryable=False))
+                self.event("error", dict(code="secret_input_unsupported", message="A provider requested secret input; configure it directly on the selected host", retryable=False))
                 return
             questions = [dict(id=question["id"], question=question["question"], options=[option["label"] for option in question.get("options") or []], multiple=False) for question in params["questions"]]
             self.event("question.requested", dict(requestId=request_id, questions=questions), params["turnId"], params["itemId"])

@@ -433,6 +433,15 @@ def inventory(payload=None):
 def health(payload=None):
     # Return counters; the desktop computes CPU utilization between samples.
     # Guest ticks are already included in user/nice, so exclude them from total.
+    if sys.platform == "darwin":
+        # macOS has no /proc CPU counters. Leave utilization unknown rather
+        # than reporting load averages as a CPU percentage.
+        total = int(checked(["sysctl", "-n", "hw.memsize"]))
+        pages = run(["vm_stat"]).stdout
+        page_size = int(re.search(r"page size of (\d+) bytes", pages).group(1))
+        free_pages = sum(int(value) for value in re.findall(r"Pages (?:free|inactive|speculative):\s+(\d+)", pages))
+        usage = shutil.disk_usage(HOME)
+        return {"cpuTotal": 0, "cpuIdle": 0, "memoryTotal": total, "memoryUsed": max(0, total - free_pages * page_size), "disks": [{"path": str(HOME), "total": usage.total, "used": usage.used, "free": usage.free}], "sampledAt": time.time() * 1000, "gpu": {"status": "unsupported", "sampledAt": None, "devices": []}}
     cpu = [int(value) for value in Path("/proc/stat").read_text().splitlines()[0].split()[1:9]]
     memory = {}
     for line in Path("/proc/meminfo").read_text().splitlines():
@@ -537,7 +546,7 @@ def create(payload):
         if existing and existing != identifier:
             raise ValueError("Managed session identity changed")
         if not existing:
-            checked(["tmux", "new-session", "-d", "-s", name, "-c", str(cwd), "printf 'AgentC2 structured chat session. Open Chat to interact.\\n'; exec sleep infinity"])
+            checked(["tmux", "new-session", "-d", "-s", name, "-c", str(cwd), "printf 'AgentC2 structured chat session. Open Chat to interact.\\n'; while :; do sleep 86400; done"])
             for key, value in (("provider", provider), ("title", title), ("cwd", str(cwd)), ("preset", preset.get("name", "") if preset else ""), ("preset_id", preset.get("id", "") if preset else ""), ("worktree", payload.get("worktreeOperation") or ""), ("roe", roe_profile or "full"), ("chat_session_id", identifier)):
                 checked(["tmux", "set-option", "-t", name, "@hq_" + key, value])
         command = {"protocolVersion": 1, "commandId": command_id, "operation": "create", "payload": {"provider": provider, "cwd": str(cwd), "title": title, "roeProfile": roe_profile or "full", "managedName": name, "instructions": payload.get("instructions") or "", **({"providerSessionId": conversation_id} if conversation_id else {})}}

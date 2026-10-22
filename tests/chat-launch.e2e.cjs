@@ -12,8 +12,10 @@ const root = path.resolve(__dirname, '..');
 const quote = (value) => "'" + String(value).replaceAll("'", "'\\''") + "'";
 async function poll(check, label) { for(let i=0;i<100;i++){const result=await check();if(result)return result;await new Promise((resolve)=>setTimeout(resolve,100));}throw new Error(label); }
 (async()=>{
-  if(process.platform!=='linux' || !fs.existsSync('/usr/sbin/sshd')) { console.log('SKIP isolated SSH chat launch: Linux sshd is required'); return; }
-  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'a2-chat-ssh-')), originalPath=process.env.PATH;
+  const local = process.env.AGENTC2_CHAT_TEST_LOCAL === '1';
+  const browserExecutable = process.env.AGENTC2_CHROMIUM || require('playwright-core').chromium.executablePath();
+  if(process.platform!=='linux' || (!local && !fs.existsSync('/usr/sbin/sshd'))) { console.log('SKIP isolated SSH chat launch: Linux sshd is required'); return; }
+  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'a2-chat-ssh-')), originalPath=process.env.PATH, originalHome=process.env.HOME, originalFixture=process.env.AGENTC2_CODEX_FIXTURE_DIR;
   const home=path.join(directory,'home'), bin=path.join(directory,'bin'), remoteBin=path.join(directory,'remote-bin');
   for(const folder of [home,bin,remoteBin])fs.mkdirSync(folder,{mode:0o700});
   const script=(name,body)=>fs.writeFileSync(name,'#!/bin/sh\n'+body+'\n',{mode:0o700});
@@ -27,17 +29,18 @@ async function poll(check, label) { for(let i=0;i<100;i++){const result=await ch
     fs.copyFileSync(path.join(root,'tests/fixtures/codex-app-server.py'),path.join(remoteBin,'codex'));fs.chmodSync(path.join(remoteBin,'codex'),0o700);fs.writeFileSync(path.join(home,'settings.json'),'{}');
     const force=path.join(directory,'remote-command');script(force,`export HOME=${quote(home)}\nexport PATH=${quote(remoteBin+':/usr/local/bin:/usr/bin:/bin')}\nexport AGENTC2_CODEX_FIXTURE_DIR=${quote(home)}\nexec /bin/bash -c "$SSH_ORIGINAL_COMMAND"`);
     const config=path.join(directory,'sshd_config');fs.writeFileSync(config,`Port ${port}\nListenAddress 127.0.0.1\nHostKey ${hostKey}\nPidFile ${directory}/sshd.pid\nAuthorizedKeysFile ${key}.pub\nStrictModes no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nUsePAM no\nAllowUsers ${os.userInfo().username}\nForceCommand ${force}\n`);
-    let diagnostics='';daemon=spawn('/usr/sbin/sshd',['-D','-e','-f',config]);daemon.stderr.on('data',(chunk)=>{diagnostics+=chunk;});
-    await poll(async()=>{if(daemon.exitCode!==null)throw new Error(diagnostics);return new Promise((resolve)=>{const socket=net.connect(port,'127.0.0.1');socket.on('connect',()=>{socket.destroy();resolve(true);});socket.on('error',()=>resolve(false));});},'Isolated sshd unavailable');
-    script(path.join(bin,'ssh'),`exec /usr/bin/ssh -i ${quote(key)} -o IdentitiesOnly=yes -o UserKnownHostsFile=${quote(knownHosts)} "$@"`);process.env.PATH=bin+':'+originalPath;
-    service=createService({directory:path.join(directory,'desktop'),home});service.store.save('settings',{...service.store.data.settings,hosts:[{id:'default',name:'Isolated SSH fixture',target:os.userInfo().username+'@127.0.0.1',port,enabled:true}]});
+    let diagnostics='';if (!local) { daemon=spawn('/usr/sbin/sshd',['-D','-e','-f',config]);daemon.stderr.on('data',(chunk)=>{diagnostics+=chunk;});
+    await poll(async()=>{if(daemon.exitCode!==null)throw new Error(diagnostics);return new Promise((resolve)=>{const socket=net.connect(port,'127.0.0.1');socket.on('connect',()=>{socket.destroy();resolve(true);});socket.on('error',()=>resolve(false));});},'Isolated sshd unavailable'); }
+    script(path.join(bin,'ssh'),`exec /usr/bin/ssh -i ${quote(key)} -o IdentitiesOnly=yes -o UserKnownHostsFile=${quote(knownHosts)} "$@"`);process.env.PATH=bin+':'+(local ? remoteBin+':' : '')+originalPath;
+    if(local){script(path.join(bin,'ssh'),'echo Unexpected SSH invocation >&2\nexit 97');process.env.HOME=home;process.env.AGENTC2_CODEX_FIXTURE_DIR=home;}
+    service=createService({directory:path.join(directory,'desktop'),home});service.store.save('settings',{...service.store.data.settings,hosts:[{id:'default',...(local?{kind:'local'}:{}),name:local?'This computer fixture':'Isolated SSH fixture',target:os.userInfo().username+'@127.0.0.1',port,enabled:true}]});
     await service.chats.capabilities('default'); workerPid=(await service.chats.request('default','health')).pid;
     const repo=path.join(home,'repo');fs.mkdirSync(repo);execFileSync('git',['init','-q',repo]);execFileSync('git',['-C',repo,'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','--allow-empty','-qm','Fixture']);
     fixtureServer=require('node:http').createServer((_request,response)=>response.end('AgentC2 structured tunnel fixture'));
     await new Promise((resolve)=>fixtureServer.listen(0,'127.0.0.1',resolve));
     const devUrl=`http://127.0.0.1:${fixtureServer.address().port}/preview?fixture=chat`;
     fs.writeFileSync(path.join(home,'settings.json'),JSON.stringify({devUrl}));
-    const launch={provider:'codex',transport:'chat',launchId:crypto.randomBytes(16).toString('hex'),cwd:repo,title:'SSH structured fixture',instructions:'initial fixture prompt',roeProfile:'gated',hostId:'default'};
+    const launch={provider:'codex',transport:'chat',launchId:crypto.randomBytes(16).toString('hex'),cwd:repo,title:local?'Local structured fixture':'SSH structured fixture',instructions:'initial fixture prompt',roeProfile:'gated',hostId:'default'};
     const first=await service.create(launch),again=await service.create(launch);assert.equal(first.name,again.name);
     const desktop={id:'desktop',name:'Desktop'};
     const handle=await service.chats.open(desktop,first.chatSessionId,'default');
@@ -58,6 +61,8 @@ async function poll(check, label) { for(let i=0;i<100;i++){const result=await ch
     assert.equal(service.devUrls(unit.key)[0].url,devUrl);
     assert.throws(()=>service.openDevUrl({id:'unsubscribed'},unit.key,devUrl),/Open this connected chat/);
     const forwarded=await service.openDevUrl(desktop,unit.key,devUrl);
+    if(local)assert.equal(forwarded,devUrl,'Local URLs must not be forwarded through SSH');
+    await assert.rejects(()=>service.saveSettings({...service.store.data.settings,hosts:[{id:'default',name:'Retargeted',target:os.userInfo().username+'@127.0.0.1',port,enabled:true,...(local?{}:{kind:'local'})}]}),/Close this host’s chat views/);
     assert.equal(await (await fetch(forwarded)).text(),'AgentC2 structured tunnel fixture');
     const isolated=await service.create({...launch,launchId:undefined,instructions:'',title:'Isolated worktree chat',worktree:{operationId:crypto.randomBytes(16).toString('hex'),repository:repo,baseRef:'HEAD',slug:'chat'}});
     assert.equal((await service.create({...launch,launchId:undefined,instructions:'',title:'Isolated worktree chat',worktree:{operationId:isolated.worktree.operationId,repository:repo,baseRef:'HEAD',slug:'chat'}})).name,isolated.name);
@@ -69,9 +74,17 @@ async function poll(check, label) { for(let i=0;i<100;i++){const result=await ch
       app=await _electron.launch({executablePath:require('electron'),args:['.',`--user-data-dir=${directory}/browser`],cwd:root,env:{...process.env,NODE_ENV:'production',AGENTC2_DATA_DIR:path.join(directory,'desktop')},timeout:60000});
       const rendered=await app.firstWindow(),errors=[];rendered.on('pageerror',(error)=>errors.push(error.message));
       await rendered.getByRole('textbox',{name:'Message to agent'}).waitFor({timeout:30000});
+      if(local){
+        await rendered.getByRole('button',{name:'Settings',exact:true}).click();
+        const settingsDialog=rendered.getByRole('dialog',{name:'Settings',exact:true});
+        assert.equal(await settingsDialog.getByRole('button',{name:'Add this computer',exact:true}).isDisabled(),true);
+        assert.equal(await settingsDialog.getByRole('textbox',{name:'SSH target',exact:true}).count(),0);
+        await settingsDialog.getByRole('button',{name:'Save settings',exact:true}).click();
+        await settingsDialog.waitFor({state:'hidden'});
+      }
       await rendered.getByText('Fixture approved',{exact:true}).waitFor();assert.equal(await rendered.locator('vite-error-overlay').count(),0);assert.deepEqual(errors,[]);
       await rendered.getByRole('textbox',{name:'Search sessions',exact:true}).fill(launch.title);
-      if(process.env.AGENTC2_QA_SCREENSHOT_DIR){fs.mkdirSync(process.env.AGENTC2_QA_SCREENSHOT_DIR,{recursive:true});await rendered.screenshot({path:path.join(process.env.AGENTC2_QA_SCREENSHOT_DIR,'electron-chat-ssh.png')});}
+      if(process.env.AGENTC2_QA_SCREENSHOT_DIR){fs.mkdirSync(process.env.AGENTC2_QA_SCREENSHOT_DIR,{recursive:true});await rendered.screenshot({path:path.join(process.env.AGENTC2_QA_SCREENSHOT_DIR,local?'electron-chat-local.png':'electron-chat-ssh.png')});}
       await rendered.getByRole('textbox',{name:'Message to agent'}).fill('hold');
       await rendered.locator('.structured-chat').getByRole('button',{name:'Send',exact:true}).click();
       await poll(async()=>await rendered.getByRole('button',{name:'Interrupt',exact:true}).isEnabled(),'Desktop turn not interruptible');
@@ -82,7 +95,7 @@ async function poll(check, label) { for(let i=0;i<100;i++){const result=await ch
       await rendered.evaluate((config)=>window.agentHQ.saveRemote(config),{enabled:true,port:gatewayPort,url:origin,transport:'https'});
       const pair=await rendered.evaluate(()=>window.agentHQ.pairRemote());
       const {chromium}=require('playwright-core');
-      browser=await chromium.launch({executablePath:process.env.AGENTC2_CHROMIUM||chromium.executablePath(),headless:true,args:['--no-sandbox']});
+      browser=await chromium.launch({executablePath:browserExecutable,headless:true,args:['--no-sandbox']});
       const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,serviceWorkers:'block'});
       phoneProxy=await require('./fixtures/companion-proxy.cjs').companionProxy(context,origin,gatewayPort,errors);
       const phone=phoneProxy.page;await phone.goto(pair.url);await phone.getByRole('button',{name:'Pair this device',exact:true}).click();
@@ -109,7 +122,7 @@ async function poll(check, label) { for(let i=0;i<100;i++){const result=await ch
       await poll(async()=>await phone.getByRole('textbox',{name:'Message to agent'}).isDisabled(),'Desktop reclaim did not fence phone input');
       assert.equal(await phone.getByText('Fixture answered',{exact:true}).count(),1,'Phone reconnect duplicated a final message');
       assert.equal(await phone.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
-      if(process.env.AGENTC2_QA_SCREENSHOT_DIR)await phone.screenshot({path:path.join(process.env.AGENTC2_QA_SCREENSHOT_DIR,'companion-chat-ssh.png')});
+      if(process.env.AGENTC2_QA_SCREENSHOT_DIR)await phone.screenshot({path:path.join(process.env.AGENTC2_QA_SCREENSHOT_DIR,local?'companion-chat-local.png':'companion-chat-ssh.png')});
       const devices=await rendered.evaluate(()=>window.agentHQ.remoteStatus());await rendered.evaluate((device)=>window.agentHQ.revokeRemote(device),devices.devices[0].id);
       await phone.getByText('This device was revoked. Pair again from desktop.').waitFor();
       await phoneProxy.close();phoneProxy=null;await browser.close();browser=null;
@@ -143,8 +156,22 @@ async function poll(check, label) { for(let i=0;i<100;i++){const result=await ch
     assert.equal((await service.chats.receipt(desktop,second,first.receipt.commandId)).state,retainedReceipt.state);
     assert.equal(pruned.session.providerSessionId,'native-thread');
     assert.throws(()=>execFileSync('/usr/bin/tmux',['-S',tmuxSocket,'has-session','-t',first.name],{stdio:'pipe'}));
+    if(local){
+      const shell=await service.create({provider:'terminal',hostId:'default',cwd:repo,title:'Local terminal fixture'});
+      const terminal=await service.terminals.open(desktop,shell.name,'default',100,30);service.terminals.ready(desktop,terminal);
+      await service.terminals.write(desktop,terminal,'printf \'LOCAL_PTY_WITNESS\\n\'; for i in $(seq 1 80); do echo local-scroll-$i; done\r');
+      await poll(async()=>service.terminals.sessions.get('default/'+shell.name)?.serializer.serialize().includes('local-scroll-80'),'Local terminal input/output not attached');
+      const uploaded=await service.uploadClipboardImage(desktop,terminal,fs.readFileSync(path.join(root,'assets/app-icon.png')));
+      assert.ok(uploaded.startsWith(home+'/'));assert.equal(fs.statSync(uploaded).mode&0o777,0o600);
+      await service.terminals.scrollRemote(desktop,terminal,'up',20);
+      service.terminals.close(desktop,terminal);
+      const reattached=await service.terminals.open(desktop,shell.name,'default',100,30);service.terminals.ready(desktop,reattached);
+      await poll(async()=>(await service.terminals.retained(desktop,reattached)).text.includes('LOCAL_PTY_WITNESS'),'Local terminal history lost after detach');
+      await service.action(desktop,'stop',shell.name,'default');service.terminals.close(desktop,reattached);
+      const health=await service.health();assert.equal(health[0].connected,true);assert.ok(health[0].memoryTotal>0);
+    }
     workerPid=(await service.chats.request('default','health')).pid;
-    console.log('PASS real isolated SSH, private worker bootstrap, idempotent initial instructions, inventory/native IDs/usage, detach replay, exact approval, worktree retry, scoped stop, retained receipts after transcript pruning, structured-output SSH forwarding'+(process.env.DISPLAY?', and actual Electron/paired companion question, reconnect, denial, handoff, revocation, native-history resume, and ROE preservation':''));
+    console.log('PASS '+(local?'direct local execution without SSH':'real isolated SSH')+', private worker bootstrap, idempotent initial instructions, inventory/native IDs/usage, detach replay, exact approval, worktree retry, scoped stop, retained receipts after transcript pruning, '+(local?'direct loopback URLs and local terminal/clipboard/health':'structured-output SSH forwarding')+(process.env.DISPLAY?', and actual Electron/paired companion question, reconnect, denial, handoff, revocation, native-history resume, and ROE preservation':''));
   }catch(error){
     if(phoneProxy){await phoneProxy.page.screenshot({path:path.join(os.tmpdir(),'agentc2-chat-phone-failure.png'),fullPage:true}).catch(()=>{});console.error('Phone fixture state:',await phoneProxy.page.locator('.phone-main').innerText().catch(()=>''));}
     throw error;
@@ -153,6 +180,6 @@ async function poll(check, label) { for(let i=0;i<100;i++){const result=await ch
     if(workerPid){try{process.kill(workerPid,'SIGTERM');}catch{}}
     try{execFileSync('/usr/bin/tmux',['-S',path.join(directory,'tmux.sock'),'kill-server'],{stdio:'ignore'});}catch{}
     service?.tunnels.closeAll();fixtureServer?.closeAllConnections();if(fixtureServer)await new Promise((resolve)=>fixtureServer.close(resolve));
-    daemon?.kill();process.env.PATH=originalPath;fs.rmSync(directory,{recursive:true,force:true});
+    daemon?.kill();process.env.PATH=originalPath;if(originalHome===undefined)delete process.env.HOME;else process.env.HOME=originalHome;if(originalFixture===undefined)delete process.env.AGENTC2_CODEX_FIXTURE_DIR;else process.env.AGENTC2_CODEX_FIXTURE_DIR=originalFixture;fs.rmSync(directory,{recursive:true,force:true});
   }
 })().catch((error)=>{console.error(error);process.exitCode=1;});

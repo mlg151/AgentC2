@@ -28,6 +28,11 @@ function validateSettings(input) {
   const hosts = input.hosts.map((h) => {
     if (!ID.test(h.id) || ids.has(h.id)) throw new Error('Host IDs must be unique');
     ids.add(h.id);
+    if (h.kind !== undefined && !['ssh', 'local'].includes(h.kind)) throw new Error('Invalid host connection type');
+    if (h.kind === 'local') {
+      if (input.hosts.some((other) => other !== h && other.kind === 'local')) throw new Error('Configure only one local host');
+      return { id: h.id, kind: 'local', name: text(h.name, 100).trim() || 'This computer', target: 'localhost', port: 22, enabled: Boolean(h.enabled), autoForward: Boolean(h.autoForward) };
+    }
     const target = text(h.target, 255).trim();
     if (!/^[a-zA-Z0-9_][a-zA-Z0-9_.@:\[\]-]*$/.test(target)) throw new Error('Use an SSH config alias or user@hostname for the host target');
     const port = Number(h.port);

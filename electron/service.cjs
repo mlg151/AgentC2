@@ -3,6 +3,7 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { sshBinary } = require('./platform.cjs');
+const { localCommand, connectionKey } = require('./local.cjs');
 const { EventEmitter } = require('node:events');
 const pty = require('node-pty');
 const { Store, validateSettings, resolveRoeProfile, validateRoeLaunch, validateSessionPin } = require('./config.cjs');
@@ -148,9 +149,11 @@ function createService({ directory, home }) {
     return new Promise((resolve, reject) => {
       const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
       const embedded = encoded.length > 60000;
-      const child = spawn(SSH_BINARY, [...sshArgs(host), host.target, 'python3', '-', ...(embedded ? [] : [encoded])], {
+      const execution = host.kind === 'local' ? localCommand('python3', ['-', ...(embedded ? [] : [encoded])]) : { binary: SSH_BINARY, args: [...sshArgs(host), host.target, 'python3', '-', ...(embedded ? [] : [encoded])], env: process.env };
+      const child = spawn(execution.binary, execution.args, {
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],
+        env: execution.env,
       });
       let output = '';
       let errors = '';
@@ -170,7 +173,7 @@ function createService({ directory, home }) {
         if (settled) return;
         settled = true;
         clearTimeout(timeout);
-        if (code !== 0) return reject(new Error(errors.trim() || 'SSH connection failed'));
+        if (code !== 0) return reject(new Error(errors.trim() || (host.kind === 'local' ? 'Local execution failed. Install Python 3 and tmux (inside the default WSL distribution on Windows).' : 'SSH connection failed')));
         try {
           const response = JSON.parse(output.trim());
           if (!response.ok) return reject(new Error(response.error || 'Remote action failed'));
@@ -187,7 +190,7 @@ function createService({ directory, home }) {
   const chats = new Chats({
     remote: async (hostId, request) => {
       const host = getHost(hostId);
-      const key = `${host.id}/${host.target}/${host.port}`;
+      const key = `${host.id}/${connectionKey(host)}`;
       try {
         const result = await runRemote({ action: 'chat', sourceDigest: chatDigest, allowUpgrade: true, ...(!chatBootstrapped.has(key) ? { chatFiles } : {}), request }, hostId);
         chatBootstrapped.add(key);
@@ -221,14 +224,18 @@ function createService({ directory, home }) {
     },
     spawn: (name, hostId, size) => {
       const host = getHost(hostId);
-      return pty.spawn(SSH_BINARY, [...sshArgs(host), '-tt', host.target, 'env', 'TERM=xterm-256color', 'tmux', 'attach-session', '-t', name], {
-        name: 'xterm-256color', ...size, cwd: home, env: { ...process.env, TERM: 'xterm-256color' },
+      const execution = host.kind === 'local' ? localCommand('tmux', ['attach-session', '-t', name]) : { binary: SSH_BINARY, args: [...sshArgs(host), '-tt', host.target, 'env', 'TERM=xterm-256color', 'tmux', 'attach-session', '-t', name], env: process.env };
+      return pty.spawn(execution.binary, execution.args, {
+        name: 'xterm-256color', ...size, cwd: home, env: { ...execution.env, TERM: 'xterm-256color' },
       });
     },
     history: (name, hostId) => runRemote({ action: 'history', name }, hostId),
     scroll: async (record, direction, count) => {
       const host = getHost(record.hostId);
-      if (!record.control || record.control.closed) record.control = new TmuxControl(SSH_BINARY, sshArgs(host), host.target, record.name);
+      if (!record.control || record.control.closed) {
+        const local = host.kind === 'local' ? localCommand('tmux', []) : null;
+        record.control = local ? new TmuxControl(local.binary, local.args, null, record.name, local.env) : new TmuxControl(SSH_BINARY, sshArgs(host), host.target, record.name);
+      }
       const target = record.name;
       try {
         record.historyActive = await scrollTerminal((text) => record.control.command(text), target, direction, count);
@@ -254,21 +261,21 @@ function createService({ directory, home }) {
     for (const record of terminals.sessions.values()) {
       const oldHost = getHost(record.hostId);
       const nextHost = settings.hosts.find((h) => h.id === record.hostId);
-      if (!nextHost || !nextHost.enabled || nextHost.target !== oldHost.target || nextHost.port !== oldHost.port) throw new Error('Close this host’s terminal tabs on every device before changing its connection settings');
+      if (!nextHost || !nextHost.enabled || connectionKey(nextHost) !== connectionKey(oldHost)) throw new Error('Close this host’s terminal tabs on every device before changing its connection settings');
     }
     for (const record of chats.sessions.values()) {
       const oldHost = getHost(record.hostId);
       const nextHost = settings.hosts.find((host) => host.id === record.hostId);
-      if (!nextHost || !nextHost.enabled || nextHost.target !== oldHost.target || nextHost.port !== oldHost.port) throw new Error('Close this host’s chat views on every device before changing its connection settings');
+      if (!nextHost || !nextHost.enabled || connectionKey(nextHost) !== connectionKey(oldHost)) throw new Error('Close this host’s chat views on every device before changing its connection settings');
     }
     for (const h of settings.hosts) {
       const old = store.data.settings.hosts.find((item) => item.id === h.id);
-      if (!old || old.target !== h.target || old.port !== h.port) { hostCache.delete(h.id); healthCache.delete(h.id); cpuSamples.delete(h.id); gpuProbedAt.delete(h.id); }
+      if (!old || connectionKey(old) !== connectionKey(h)) { hostCache.delete(h.id); healthCache.delete(h.id); cpuSamples.delete(h.id); gpuProbedAt.delete(h.id); }
     }
     const retained = Object.fromEntries(Object.entries(store.data.cachedUnits).filter(([hostId]) => {
       const old = store.data.settings.hosts.find((host) => host.id === hostId);
       const next = settings.hosts.find((host) => host.id === hostId);
-      return old && next && next.target === old.target && next.port === old.port;
+      return old && next && connectionKey(next) === connectionKey(old);
     }));
     const result = settings;
     store.update({ settings, cachedUnits: retained });
@@ -520,7 +527,7 @@ function createService({ directory, home }) {
     const { record } = terminals.get(client, id);
     terminals.assertOwner(client, record);
     const host = getHost(record.hostId);
-    const remotePath = await uploadPng({ binary: SSH_BINARY, args: sshArgs(host), target: host.target, png });
+    const remotePath = await uploadPng({ binary: SSH_BINARY, args: sshArgs(host), target: host.target, local: host.kind === 'local', png });
     if (terminals.get(client, id).record !== record) throw new Error('Terminal changed during image upload');
     terminals.assertOwner(client, record);
     return remotePath;
