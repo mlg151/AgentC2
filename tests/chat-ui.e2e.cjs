@@ -73,9 +73,11 @@ function request(type, data) {
     assert.equal(await desktop.locator('a[href^="javascript"]').count(),0); assert.equal(await desktop.locator('img').count(),0); assert.equal(await desktop.evaluate(()=>window.qaXss),undefined);
     await desktop.getByText('git diff --stat',{exact:true}).click(); await desktop.getByText('3 files changed, 42 insertions(+)').waitFor();
     delay = true; await desktop.getByRole('textbox',{name:'Message to agent'}).fill('Review lifecycle\nPreserve the command ID');
-    await desktop.getByRole('button',{name:'Send',exact:true}).click();
+    await desktop.getByRole('textbox',{name:'Message to agent'}).dispatchEvent('keydown',{key:'Enter',ctrlKey:true,isComposing:true});
+    assert.equal(commands.length,0,'IME composition submitted a prompt');
+    await desktop.getByRole('textbox',{name:'Message to agent'}).press('Control+Enter');
     await desktop.getByText('Streamed final answer',{exact:true}).waitFor(); await poll(async()=>await desktop.getByRole('button',{name:'Send',exact:true}).count()===1,'Submission receipt stuck');
-    assert.equal(await desktop.getByText('Streamed final answer',{exact:true}).count(),1); assert.equal(commands.length,1); delay=false;
+    assert.equal(await desktop.getByText('Streamed final answer',{exact:true}).count(),1); assert.equal(commands.length,1); assert.equal(commands[0].payload.text,'Review lifecycle\nPreserve the command ID'); delay=false;
     await desktop.getByRole('button',{name:'Load earlier managed messages'}).click();
     request('approval.requested',{requestId:'approval-one',action:'Run a protected command',detail:'{"command":"git status --short","cwd":"/workspace/agentc2"}'});
     await desktop.getByRole('button',{name:'Allow once'}).waitFor();
