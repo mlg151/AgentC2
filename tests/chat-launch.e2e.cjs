@@ -25,7 +25,8 @@ async function poll(check, label) { for(let i=0;i<100;i++){const result=await ch
     const key=path.join(directory,'client-key'), hostKey=path.join(directory,'host-key');
     for(const file of [key,hostKey])execFileSync('ssh-keygen',['-q','-t','ed25519','-N','','-f',file]);
     const knownHosts=path.join(directory,'known-hosts');fs.writeFileSync(knownHosts,`[127.0.0.1]:${port} ${fs.readFileSync(hostKey+'.pub','utf8')}`);
-    const tmuxSocket=path.join(directory,'tmux.sock');script(path.join(remoteBin,'tmux'),`exec /usr/bin/tmux -S ${quote(tmuxSocket)} "$@"`);
+    // Exercise tty startup that discards input queued before attachment is ready.
+    const tmuxSocket=path.join(directory,'tmux.sock');script(path.join(remoteBin,'tmux'),`if [ "$1" = attach-session ]; then python3 -c 'import termios,time; time.sleep(0.2); termios.tcflush(0, termios.TCIFLUSH)'; fi\nexec /usr/bin/tmux -S ${quote(tmuxSocket)} "$@"`);
     fs.copyFileSync(path.join(root,'tests/fixtures/codex-app-server.py'),path.join(remoteBin,'codex'));fs.chmodSync(path.join(remoteBin,'codex'),0o700);fs.writeFileSync(path.join(home,'settings.json'),'{}');
     const force=path.join(directory,'remote-command');script(force,`export HOME=${quote(home)}\nexport PATH=${quote(remoteBin+':/usr/local/bin:/usr/bin:/bin')}\nexport AGENTC2_CODEX_FIXTURE_DIR=${quote(home)}\nexec /bin/bash -c "$SSH_ORIGINAL_COMMAND"`);
     const config=path.join(directory,'sshd_config');fs.writeFileSync(config,`Port ${port}\nListenAddress 127.0.0.1\nHostKey ${hostKey}\nPidFile ${directory}/sshd.pid\nAuthorizedKeysFile ${key}.pub\nStrictModes no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nUsePAM no\nAllowUsers ${os.userInfo().username}\nForceCommand ${force}\n`);
@@ -195,14 +196,20 @@ async function poll(check, label) { for(let i=0;i<100;i++){const result=await ch
     console.log('PASS managed deletion: ownership, unknown stop receipts, confirmed live/stopped removal, persistent tombstones, and stale-save protection');
     if(local){
       const shell=await service.create({provider:'terminal',hostId:'default',cwd:repo,title:'Local terminal fixture'});
-      const terminal=await service.terminals.open(desktop,shell.name,'default',100,30);service.terminals.ready(desktop,terminal);
-      await service.terminals.write(desktop,terminal,'printf \'LOCAL_PTY_WITNESS\\n\'; for i in $(seq 1 80); do echo local-scroll-$i; done\r');
-      await poll(async()=>service.terminals.sessions.get('default/'+shell.name)?.serializer.serialize().includes('local-scroll-80'),'Local terminal input/output not attached');
+      const terminal=await service.terminals.open(desktop,shell.name,'default',100,30);
+      const terminalRecord=service.terminals.sessions.get('default/'+shell.name);
+      // ready() subscribes a viewer; it does not wait for tmux's PTY startup.
+      // This service-level test has no renderer to answer terminal queries.
+      const terminalReplies=terminalRecord.mirror.onData((data)=>terminalRecord.terminal.write(data));
+      await service.terminals.ready(desktop,terminal);
+      await poll(()=>terminalRecord.sequence>0 && terminalRecord.mirror.buffer.active.type==='alternate','Local tmux attachment did not redraw');
+      await service.terminals.write(desktop,terminal,'printf \'LOCAL_PTY_%s\\n\' WITNESS; for i in $(seq 1 80); do echo local-scroll-$i; done\r');
+      await poll(()=>terminalRecord.serializer.serialize().includes('local-scroll-80'),'Local terminal input/output not attached');
       const uploaded=await service.uploadClipboardImage(desktop,terminal,fs.readFileSync(path.join(root,'assets/app-icon.png')));
       assert.ok(uploaded.startsWith(home+'/'));assert.equal(fs.statSync(uploaded).mode&0o777,0o600);
       await service.terminals.scrollRemote(desktop,terminal,'up',20);
-      service.terminals.close(desktop,terminal);
-      const reattached=await service.terminals.open(desktop,shell.name,'default',100,30);service.terminals.ready(desktop,reattached);
+      terminalReplies.dispose();service.terminals.close(desktop,terminal);
+      const reattached=await service.terminals.open(desktop,shell.name,'default',100,30);await service.terminals.ready(desktop,reattached);
       await poll(async()=>(await service.terminals.retained(desktop,reattached)).text.includes('LOCAL_PTY_WITNESS'),'Local terminal history lost after detach');
       await service.deleteSession(desktop,'default/tmux:'+shell.name);service.terminals.close(desktop,reattached);
       assert.equal((await service.inventory()).sessions.some((item)=>item.id===shell.name),false,'Deleted terminal returned to inventory');
