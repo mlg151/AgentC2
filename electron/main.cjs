@@ -3,6 +3,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { tailscaleStatus, closeAction } = require('./platform.cjs');
 const { createService } = require('./service.cjs');
+const { createUpdates } = require('./updates.cjs');
 const { Gateway } = require('./gateway.cjs');
 const { readClipboardPng } = require('./clipboard-image.cjs');
 
@@ -150,6 +151,12 @@ app.whenReady().then(async () => {
   handle('fault:reset', (key) => service.resetFault(key));
   handle('workspace:save', (input) => service.saveWorkspace(input));
   handle('session:pin', (key, pinned) => service.setSessionPinned(key, pinned));
+  let buildInfo = {};
+  try { buildInfo = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'dist', 'build-info.json'), 'utf8')); } catch { /* Source archive without build metadata. */ }
+  const updates = createUpdates({ version: app.getVersion(), revision: buildInfo.revision });
+  handle('updates:check', () => updates.check());
+  handle('updates:open', async () => { const update = await updates.check(); if (update.available) await shell.openExternal(update.url); });
+  handle('session:rename', (key, title) => service.renameSession(key, title));
   handle('session:delete', (key) => service.deleteSession(desktop, key));
   handle('cleanup:preview', (input) => service.cleanup.preview(input));
   handle('cleanup:execute', (token, keys) => service.cleanup.execute(token, keys));

@@ -1,4 +1,4 @@
-export type ChatProvider = 'codex' | 'claude' | 'antigravity';
+export type ChatProvider = 'codex' | 'claude' | 'antigravity' | 'opencode';
 export type ChatSessionState = 'starting' | 'idle' | 'running' | 'waiting' | 'stopped' | 'failed' | 'unknown';
 export type ChatCommandState = 'accepted' | 'dispatching' | 'completed' | 'failed' | 'unknown';
 export interface ChatCapabilities {

@@ -1,6 +1,6 @@
 import type { ChatCapabilities, ChatSessionState, ChatClientState, ChatCommand, ChatPage, ChatReceipt, ChatSnapshot, ChatUpdate } from './chatTypes';
 export type { ChatProvider, ChatSessionState, ChatCommandState, ChatCapabilities, ChatUsage, ChatQuestion, ChatAnswer, ChatEvent, ChatCommand, ChatReceipt, ChatSession, ChatPage, ChatPendingRequest, ChatClientState, ChatSnapshot, ChatUpdate, ChatApi } from './chatTypes';
-export type Provider = 'codex' | 'claude' | 'antigravity' | 'terminal';
+export type Provider = 'codex' | 'claude' | 'antigravity' | 'opencode' | 'terminal';
 export interface ProviderTelemetry { status: 'reported' | 'stale' | 'unknown' | 'unsupported'; sampledAt: string | null; source: string | null; context: { usedTokens: number; capacityTokens: number; percent: number } | null; totalTokens: number | null; tokensPerMinute: number | null; costUsd: number | null; costBasis: string | null }
 
 export interface Session {
@@ -125,7 +125,10 @@ export interface DiffFile { id: string; path: string; staged: boolean; unstaged:
 export interface DiffHunk { id: string; text: string; actionable: boolean }
 export interface DiffDetail { revision: string; staged: DiffHunk[]; unstaged: DiffHunk[]; summary: string; binary: boolean; large: boolean }
 
+export interface AppUpdate { available: boolean; version: string; revision: string | null; kind: 'release' | 'main' | null; label: string; url: string }
 export interface AgentHQApi {
+  checkForUpdates(): Promise<AppUpdate>;
+  openUpdate(): Promise<void>;
   readonly platform: string;
   getState(): Promise<{ settings: Settings; workspace: Workspace; attention: AttentionItem[] }>;
   saveSettings(settings: Settings): Promise<Settings>;
@@ -152,6 +155,7 @@ export interface AgentHQApi {
   decideFlashTraffic(input: { hostId: string; name: string; id: string; decision: 'allow' | 'deny' }): Promise<{ id: string; state: string; decision: string; duplicate: boolean }>;
   saveWorkspace(workspace: Workspace): Promise<Workspace>;
   setSessionPinned(key: string, pinned: boolean): Promise<boolean>;
+  renameSession(key: string, title: string): Promise<string>;
   onSessionPinned(callback: (key: string, pinned: boolean) => void): () => void;
   onSessionsDeleted(callback: (keys: string[]) => void): () => void;
   previewCleanup(input: CleanupInput): Promise<CleanupPreview>;

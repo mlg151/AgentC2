@@ -10,11 +10,12 @@ const os = require('node:os');
 const path = require('node:path');
 const id = 'chat-0123456789abcdef0123456789abcdef';
 const timestamp = '2026-10-22T12:00:00.000Z';
-const caps = { provider: 'codex', version: '0.163.0 fixture', status: 'supported', reason: null, ...Object.fromEntries(contract.capabilities.map((name) => [name, ['streaming','history','resume','interrupt','approvals','questions'].includes(name)])) };
-const session = { id, canStop: true, provider: 'codex', providerSessionId: 'native-fixture', title: 'Mission review', cwd: '/workspace/agentc2', roeProfile: 'gated', state: 'idle', activeTurnId: null, createdAt: timestamp, updatedAt: timestamp, capabilities: caps };
+const provider = process.env.AGENTC2_CHAT_UI_PROVIDER || 'codex';
+const caps = { provider, version: '0.163.0 fixture', status: 'supported', reason: null, ...Object.fromEntries(contract.capabilities.map((name) => [name, ['streaming','history','resume','interrupt','approvals','questions'].includes(name)])) };
+const session = { id, canStop: true, provider, providerSessionId: 'native-fixture', title: 'Mission review', cwd: '/workspace/agentc2', roeProfile: provider === 'opencode' ? 'provider-default' : 'gated', state: 'idle', activeTurnId: null, createdAt: timestamp, updatedAt: timestamp, capabilities: caps };
 const rows = [], pending = [], receipts = new Map(), commands = [], views = new Map(), errors = [];
 let delay = false, drop = false, accepted = 0, sequence = 0, retainedFrom = 1;
-function append(type, data, itemId = null) { rows.push({ protocolVersion: 1, sessionId: id, sequence: ++sequence, timestamp, provider: 'codex', providerSessionId: 'native-fixture', turnId: 'turn-fixture', itemId, type, data }); }
+function append(type, data, itemId = null) { rows.push({ protocolVersion: 1, sessionId: id, sequence: ++sequence, timestamp, provider, providerSessionId: 'native-fixture', turnId: 'turn-fixture', itemId, type, data }); }
 for (let i = 0; i < 210; i++) append('provider.event', { method: 'fixture', payload: {} });
 append('message.completed', { role: 'assistant', text: '## Review complete\nThe worker keeps running when you detach.\n\n| Check | Result |\n| --- | --- |\n| Replay | Verified |\n| Control | Scoped |\n\n```typescript\nawait chat.ready(cursor);\n```\n\n[Documentation](https://example.com/docs)\n\n<script>window.qaXss = 1</script>\n[bad](javascript:alert(1)) ![remote](https://example.invalid/pixel.png)' }, 'intro');
 append('tool.started', { name: 'git diff --stat', input: '{"cwd":"/workspace/agentc2"}' }, 'tool');

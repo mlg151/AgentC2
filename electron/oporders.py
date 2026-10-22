@@ -5,7 +5,7 @@ OPORDER_BEGIN = "<!-- AgentC2 OpOrder: begin -->"
 OPORDER_END = "<!-- AgentC2 OpOrder: end -->"
 OPORDER_TOML_BEGIN = "# AgentC2 OpOrder: begin"
 OPORDER_TOML_END = "# AgentC2 OpOrder: end"
-OPORDER_PATHS = ("AGENTS.md", "CLAUDE.md", ".agents/rules/agentc2.md", ".codex/config.toml", ".mcp.json", ".agents/mcp_config.json")
+OPORDER_PATHS = ("AGENTS.md", "CLAUDE.md", ".agents/rules/agentc2.md", ".codex/config.toml", ".mcp.json", ".agents/mcp_config.json", "opencode.json")
 
 
 def oporder_digest(value):
@@ -77,9 +77,10 @@ def oporder_render(order):
     codex = []
     claude = {}
     antigravity = {}
+    opencode = {}
     for server in order.get("mcp") or []:
         name = server["name"]
-        selected = server.get("providers") or ["codex", "claude", "antigravity"]
+        selected = server.get("providers") or ["codex", "claude", "antigravity", "opencode"]
         transport = server["transport"]
         env = server.get("env") or []
         headers = server.get("headers") or {}
@@ -110,8 +111,18 @@ def oporder_render(order):
                 unsupported.append(f"Antigravity MCP server {name} uses environment references whose workspace expansion is not verified; deselect Antigravity for this server")
             else:
                 antigravity[name] = ({"command": server["command"], "args": server.get("args") or []} if transport == "stdio" else {"serverUrl": server["url"]})
+        if "opencode" in selected:
+            if transport == "stdio":
+                entry = {"type": "local", "command": [server["command"], *server.get("args", [])]}
+                if env:
+                    entry["environment"] = {variable: "{env:" + variable + "}" for variable in env}
+            else:
+                entry = {"type": "remote", "url": server["url"]}
+                if headers:
+                    entry.update(oauth=False, headers={header: "{env:" + variable + "}" for header, variable in headers.items()})
+            opencode[name] = entry
     blocks[".codex/config.toml"] = "\n\n".join(codex)
-    entries = {".mcp.json": claude, ".agents/mcp_config.json": antigravity}
+    entries = {".mcp.json": claude, ".agents/mcp_config.json": antigravity, "opencode.json": opencode}
     return blocks, entries, unsupported
 
 
@@ -146,7 +157,7 @@ def oporder_block(current, desired, previous, toml=False):
     return updated or None, oporder_digest(wanted) if wanted else None
 
 
-def oporder_entries(current, desired, previous):
+def oporder_entries(current, desired, previous, opencode=False):
     if not desired and not previous:
         return current, {}
     if current is None:
@@ -155,7 +166,11 @@ def oporder_entries(current, desired, previous):
         document = json.loads(current)
         if not isinstance(document, dict):
             raise ValueError("MCP configuration must be an object")
-    servers = document.get("mcpServers", {})
+    container = document.get("mcp", {}) if opencode else document
+    if not isinstance(container, dict):
+        raise ValueError("MCP configuration must be an object")
+    map_key = "servers" if opencode else "mcpServers"
+    servers = container.get(map_key, {})
     if not isinstance(servers, dict):
         raise ValueError("MCP server map is not an object")
     servers = dict(servers)
@@ -169,9 +184,14 @@ def oporder_entries(current, desired, previous):
             raise ValueError(f"MCP server {name} already exists outside AgentC2 ownership")
         servers[name] = entry
     if servers:
-        document["mcpServers"] = servers
+        container[map_key] = servers
     else:
-        document.pop("mcpServers", None)
+        container.pop(map_key, None)
+    if opencode:
+        if container:
+            document["mcp"] = container
+        else:
+            document.pop("mcp", None)
     updated = json.dumps(document, indent=2, ensure_ascii=False) + "\n" if document else None
     hashes = {name: oporder_digest(oporder_json(entry)) for name, entry in desired.items()}
     return updated, hashes
@@ -179,8 +199,10 @@ def oporder_entries(current, desired, previous):
 
 def oporder_entry_diff(relative, before, after, previous, desired):
     """Preview managed entries only; unrelated MCP values may contain secrets."""
-    old = json.loads(before or "{}").get("mcpServers", {})
-    new = json.loads(after or "{}").get("mcpServers", {})
+    def servers(value):
+        document = json.loads(value or "{}")
+        return document.get("mcp", {}).get("servers", {}) if relative == "opencode.json" else document.get("mcpServers", {})
+    old, new = servers(before), servers(after)
     names = sorted(set(previous) | set(desired))
     old_managed = {name: old[name] for name in names if name in old}
     new_managed = {name: new[name] for name in names if name in new}
@@ -210,6 +232,8 @@ def oporder_plan(order):
         raise ValueError("Another OpOrder owns this project")
     previous = manifest.get("managed") or {}
     blocks, entries, unsupported = oporder_render(order)
+    if entries["opencode.json"] and (root / "opencode.jsonc").exists():
+        unsupported.append("OpenCode MCP conversion requires opencode.json; merge the existing opencode.jsonc configuration before enrolling these servers")
     changes = []
     next_managed = {}
     existing = set(manifest.get("existing") or [])
@@ -227,7 +251,7 @@ def oporder_plan(order):
                 if hash_value:
                     next_managed[relative] = hash_value
             else:
-                updated, hashes = oporder_entries(current, entries[relative], prior or {})
+                updated, hashes = oporder_entries(current, entries[relative], prior or {}, relative == "opencode.json")
                 if hashes:
                     next_managed[relative] = hashes
             if updated is None and relative in existing:

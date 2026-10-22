@@ -17,18 +17,22 @@ import subprocess
 import sys
 import stat
 import tempfile
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 import time
 import uuid
 
 
 HOME = Path.home()
-PROVIDERS = {"codex": "codex", "claude": "claude", "antigravity": "agy"}
+# The OpenCode installer uses this directory; GUI and noninteractive SSH
+# sessions may not inherit the interactive shell PATH. Keep existing PATH first.
+os.environ["PATH"] = os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin") + os.pathsep + str(HOME / ".opencode" / "bin")
+PROVIDERS = {"codex": "codex", "claude": "claude", "antigravity": "agy", "opencode": "opencode"}
 SESSION_PROVIDERS = {*PROVIDERS, "terminal"}
 PERMISSION_FLAGS = {
     "codex": "--dangerously-bypass-approvals-and-sandbox",
     "claude": "--dangerously-skip-permissions",
     "antigravity": "--dangerously-skip-permissions",
+    "opencode": "--auto",
 }
 ID_RE = re.compile(r"^[a-zA-Z0-9_-]{6,100}$")
 TMUX_RE = re.compile(r"^hq-[a-f0-9]{12}$")
@@ -260,6 +264,32 @@ def antigravity_sessions():
     return list(result.values())
 
 
+def opencode_database():
+    return Path(os.environ.get("XDG_DATA_HOME") or HOME / ".local" / "share") / "opencode" / "opencode.db"
+
+
+def opencode_sessions():
+    database = opencode_database()
+    if not database.is_file() or database.is_symlink():
+        return []
+    try:
+        sessions = {}
+        with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=2)) as connection:
+            connection.row_factory = sqlite3.Row
+            tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            # V2 keeps the legacy table during migration. Prefer migrated IDs.
+            for table in ("session", "session_v2"):
+                if table not in tables:
+                    continue
+                rows = connection.execute(f"SELECT id, title, directory, time_updated FROM {table} WHERE parent_id IS NULL ORDER BY time_updated DESC LIMIT 400").fetchall()
+                for row in rows:
+                    if isinstance(row["id"], str) and re.fullmatch(r"ses_[A-Za-z0-9_-]{1,96}", row["id"]):
+                        sessions[row["id"]] = {"key": "opencode:" + row["id"], "id": row["id"], "provider": "opencode", "title": str(row["title"] or "OpenCode session")[:150], "cwd": row["directory"], "updatedAt": normalize_time(row["time_updated"]), "state": "saved", "kind": "conversation", "canResume": True, "canAttach": False}
+        return list(sessions.values())
+    except (OSError, sqlite3.Error, ValueError):
+        return []
+
+
 def tmux_option(name, option):
     value = run(["tmux", "show-options", "-qv", "-t", name, option], timeout=3)
     return value.stdout.strip() if value.returncode == 0 else ""
@@ -280,7 +310,7 @@ def tmux_sessions():
         name, created, attached, command, cwd = fields[:5]
         managed = bool(TMUX_RE.fullmatch(name)) and tmux_option(name, "@hq_provider") in SESSION_PROVIDERS
         provider = tmux_option(name, "@hq_provider") if managed else {
-            "agy": "antigravity", "codex": "codex", "claude": "claude"
+            "agy": "antigravity", "codex": "codex", "claude": "claude", "opencode": "opencode", "opencode.exe": "opencode"
         }.get(command)
         if provider not in SESSION_PROVIDERS:
             continue
@@ -344,7 +374,7 @@ def unmanaged_processes(worker_pid=None):
 
     result = []
     for pid, (_, command, tty) in processes.items():
-        provider = {"codex": "codex", "claude": "claude", "agy": "antigravity"}.get(command)
+        provider = {"codex": "codex", "claude": "claude", "agy": "antigravity", "opencode": "opencode", "opencode.exe": "opencode"}.get(command)
         if not provider or inside_tmux(pid):
             continue
         result.append({
@@ -384,7 +414,7 @@ def chat_inventory_events(journal_events, chat):
 def inventory(payload=None):
     sessions = (
         tmux_sessions() + codex_sessions()
-        + claude_sessions() + antigravity_sessions()
+        + claude_sessions() + antigravity_sessions() + opencode_sessions()
     )
     worker_pid = None
     if payload and (HOME / ".cache" / "agentc2" / "chat-v1" / "worker.sock").exists():
@@ -502,10 +532,12 @@ def agent_command(provider, conversation_id=None, agent_id=None, preset=None, in
             command += ["resume", conversation_id]
         elif provider == "claude":
             command += ["--resume", conversation_id]
+        elif provider == "opencode":
+            command += ["--session", conversation_id]
         else:
             command += ["--conversation", conversation_id]
     if instructions:
-        command += ["--", instructions]
+        command += ["--prompt", instructions] if provider == "opencode" else ["--", instructions]
     return command
 
 
@@ -529,7 +561,7 @@ def create(payload):
     roe_profile = payload.get("roeProfile")
     if not is_terminal and roe_profile not in (None, "full", "gated", "provider-default"):
         raise ValueError("Invalid Rules of Engagement profile")
-    if roe_profile == "gated" and ((provider == "antigravity" and payload.get("transport") != "chat") or (preset and (preset.get("command") != {"antigravity": "agy"}.get(provider, provider) or any(flag in preset.get("args", "") for flag in ("--dangerously", "--sandbox", "--ask-for-approval", "--permission-mode", "--settings", "--allowedTools", "--allowed-tools", "--config", "--profile")) or re.search(r"(^|\s)-c(\s|=)", preset.get("args", ""))))):
+    if roe_profile == "gated" and ((provider in ("antigravity", "opencode") and payload.get("transport") != "chat") or (preset and (preset.get("command") != {"antigravity": "agy"}.get(provider, provider) or any(flag in preset.get("args", "") for flag in ("--dangerously", "--sandbox", "--ask-for-approval", "--permission-mode", "--settings", "--allowedTools", "--allowed-tools", "--config", "--profile")) or re.search(r"(^|\s)-c(\s|=)", preset.get("args", ""))))):
         raise ValueError("Gated mode requires a supported, unmodified provider command")
     title = " ".join(str(payload.get("title") or "").split())[:100]
     if not title:
@@ -608,6 +640,22 @@ def configure_session(payload):
     checked(["tmux", "set-option", "-t", name, "mouse", "off"])
     checked(["tmux", "set-option", "-t", name, "history-limit", "50000"])
     return {"name": name}
+
+
+def rename(payload):
+    name, title = payload.get("name", ""), payload.get("title", "")
+    if not isinstance(title, str) or not title.strip() or len(title.encode("utf-16-le", errors="surrogatepass")) // 2 > 100 or any(ord(char) < 32 or 127 <= ord(char) <= 159 or 0xD800 <= ord(char) <= 0xDFFF for char in title):
+        raise ValueError("Use a session title of 1–100 characters without control characters")
+    title = title.strip()
+    if not isinstance(name, str) or not TMUX_RE.fullmatch(name):
+        raise ValueError("This rename is only available for an AgentC2 managed session")
+    if payload.get("chatSessionId"):
+        chat_remote({**payload, "request": {"protocolVersion": 1, "action": "rename", "sessionId": payload["chatSessionId"], "managedName": name, "title": title}})
+    else:
+        if tmux_option(name, "@hq_provider") not in SESSION_PROVIDERS:
+            raise ValueError("This rename is only available for an AgentC2 managed session")
+        checked(["tmux", "set-option", "-t", name, "--", "@hq_title", title])
+    return {"name": name, "title": title}
 
 
 def scroll_session(payload):
@@ -728,6 +776,8 @@ def main():
         result = cleanup_delete(payload)
     elif action == "configure":
         result = configure_session(payload)
+    elif action == "rename":
+        result = rename(payload)
     elif action == "scroll":
         result = scroll_session(payload)
     elif action == "history":

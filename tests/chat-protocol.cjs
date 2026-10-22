@@ -65,7 +65,7 @@ assert.equal(parity.status, 0, parity.stderr || parity.error?.message);
 assert.deepEqual(JSON.parse(parity.stdout), cases.map((item) => item.valid), 'Remote Python and desktop JavaScript must enforce the same contract');
 // The production journal is remote-Linux code; Windows runs wire parity only.
 if (process.platform !== 'win32') {
-  for (const test of [script, path.join(__dirname, 'chat-worker.py'), path.join(__dirname, 'chat-codex.py'), path.join(__dirname, 'chat-antigravity.py'), path.join(__dirname, 'chat-claude-native.py')]) {
+  for (const test of [script, path.join(__dirname, 'chat-worker.py'), path.join(__dirname, 'chat-codex.py'), path.join(__dirname, 'chat-opencode.py'), path.join(__dirname, 'chat-antigravity.py'), path.join(__dirname, 'chat-claude-native.py')]) {
     const result = spawnSync(python, [test], { encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } });
     process.stdout.write(result.stdout); process.stderr.write(result.stderr);
     assert.equal(result.status, 0, result.error?.message);

@@ -111,6 +111,16 @@ class Journal:
     def _receipt(row):
         return dict(commandId=row["id"], sessionId=row["session_id"], state=row["state"], result=json.loads(row["result"]) if row["result"] is not None else None, error=row["error"])
 
+    def rename(self, identifier, managed_name, title):
+        if not isinstance(title, str) or not title.strip() or len(title.encode("utf-16-le", errors="surrogatepass")) // 2 > 100 or any(ord(char) < 32 or 127 <= ord(char) <= 159 or 0xD800 <= ord(char) <= 0xDFFF for char in title):
+            raise ValueError("Invalid session title")
+        with self.transaction():
+            row = self._session(identifier)
+            if not row["managed_name"] or row["managed_name"] != managed_name:
+                raise ValueError("Managed session changed; refresh before renaming")
+            self.db.execute("UPDATE sessions SET title=? WHERE id=?", (title.strip(), identifier))
+        return dict(title=title.strip())
+
     def receipt(self, command_id):
         with self.lock:
             row = self.db.execute("SELECT * FROM commands WHERE id=?", (command_id,)).fetchone()
