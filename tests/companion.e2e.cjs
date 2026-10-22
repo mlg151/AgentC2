@@ -21,6 +21,7 @@ const marker = `HQ_PHONE_${crypto.randomBytes(4).toString('hex')}`;
 const created = [];
 const errors = [];
 let app, browser;
+let rejectNextPin = false;
 const proxySockets = new Set();
 function remote(action) {
   const source = `
@@ -91,29 +92,37 @@ async function freePort() {
     // Service-worker installation bypasses Playwright's local HTTP proxy routes.
     // Its static source is checked separately; real installation needs Tailscale.
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, serviceWorkers: 'block' });
-    const page = await context.newPage();
-    page.on('pageerror', (error) => errors.push(`phone: ${error.message}`));
-    page.on('console', (message) => { if (message.type() === 'error' && !message.text().includes('401')) errors.push(`console: ${message.text()}`); });
-    await page.route(origin + '/**', async (route) => {
-      try {
-        const request = route.request();
-        const target = new URL(request.url());
-        const response = await route.fetch({ url: `http://127.0.0.1:${port}${target.pathname}${target.search}`, headers: { ...request.headers(), host: new URL(origin).host, ...(request.method() !== 'GET' ? { origin } : {}) } });
-        await route.fulfill({ response });
-      } catch { await route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"Gateway offline"}' }).catch(() => {}); }
-    });
-    await page.routeWebSocket(origin.replace('https:', 'wss:').replace('http:', 'ws:') + '/**', async (socket) => {
-      const cookies = await context.cookies(origin);
-      const proxy = new WebSocket(`ws://127.0.0.1:${port}/api/v1/socket`, { headers: { host: new URL(origin).host, origin, cookie: cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join('; ') } });
-      proxySockets.add(proxy);
-      const pending = [];
-      socket.onMessage((data) => { if (proxy.readyState === WebSocket.OPEN) proxy.send(data); else pending.push(data); });
-      proxy.on('open', () => { for (const data of pending) proxy.send(data); });
-      proxy.on('message', (data) => socket.send(data.toString()));
-      proxy.on('error', () => socket.close({ code: 1011, reason: 'Proxy unavailable' }));
-      proxy.on('close', (code, reason) => { proxySockets.delete(proxy); socket.close({ code: code === 1006 ? 1011 : code, reason: reason.toString() }); });
-      socket.onClose(() => { proxy.close(); proxySockets.delete(proxy); });
-    });
+    async function phonePage(context) {
+      const page = await context.newPage();
+      page.on('pageerror', (error) => errors.push(`phone: ${error.message}`));
+      page.on('console', (message) => { if (message.type() === 'error' && !message.text().includes('401')) errors.push(`console: ${message.text()}`); });
+      await page.route(origin + '/**', async (route) => {
+        try {
+          const request = route.request();
+          const target = new URL(request.url());
+          const response = await route.fetch({ url: `http://127.0.0.1:${port}${target.pathname}${target.search}`, headers: { ...request.headers(), host: new URL(origin).host, ...(request.method() !== 'GET' ? { origin } : {}) } });
+          await route.fulfill({ response });
+        } catch { await route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"Gateway offline"}' }).catch(() => {}); }
+      });
+      await page.routeWebSocket(origin.replace('https:', 'wss:').replace('http:', 'ws:') + '/**', async (socket) => {
+        const cookies = await context.cookies(origin);
+        const proxy = new WebSocket(`ws://127.0.0.1:${port}/api/v1/socket`, { headers: { host: new URL(origin).host, origin, cookie: cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join('; ') } });
+        proxySockets.add(proxy);
+        const pending = [];
+        socket.onMessage((data) => {
+          const request = JSON.parse(data.toString());
+          if (rejectNextPin && request.method === 'session:pin') { rejectNextPin = false; socket.send(JSON.stringify({ id: request.id, error: 'Pin QA simulated failure' })); return; }
+          if (proxy.readyState === WebSocket.OPEN) proxy.send(data); else pending.push(data);
+        });
+        proxy.on('open', () => { for (const data of pending) proxy.send(data); });
+        proxy.on('message', (data) => socket.send(data.toString()));
+        proxy.on('error', () => socket.close({ code: 1011, reason: 'Proxy unavailable' }));
+        proxy.on('close', (code, reason) => { proxySockets.delete(proxy); socket.close({ code: code === 1006 ? 1011 : code, reason: reason.toString() }); });
+        socket.onClose(() => { proxy.close(); proxySockets.delete(proxy); });
+      });
+      return page;
+    }
+    const page = await phonePage(context);
     await page.goto(pair.url);
     assert.equal(await page.title(), 'AgentC2 Companion');
     await page.getByRole('button', { name: 'Pair this device', exact: true }).click();
@@ -125,10 +134,65 @@ async function freePort() {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.screenshot({ path: path.join(os.tmpdir(), 'agent-hq-phone-sessions.png') });
     console.log('PASS production-cookie pairing and mobile session list');
+    const secondContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, serviceWorkers: 'block' });
+    const secondPhone = await phonePage(secondContext);
+    const secondPair = await desktop.evaluate(() => window.agentHQ.pairRemote());
+    await secondPhone.goto(secondPair.url);
+    await secondPhone.getByLabel('Device name', { exact: true }).fill('Second phone');
+    await secondPhone.getByRole('button', { name: 'Pair this device', exact: true }).click();
+    await secondPhone.getByRole('textbox', { name: 'Search sessions', exact: true }).fill(marker);
+    await secondPhone.getByRole('button', { name: `Unpin ${marker}`, exact: true }).waitFor();
+    await desktop.getByRole('button', { name: 'Close settings', exact: true }).click();
+    const sessionKey = `default/tmux:${name}`;
+    const originalWorkspace = (await desktop.evaluate(() => window.agentHQ.getState())).workspace;
+    rejectNextPin = true;
+    await page.getByRole('button', { name: `Unpin ${marker}`, exact: true }).click();
+    await page.getByRole('alert').filter({ hasText: 'Pin QA simulated failure' }).waitFor();
+    await page.getByRole('button', { name: `Unpin ${marker}`, exact: true }).waitFor();
+    assert.equal((await desktop.evaluate(() => window.agentHQ.getState())).workspace.metadata[sessionKey].pinned, true);
+    await page.getByRole('button', { name: 'Dismiss error', exact: true }).click();
+    await page.getByRole('button', { name: `Unpin ${marker}`, exact: true }).click();
+    await page.getByRole('button', { name: `Pin ${marker}`, exact: true }).waitFor();
+    assert.equal(await page.locator('.phone-terminal').count(), 0, 'List pin must not open the session');
+    await secondPhone.getByRole('button', { name: `Pin ${marker}`, exact: true }).waitFor();
+    await desktop.getByRole('button', { name: `Pin ${marker}`, exact: true }).waitFor();
+    assert.equal((await desktop.evaluate(() => window.agentHQ.getState())).workspace.metadata[sessionKey].pinned, false);
+    // An old layout snapshot cannot restore the previous pin, even if its
+    // metadata predates a concurrently edited companion value.
+    await desktop.evaluate((workspace) => window.agentHQ.saveWorkspace(workspace), originalWorkspace);
+    assert.equal((await desktop.evaluate(() => window.agentHQ.getState())).workspace.metadata[sessionKey].pinned, false);
+    await desktop.getByRole('combobox', { name: 'Session project', exact: true }).fill('Pin sync QA');
+    await desktop.getByRole('button', { name: 'Notes & handoff', exact: true }).click();
+    await desktop.getByRole('textbox', { name: 'Session notes and handoff', exact: true }).fill('Notes survive phone pin edits.');
+    await secondPhone.getByRole('button', { name: `Pin ${marker}`, exact: true }).click();
+    await page.getByRole('button', { name: `Unpin ${marker}`, exact: true }).waitFor();
+    await desktop.getByRole('button', { name: `Unpin ${marker}`, exact: true }).waitFor();
+    await poll(async () => {
+      const metadata = (await desktop.evaluate(() => window.agentHQ.getState())).workspace.metadata[sessionKey];
+      return metadata.pinned && metadata.project === 'Pin sync QA' && metadata.notes === 'Notes survive phone pin edits.';
+    }, 'Pin sync overwrote concurrent notes/project edits');
+    await page.getByRole('button', { name: 'Pinned', exact: true }).click();
+    await page.getByRole('button', { name: `Unpin ${marker}`, exact: true }).waitFor();
+    await page.reload();
+    await page.getByRole('textbox', { name: 'Search sessions', exact: true }).fill(marker);
+    await page.getByRole('button', { name: `Unpin ${marker}`, exact: true }).waitFor();
+    assert.equal((await desktop.evaluate(() => window.agentHQ.getState())).workspace.selectedKey, originalWorkspace.selectedKey);
+    assert.equal((await desktop.evaluate(() => window.agentHQ.getState())).workspace.splitKey, originalWorkspace.splitKey);
+    await page.screenshot({ path: path.join(os.tmpdir(), 'agentc2-companion-pins-mobile.png') });
+    await desktop.screenshot({ path: path.join(os.tmpdir(), 'agentc2-companion-pins-desktop.png') });
+    console.log('PASS list pin/unpin without navigation or control, two paired devices/desktop sync, stale saves, notes/project preservation, filter, and reload');
     await page.locator('.phone-session-row').filter({ hasText: marker }).click();
     await page.getByRole('button', { name: 'Take control', exact: true }).waitFor();
     await poll(() => page.getByRole('button', { name: 'Take control', exact: true }).isEnabled(), 'Phone terminal did not attach');
     assert.equal(await page.getByRole('button', { name: 'Send', exact: true }).isEnabled(), false);
+    await page.getByRole('button', { name: `Unpin ${marker}`, exact: true }).click();
+    await page.getByRole('button', { name: `Pin ${marker}`, exact: true }).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Send', exact: true }).isEnabled(), false);
+    await desktop.getByRole('button', { name: `Pin ${marker}`, exact: true }).click();
+    await page.getByRole('button', { name: `Unpin ${marker}`, exact: true }).waitFor();
+    await page.screenshot({ path: path.join(os.tmpdir(), 'agentc2-companion-pin-detail.png') });
+    await secondContext.close();
+    console.log('PASS detail pin/unpin without taking control and desktop-to-phone updates');
     await page.getByRole('button', { name: 'Take control', exact: true }).click();
     console.log('Phone requested control');
     await poll(() => desktop.locator('.session-pane:visible .control-owner').innerText().then((text) => text.includes('My phone controls')), 'Desktop did not show phone ownership');
@@ -144,7 +208,6 @@ async function freePort() {
     await page.getByRole('button', { name: 'Close history', exact: true }).click();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.screenshot({ path: path.join(os.tmpdir(), 'agent-hq-phone-terminal.png'), fullPage: true });
-    await desktop.getByRole('button', { name: 'Close settings', exact: true }).click();
     await desktop.locator('.session-pane:visible').getByRole('button', { name: 'Take control', exact: true }).click();
     await poll(async () => (await page.locator('.phone-control').innerText()).includes('Desktop controls'), 'Phone did not show desktop reclaim');
     console.log('PASS mobile pairing, responsive session list, live terminal, composer, retained-history search, server-enforced handoff, and desktop reclaim');
@@ -163,6 +226,7 @@ async function freePort() {
     await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].restore(); BrowserWindow.getAllWindows()[0].show(); });
     await desktop.evaluate((value) => window.agentHQ.saveRemote({ ...value, enabled: false }), config);
     await poll(async () => (await page.locator('.phone-connection').innerText()) !== 'Connected', 'Phone did not notice gateway shutdown');
+    assert.equal(await page.getByRole('button', { name: `Unpin ${marker}`, exact: true }).isEnabled(), false);
     await desktop.evaluate((value) => window.agentHQ.saveRemote(value), config);
     await poll(async () => (await page.locator('.phone-connection').innerText()) === 'Connected', 'Phone did not reconnect');
     await poll(() => page.getByRole('button', { name: 'Take control', exact: true }).isEnabled(), 'Reconnect did not reopen the terminal');
@@ -193,6 +257,8 @@ async function freePort() {
     const shell = (await desktop.evaluate(() => window.agentHQ.inventory())).sessions.find((session) => session.title === `${marker} terminal`);
     assert.ok(shell); created.push(shell.id);
     assert.equal(shell.provider, 'terminal'); assert.equal(shell.cwd, '/tmp');
+    await page.getByRole('button', { name: `Pin ${marker} terminal`, exact: true }).click();
+    await page.getByRole('button', { name: `Unpin ${marker} terminal`, exact: true }).waitFor();
     await poll(() => page.getByRole('button', { name: 'Take control', exact: true }).isEnabled(), 'New shell did not attach');
     await page.getByRole('button', { name: 'Take control', exact: true }).click();
     await page.getByLabel('Command', { exact: true }).fill("export HQ_PHONE_REATTACH=retained; printf '\\033[2J\\033[Hhttps://example.com/hq\\n'");

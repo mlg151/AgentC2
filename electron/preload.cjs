@@ -4,7 +4,40 @@ contextBridge.exposeInMainWorld('agentHQ', {
   platform: process.platform,
   getState: () => ipcRenderer.invoke('state:get'),
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
+  previewOpOrder: (order) => ipcRenderer.invoke('oporder:preview', order),
+  enrollOpOrder: (order, revision) => ipcRenderer.invoke('oporder:enroll', order, revision),
+  previewSitrep: (input) => ipcRenderer.invoke('sitrep:preview', input),
+  launchSitrep: (input) => ipcRenderer.invoke('sitrep:launch', input),
+  listExercises: () => ipcRenderer.invoke('exercise:list'),
+  exerciseCapabilities: (hostId) => ipcRenderer.invoke('exercise:capabilities', hostId),
+  createExercise: (input) => ipcRenderer.invoke('exercise:create', input),
+  retryExercise: (id) => ipcRenderer.invoke('exercise:retry', id),
+  cancelExercise: (id) => ipcRenderer.invoke('exercise:cancel', id),
+  markExerciseComplete: (id, contestantId) => ipcRenderer.invoke('exercise:complete', id, contestantId),
+  inspectExercise: (id, contestantId, verify) => ipcRenderer.invoke('exercise:inspect', id, contestantId, verify),
+  previewExercisePromotion: (id, contestantId) => ipcRenderer.invoke('exercise:preview', id, contestantId),
+  promoteExercise: (id, contestantId, revision) => ipcRenderer.invoke('exercise:promote', id, contestantId, revision),
+  listFlashTraffic: () => ipcRenderer.invoke('flash:list'),
+  decideFlashTraffic: (input) => ipcRenderer.invoke('flash:decide', input),
+  interruptFaults: () => ipcRenderer.invoke('fault:interrupt-all'),
+  resetFault: (key) => ipcRenderer.invoke('fault:reset', key),
   saveWorkspace: (workspace) => ipcRenderer.invoke('workspace:save', workspace),
+  setSessionPinned: (key, pinned) => ipcRenderer.invoke('session:pin', key, pinned),
+  previewCleanup: (input) => ipcRenderer.invoke('cleanup:preview', input),
+  executeCleanup: (token, keys) => ipcRenderer.invoke('cleanup:execute', token, keys),
+  cleanupState: () => ipcRenderer.invoke('cleanup:state'),
+  terminalPreviews: (keys) => ipcRenderer.invoke('terminal:previews', keys),
+  searchHistory: (query, keys) => ipcRenderer.invoke('terminal:search', query, keys),
+  onSessionsDeleted: (callback) => {
+    const listener = (_event, keys) => callback(keys);
+    ipcRenderer.on('sessions:deleted', listener);
+    return () => ipcRenderer.removeListener('sessions:deleted', listener);
+  },
+  onSessionPinned: (callback) => {
+    const listener = (_event, key, pinned) => callback(key, pinned);
+    ipcRenderer.on('session:pinned', listener);
+    return () => ipcRenderer.removeListener('session:pinned', listener);
+  },
   acknowledge: (id) => ipcRenderer.invoke('attention:ack', id),
   inventory: () => ipcRenderer.invoke('inventory'),
   health: () => ipcRenderer.invoke('health'),
@@ -14,6 +47,11 @@ contextBridge.exposeInMainWorld('agentHQ', {
     return () => ipcRenderer.removeListener('health:updated', listener);
   },
   create: (input) => ipcRenderer.invoke('create', input),
+  listWorktrees: (hostId) => ipcRenderer.invoke('worktrees:list', hostId),
+  archiveWorktree: (hostId, operationId) => ipcRenderer.invoke('worktrees:archive', hostId, operationId),
+  diffFiles: (input) => ipcRenderer.invoke('diff:files', input),
+  diffDetail: (input) => ipcRenderer.invoke('diff:detail', input),
+  diffHunk: (input) => ipcRenderer.invoke('diff:hunk', input),
   interrupt: (name, hostId) => ipcRenderer.invoke('interrupt', name, hostId),
   stop: (name, hostId) => ipcRenderer.invoke('stop', name, hostId),
   openTerminal: (name, cols, rows, hostId) => ipcRenderer.invoke('terminal:open', name, cols, rows, hostId),
@@ -41,6 +79,14 @@ contextBridge.exposeInMainWorld('agentHQ', {
   closeTerminal: (id) => ipcRenderer.invoke('terminal:close', id),
   scrollTerminal: (id, direction, lines) => ipcRenderer.invoke('terminal:scroll', id, direction, lines),
   readClipboard: () => ipcRenderer.invoke('clipboard:read'),
+  readClipboardForTerminal: (id) => ipcRenderer.invoke('clipboard:for-terminal', id),
+  devUrls: (sessionKey) => ipcRenderer.invoke('tunnel:list', sessionKey),
+  openDevUrl: (id, url) => ipcRenderer.invoke('tunnel:open', id, url),
+  onDevUrls: (callback) => {
+    const listener = (_event, sessionKey, urls) => callback(sessionKey, urls);
+    ipcRenderer.on('tunnel:updated', listener);
+    return () => ipcRenderer.removeListener('tunnel:updated', listener);
+  },
   writeClipboard: (text) => ipcRenderer.invoke('clipboard:write', text),
   terminalMenu: (hasSelection) => ipcRenderer.invoke('terminal:menu', hasSelection),
   onInventory: (callback) => {

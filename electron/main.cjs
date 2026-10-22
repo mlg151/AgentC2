@@ -4,9 +4,10 @@ const fs = require('node:fs');
 const { tailscaleStatus, closeAction } = require('./platform.cjs');
 const { createService } = require('./service.cjs');
 const { Gateway } = require('./gateway.cjs');
+const { readClipboardPng } = require('./clipboard-image.cjs');
 
 const desktop = { id: 'desktop', name: 'Desktop' };
-let mainWindow, service, gateway, tray, monitor, healthMonitor;
+let mainWindow, service, gateway, tray, monitor, healthMonitor, cleanupMonitor;
 let quitting = false;
 let startupError = '';
 const icon = path.join(__dirname, '..', 'assets', process.platform === 'win32' ? 'app-icon.ico' : 'app-icon.png');
@@ -101,6 +102,7 @@ app.whenReady().then(async () => {
       else if (event === 'terminal:exit') send(event, value.id, value.code);
       else send(event, value);
     });
+    service.events.on('tunnel:updated', ({ sessionKey, urls }) => send('tunnel:updated', sessionKey, urls));
     service.events.on('inventory:updated', (value) => {
       send('inventory:updated', value);
       const unread = value.attention.filter((item) => !item.acknowledged);
@@ -114,6 +116,8 @@ app.whenReady().then(async () => {
       }
     });
     service.events.on('health:updated', (value) => send('health:updated', value));
+    service.events.on('session:pinned', (key, pinned) => send('session:pinned', key, pinned));
+    service.events.on('sessions:deleted', (keys) => send('sessions:deleted', keys));
     for (const item of service.store.data.attention) notified.add(item.id);
     if (gateway.data.enabled) await gateway.start().catch((error) => { gateway.error = error.message; });
     updateTray();
@@ -121,11 +125,39 @@ app.whenReady().then(async () => {
   function handle(name, fn) { ipcMain.handle(name, (event, ...args) => { assertSender(event); return fn(...args); }); }
   handle('state:get', () => service.store.data);
   handle('settings:save', (input) => service.saveSettings(input));
+  handle('oporder:preview', (order) => service.previewOpOrder(order));
+  handle('oporder:enroll', (order, revision) => service.enrollOpOrder(order, revision));
+  handle('sitrep:preview', (input) => service.previewSitrep(desktop, input));
+  handle('sitrep:launch', (input) => service.launchSitrep(desktop, input));
+  handle('exercise:list', () => service.exercises.list());
+  handle('exercise:capabilities', (hostId) => service.exercises.capabilities(hostId));
+  handle('exercise:create', (input) => service.exercises.create(input));
+  handle('exercise:retry', (id) => service.exercises.launch(id));
+  handle('exercise:cancel', (id) => service.exercises.cancel(id));
+  handle('exercise:complete', (id, contestantId) => service.exercises.markComplete(id, contestantId));
+  handle('exercise:inspect', (id, contestantId, verify) => service.exercises.inspect(id, contestantId, verify));
+  handle('exercise:preview', (id, contestantId) => service.exercises.preview(id, contestantId));
+  handle('exercise:promote', (id, contestantId, revision) => service.exercises.promote(id, contestantId, revision));
+  handle('flash:list', () => service.flashQueue());
+  handle('flash:decide', (input) => service.flashDecide(desktop, input));
+  handle('fault:interrupt-all', () => service.interruptFaults(desktop));
+  handle('fault:reset', (key) => service.resetFault(key));
   handle('workspace:save', (input) => service.saveWorkspace(input));
+  handle('session:pin', (key, pinned) => service.setSessionPinned(key, pinned));
+  handle('cleanup:preview', (input) => service.cleanup.preview(input));
+  handle('cleanup:execute', (token, keys) => service.cleanup.execute(token, keys));
+  handle('cleanup:state', () => service.cleanup.state());
+  handle('terminal:previews', (keys) => service.terminalPreviews(keys));
+  handle('terminal:search', (query, keys) => service.searchHistory(query, keys));
   handle('attention:ack', (id) => service.acknowledge(id));
   handle('inventory', () => service.inventory());
   handle('health', () => service.health());
   handle('create', (input) => service.create(input));
+  handle('worktrees:list', (hostId) => service.worktrees(hostId));
+  handle('worktrees:archive', (hostId, operationId) => service.archiveWorktree(hostId, operationId));
+  handle('diff:files', (input) => service.diffRequest(desktop, input, 'diff_files'));
+  handle('diff:detail', (input) => service.diffRequest(desktop, input, 'diff_detail'));
+  handle('diff:hunk', (input) => service.diffRequest(desktop, input, 'diff_hunk'));
   for (const action of ['interrupt', 'stop']) handle(action, (name, hostId) => service.action(desktop, action, name, hostId));
   handle('terminal:open', (name, cols, rows, hostId) => service.terminals.open(desktop, name, service.hostId(hostId), cols, rows));
   handle('terminal:ready', (id) => service.terminals.ready(desktop, id));
@@ -137,7 +169,20 @@ app.whenReady().then(async () => {
   handle('terminal:history', (id) => service.terminals.retained(desktop, id));
   handle('terminal:scroll', (id, direction, lines) => service.terminals.scrollRemote(desktop, id, direction, lines));
   handle('clipboard:read', () => clipboard.readText());
-  handle('clipboard:write', (text) => { if (typeof text !== 'string' || text.length > 1_000_000) throw new Error('Invalid clipboard text'); clipboard.writeText(text); });
+  handle('clipboard:for-terminal', async (id) => {
+    const { record } = service.terminals.get(desktop, id);
+    service.terminals.assertOwner(desktop, record);
+    const png = await readClipboardPng(clipboard, nativeImage);
+    if (png) return { kind: 'image', path: await service.uploadClipboardImage(desktop, id, png) };
+    return { kind: 'text', text: await clipboard.readText() };
+  });
+  handle('tunnel:list', (sessionKey) => service.devUrls(sessionKey));
+  handle('tunnel:open', async (id, url) => {
+    const localUrl = await service.openDevUrl(desktop, id, url);
+    await shell.openExternal(localUrl);
+    return localUrl;
+  });
+  handle('clipboard:write', (text) => { if (typeof text !== 'string' || text.length > 1_000_000) throw new Error('Invalid clipboard text'); return clipboard.writeText(text); });
   handle('terminal:menu', (hasSelection) => new Promise((resolve) => {
     Menu.buildFromTemplate([
       { label: 'Copy', accelerator: 'CommandOrControl+Shift+C', enabled: Boolean(hasSelection), click: () => resolve('copy') },
@@ -154,6 +199,8 @@ app.whenReady().then(async () => {
   if (!startupError) {
     monitor = setInterval(() => { void service.inventory().catch(() => {}); }, 15000);
     healthMonitor = setInterval(() => { void service.health().catch(() => {}); }, 5000);
+    cleanupMonitor = setInterval(() => { void service.cleanup.runDue().catch(() => {}); }, 60000);
+    void service.cleanup.runDue().catch(() => {});
     powerMonitor.on('resume', () => { void service.inventory().catch(() => {}); void service.health().catch(() => {}); });
     powerMonitor.on('suspend', () => { for (const record of [...gateway.sockets.values()]) gateway.drop(record, 4004, 'Desktop sleeping'); });
   }
@@ -162,7 +209,8 @@ app.whenReady().then(async () => {
 const notified = new Set();
 app.on('before-quit', () => {
   quitting = true;
-  clearInterval(monitor); clearInterval(healthMonitor);
+  clearInterval(monitor); clearInterval(healthMonitor); clearInterval(cleanupMonitor);
   void gateway?.dispose(); service?.terminals.closeAll(); tray?.destroy(); tray = null;
+  service?.tunnels.closeAll();
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

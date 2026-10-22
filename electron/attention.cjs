@@ -17,15 +17,25 @@ class Attention {
     let cursorChanged = false;
     for (const session of sessions) {
       const events = session.events || [];
-      const cursor = events.findIndex((event) => event.id === cursors[session.key]);
+      const savedCursor = cursors[session.key];
+      const cursorId = typeof savedCursor === 'string' ? savedCursor : savedCursor?.id;
+      const rememberedAt = typeof savedCursor === 'object' ? Date.parse(savedCursor.at || '') : Math.max(0, ...items.filter((item) => item.sessionKey === session.key && item.signature?.startsWith('hook:')).map((item) => Date.parse(item.createdAt) || 0));
+      const cursorAt = Number.isFinite(rememberedAt) ? rememberedAt : 0;
+      const cursor = events.findIndex((event) => event.id === cursorId);
       for (const event of events.slice(cursor + 1)) {
         if (!['completed', 'failed', 'input'].includes(event.kind) || typeof event.id !== 'string') continue;
+        const eventAt = Date.parse(event.at || '');
+        if (Number.isFinite(eventAt) && eventAt < cursorAt - 1000) continue;
         const signature = `hook:${event.id}`;
         if (items.some((i) => i.sessionKey === session.key && i.signature === signature)) continue;
-        const item = { id: crypto.randomUUID(), sessionKey: session.key, hostId: session.hostId, title: session.title, provider: session.provider, createdAt: event.at || new Date().toISOString(), acknowledged: false, signature, kind: event.kind, confidence: 'confirmed', detail: event.kind === 'completed' ? 'The provider reported that its turn finished. Review the result in the terminal.' : event.kind === 'failed' ? 'The provider reported a failed turn.' : 'The provider reported an input or approval request.' };
+        const item = { id: crypto.randomUUID(), sessionKey: session.key, hostId: session.hostId, title: session.title, provider: session.provider, createdAt: event.at || new Date().toISOString(), acknowledged: Boolean(event.requestId && this.store.data.flashResolved?.includes(event.requestId)), requestId: event.requestId || undefined, signature, kind: event.kind, confidence: 'confirmed', detail: event.kind === 'completed' ? 'The provider reported that its turn finished. Review the result in the terminal.' : event.kind === 'failed' ? 'The provider reported a failed turn.' : event.tool ? `The provider requested permission for ${event.tool}. Review the exact action in Flash Traffic.` : 'The provider reported an input or approval request.' };
         items = [...items, item].slice(-500); added.push(item);
       }
-      if (events.length && cursors[session.key] !== events.at(-1).id) { cursors[session.key] = events.at(-1).id; cursorChanged = true; }
+      if (events.length && cursorId !== events.at(-1).id) {
+        const latestAt = Math.max(cursorAt, ...events.map((event) => Date.parse(event.at || '') || 0));
+        cursors[session.key] = { id: events.at(-1).id, at: new Date(latestAt || Date.now()).toISOString() };
+        cursorChanged = true;
+      }
       const signal = classify(session);
       const signature = signal ? `${signal.kind}:${signal.confidence}:${signal.detail}` : '';
       const previous = this.observed.get(session.key);
@@ -42,6 +52,13 @@ class Attention {
   }
   acknowledge(id) {
     return this.store.save('attention', this.store.data.attention.map((i) => id === 'all' || i.id === id ? { ...i, acknowledged: true } : i));
+  }
+  resolveRequests(ids) {
+    if (!ids.length) return;
+    const known = new Set([...(this.store.data.flashResolved || []), ...ids]);
+    if (known.size !== (this.store.data.flashResolved || []).length) this.store.save('flashResolved', [...known].slice(-1000));
+    const next = this.store.data.attention.map((item) => item.requestId && known.has(item.requestId) && !item.acknowledged ? { ...item, acknowledged: true } : item);
+    if (next.some((item, index) => item !== this.store.data.attention[index])) this.store.save('attention', next);
   }
 }
 module.exports = { Attention, classify };

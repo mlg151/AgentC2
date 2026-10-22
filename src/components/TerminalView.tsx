@@ -7,7 +7,7 @@ import { HistorySearch } from './HistorySearch';
 import { enableTerminalLinks } from '../terminalLinks';
 import type { TerminalState } from '../types';
 
-export function TerminalView({ terminalId, visible }: { terminalId: string | null; visible: boolean }) {
+export function TerminalView({ terminalId, visible, focused = true }: { terminalId: string | null; visible: boolean; focused?: boolean }) {
   const elementRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -57,7 +57,7 @@ export function TerminalView({ terminalId, visible }: { terminalId: string | nul
     if (!id || !text || !window.agentHQ) return;
     try {
       await latest();
-      if (activeIdRef.current !== id) return;
+      if (activeIdRef.current !== id || !controlRef.current) return;
       // xterm.paste preserves the CLI's bracketed-paste handling.
       terminalRef.current?.paste(text);
       terminalRef.current?.focus();
@@ -66,8 +66,13 @@ export function TerminalView({ terminalId, visible }: { terminalId: string | nul
   }, [latest, showError]);
 
   const pasteClipboard = useCallback(async () => {
-    if (!window.agentHQ) return;
-    try { await pasteText(await window.agentHQ.readClipboard()); }
+    const id = activeIdRef.current;
+    if (!window.agentHQ || !id || !controlRef.current) return;
+    try {
+      const value = await window.agentHQ.readClipboardForTerminal(id);
+      if (activeIdRef.current !== id || !controlRef.current) return;
+      await pasteText(value.kind === 'image' ? `'${value.path.replaceAll("'", "'\\''")}'` : value.text);
+    }
     catch (cause) { showError(cause); }
   }, [pasteText, showError]);
 
@@ -83,7 +88,7 @@ export function TerminalView({ terminalId, visible }: { terminalId: string | nul
       scrollOnUserInput: true,
       allowProposedApi: false,
       theme: {
-        background: '#0a1218', foreground: '#dbe6ec', cursor: '#35c9cc',
+        background: '#0a0e14', foreground: '#dbe6ec', cursor: '#00f0ff',
         selectionBackground: '#255b68', black: '#15222b', red: '#ec6c70',
         green: '#45d89b', yellow: '#e9bd76', blue: '#80b7ed',
         magenta: '#b7a4ec', cyan: '#50d4d8', white: '#dce7ea',
@@ -91,7 +96,10 @@ export function TerminalView({ terminalId, visible }: { terminalId: string | nul
     });
     const fit = new FitAddon();
     terminal.loadAddon(fit);
-    enableTerminalLinks(terminal);
+    enableTerminalLinks(terminal, (url) => {
+      const id = activeIdRef.current;
+      if (id) void window.agentHQ?.openDevUrl(id, url).catch(showError);
+    });
     terminal.open(element);
     terminalRef.current = terminal;
     fitRef.current = fit;
@@ -152,8 +160,11 @@ export function TerminalView({ terminalId, visible }: { terminalId: string | nul
     const onPaste = (event: ClipboardEvent) => {
       event.preventDefault();
       event.stopImmediatePropagation();
-      const text = event.clipboardData?.getData('text/plain');
-      if (text) void pasteText(text);
+      if ([...(event.clipboardData?.items || [])].some((item) => item.type === 'image/png' || item.type === 'image/jpeg')) void pasteClipboard();
+      else {
+        const text = event.clipboardData?.getData('text/plain');
+        if (text) void pasteText(text);
+      }
     };
     const suppressRemoteContextMenu = (event: MouseEvent) => {
       if (event.button === 2) { event.preventDefault(); event.stopImmediatePropagation(); }
@@ -177,8 +188,8 @@ export function TerminalView({ terminalId, visible }: { terminalId: string | nul
     });
     const offState = window.agentHQ?.onTerminalState((state) => {
       if (state.id !== activeIdRef.current) return;
-      setControl(state); controlRef.current = state.canControl;
-      terminal.options.disableStdin = !state.canControl;
+      setControl(state); controlRef.current = state.canControl && state.connection === 'connected';
+      terminal.options.disableStdin = !controlRef.current;
       if (!state.canControl) terminal.resize(state.cols, state.rows);
     });
     return () => {
@@ -220,8 +231,8 @@ export function TerminalView({ terminalId, visible }: { terminalId: string | nul
       void window.agentHQ?.resizeTerminal(terminalId, terminal.cols, terminal.rows).catch(showError);
       void window.agentHQ?.readyTerminal(terminalId).then((snapshot) => {
         if (activeIdRef.current !== terminalId) return;
-        setControl(snapshot.state); controlRef.current = snapshot.state.canControl;
-        terminal.options.disableStdin = !snapshot.state.canControl;
+        setControl(snapshot.state); controlRef.current = snapshot.state.canControl && snapshot.state.connection === 'connected';
+        terminal.options.disableStdin = !controlRef.current;
         terminal.resize(snapshot.state.cols, snapshot.state.rows);
         terminal.write(snapshot.text);
         lastSequence.current = snapshot.sequence;
@@ -243,15 +254,22 @@ export function TerminalView({ terminalId, visible }: { terminalId: string | nul
       const terminal = terminalRef.current;
       if (terminal) {
         void window.agentHQ?.resizeTerminal(terminalId, terminal.cols, terminal.rows).catch(showError);
-        if (!document.querySelector('[role="dialog"]')) terminal.focus();
       }
     });
     return () => cancelAnimationFrame(frame);
   }, [visible, terminalId, showError]);
 
+  useEffect(() => {
+    if (!visible || !focused || !terminalId) return;
+    const frame = requestAnimationFrame(() => {
+      if (!document.querySelector('[role="dialog"]')) terminalRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [visible, focused, terminalId]);
+
   return <div className={`terminal-console${visible ? '' : ' terminal-hidden'}`}>
     <div className="terminal-utilities">
-      {terminalId && control ? <><span className="control-owner">{control.canControl ? 'You control' : `${control.controller?.name || 'No device'} controls`}</span>{!control.canControl ? <button onClick={() => void window.agentHQ?.takeTerminal(terminalId).then((state) => { setControl(state); controlRef.current = true; fitRef.current?.fit(); const terminal = terminalRef.current; if (terminal) { terminal.options.disableStdin = false; void window.agentHQ?.resizeTerminal(terminalId, terminal.cols, terminal.rows).catch(showError); terminal.focus(); } }).catch(showError)}>Take control</button> : null}</> : null}
+      {terminalId && control ? <><span className="control-owner">{control.connection === 'reconnecting' ? 'SSH reconnecting…' : control.canControl ? 'You control' : `${control.controller?.name || 'No device'} controls`}</span>{!control.canControl ? <button disabled={control.connection !== 'connected'} onClick={() => void window.agentHQ?.takeTerminal(terminalId).then((state) => { setControl(state); controlRef.current = true; fitRef.current?.fit(); const terminal = terminalRef.current; if (terminal) { terminal.options.disableStdin = false; void window.agentHQ?.resizeTerminal(terminalId, terminal.cols, terminal.rows).catch(showError); terminal.focus(); } }).catch(showError)}>Take control</button> : null}</> : null}
       <span className="terminal-hint" role="status">{feedback || 'Scroll for history · Drag to select'}</span>
       <button title={`Search retained history (${primaryModifier}+F)`} onClick={() => setSearchOpen(true)}><Search size={14} /> Find</button>
       <button title="Return to the latest output" onClick={() => void latest().catch(showError)}><ArrowDownToLine size={14} /> Latest</button>

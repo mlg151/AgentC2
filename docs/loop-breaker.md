@@ -1,0 +1,11 @@
+# Repeated-failure breaker
+
+The breaker is enabled per Claude launch preset under **Settings → Launch presets**. Detection and automatic interruption are separate opt-ins. The default policy raises a reviewable fault after four consecutive matching confirmed failures within ten minutes; a 15-minute cooldown applies after a reset. Existing sessions without a preset ID or provider hooks are not eligible.
+
+Claude `PostToolUseFailure` hooks report the tool, the documented first-line `Exit code N`, and a digest of the tool input. The command and error output are not stored. `StopFailure` reports a documented API error category. A successful tool call, completed turn, new user prompt, different failure signature, expired window, or changed HEAD in a managed worktree resets the streak. Repeated output, silence, token use, and unavailable telemetry cannot trip it. Token-rate detection is deliberately absent until a trustworthy progress signal is available for the same provider/session.
+
+A fault appears in the Attention inbox with its evidence and current interrupt result. The **Interrupt eligible units** button and command-mode **X** act only on currently faulted managed units. Each target is rechecked against a fresh SSH inventory and terminal control ownership before one scoped tmux Ctrl+C. The breaker never sends `kill-session`, never interrupts external processes, and does not repeat an already accepted interrupt on reconnect. A restarted app records an in-flight result as unknown for review. **Reset fault** clears the review state so subsequent evidence can be assessed after the cooldown; resuming work remains a manual terminal action.
+
+Only Claude has the required verified per-tool failure hook today. Codex and Antigravity keep their existing process and turn alerts but cannot trigger this breaker. See the [Claude hooks reference](https://code.claude.com/docs/en/hooks#posttoolusefailure) for the failure input and [StopFailure](https://code.claude.com/docs/en/hooks#stopfailure) for API error categories.
+
+Validate with `npm run test:ci`, `python3 tests/loop-breaker.py`, and `AGENTC2_HOST=<isolated SSH host> npm run test:loop-breaker`. The live fixture uses a managed shell and synthetic provider hook events, so it verifies scoped control and persistence without claiming an authenticated provider end-to-end run.

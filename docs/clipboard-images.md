@@ -1,0 +1,7 @@
+# Desktop image paste
+
+With an image on the desktop clipboard, use the terminal Paste button, context menu, or the platform paste shortcut. AgentC2 converts the image to PNG, uploads it to the active session's SSH host, and pastes a quoted remote file path into the current input. Review the input and submit it yourself. Ordinary text paste and Copy use the existing terminal behavior.
+
+Uploads require the desktop to control a connected terminal. The image stays in the Electron main process; the renderer receives only the finished remote path. The transfer uses the configured SSH target, strict host-key checking, and a maximum 8 MB PNG (up to 24 megapixels and 10,000 pixels per side). Failed transfers and lost control do not paste a path. Each file is created privately under `~/.cache/agent-hq/uploads/agentc2-<id>.png` on that host with mode `0600`; the directory is mode `0700`. On a later successful upload, AgentC2 removes only its own regular upload files older than seven days. It does not remove uploads on hosts that are not used again, so those files may require manual cleanup.
+
+The remote host must run Linux with Python 3 and accept the configured SSH key. Image handling after insertion depends on the CLI in that session. AgentC2 supplies a file path; it does not guarantee that Codex, Claude, Antigravity, or an arbitrary shell command accepts image input from that path. The paired web companion has no desktop clipboard access.

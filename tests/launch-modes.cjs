@@ -3,11 +3,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 
-const helper = fs.readFileSync(path.join(__dirname, '..', 'electron', 'remote.py')).toString('base64');
+const helper = Buffer.from(fs.readFileSync(path.join(__dirname, '..', 'electron', 'provider_telemetry.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, '..', 'electron', 'remote.py'), 'utf8')).toString('base64');
 const hook = fs.readFileSync(path.join(__dirname, '..', 'electron', 'session-hook.py')).toString('base64');
+const providerBinDir = process.env.AGENTC2_PROVIDER_BIN_DIR || '';
 const source = `
-import base64,json,subprocess,time
+import base64,json,os,subprocess,time
 from pathlib import Path
+if ${JSON.stringify(providerBinDir)}: os.environ['PATH'] = ${JSON.stringify(providerBinDir)} + os.pathsep + os.environ.get('PATH', '')
 scope={'__name__':'agent_hq_launch_test'}
 exec(base64.b64decode('${helper}'),scope)
 results=[]
@@ -74,6 +76,25 @@ for provider,executable in [('codex','codex'),('claude','claude'),('antigravity'
   resume=scope['agent_command'](provider,'00000000-0000-4000-8000-000000000000')
   assert flag in resume and '00000000-0000-4000-8000-000000000000' in resume
   results.append({'provider':provider,'command':executable,'fullPermissions':True,'historyLimit':50000,'resumeUsesFullPermissions':True,'hookEventsVerified':provider in ['codex','claude']})
+ finally:
+  if name: scope['managed_action']({'name':name},'stop')
+for provider in ['codex','claude']:
+ name=None
+ try:
+  payload={'provider':provider,'cwd':'/tmp','title':'AgentC2 gated launch test','roeProfile':'gated','hookSource':base64.b64decode('${hook}').decode()}
+  name=scope['create'](payload)['name']
+  time.sleep(2)
+  pid=scope['checked'](['tmux','display-message','-p','-t',name,'#{pane_pid}'])
+  argv=process_args(pid)
+  flat=[arg for process in argv for arg in process]
+  assert scope['PERMISSION_FLAGS'][provider].encode() not in flat
+  if provider=='codex':
+   assert b'--sandbox' in flat and b'read-only' in flat and b'--ask-for-approval' in flat and b'on-request' in flat
+  else:
+   assert b'--permission-mode' in flat and b'default' in flat
+   assert any(b'"ask"' in arg and b'Bash' in arg and b'Edit' in arg for arg in flat)
+  assert scope['tmux_option'](name,'@hq_roe')=='gated'
+  results.append({'provider':provider,'gatedLaunchFlags':True,'sessionMetadata':True})
  finally:
   if name: scope['managed_action']({'name':name},'stop')
 print(json.dumps(results))

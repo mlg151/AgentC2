@@ -1,14 +1,20 @@
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { sshBinary } = require('./platform.cjs');
 const { EventEmitter } = require('node:events');
 const pty = require('node-pty');
-const { Store, validateSettings, validateWorkspace } = require('./config.cjs');
+const { Store, validateSettings, resolveRoeProfile, validateRoeLaunch, validateSessionPin } = require('./config.cjs');
 const { Attention } = require('./attention.cjs');
 const { TmuxControl } = require('./tmux-control.cjs');
 const { Terminals } = require('./terminals.cjs');
 const { scrollTerminal } = require('./terminal-scroll.cjs');
+const { createCleanup } = require('./cleanup.cjs');
+const { uploadPng } = require('./image-upload.cjs');
+const { Tunnels } = require('./tunnels.cjs');
+const { createExercises } = require('./exercises.cjs');
+const { LoopBreaker } = require('./loop-breaker.cjs');
 
 function createService({ directory, home }) {
   const events = new EventEmitter();
@@ -16,33 +22,51 @@ function createService({ directory, home }) {
   const SSH_ARGS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'StrictHostKeyChecking=yes'];
   const TMUX_NAME = /^hq-[a-f0-9]{12}$/;
   const OTHER_TMUX_NAME = /^[A-Za-z0-9_.:-]{1,80}$/;
-  const helperSource = fs.readFileSync(path.join(__dirname, 'remote.py'), 'utf8');
+  const helperSource = fs.readFileSync(path.join(__dirname, 'antigravity-cleanup.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'session-cleanup.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktrees.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktree-diff.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'sitrep.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'exercises.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'flash.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'provider_telemetry.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'oporders.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'remote.py'), 'utf8');
   const hookSource = fs.readFileSync(path.join(__dirname, 'session-hook.py'), 'utf8');
 
 
   const store = new Store(directory);
   const attention = new Attention(store);
+  const loopBreaker = new LoopBreaker(store);
+  for (const fault of loopBreaker.faults()) if (['pending', 'attempted'].includes(fault.status)) loopBreaker.record(fault.sessionKey, 'unknown', 'Application restarted before the interrupt result was recorded');
+  const cleanup = createCleanup({ store, events, inventory, runRemote, hostId: (id) => getHost(id).id });
+  const exercises = createExercises({ store, getHost, runRemote, createSession, beginLaunch: (hostId) => cleanup.beginLaunch(hostId), emit: (...args) => events.emit(...args) });
   let inventoryFlight, healthFlight;
+  const opOrderSynced = new Map();
+  const opOrderAttempts = new Map();
+  const opOrderConflicts = new Map(Object.entries(store.data.opOrderConflicts));
+  const sitrepPreviews = new Map();
+  const flashCache = new Map();
+  let flashFlight;
+  const faultFlights = new Set();
 
-  const hostCache = new Map();
+  const hostCache = new Map(Object.entries(store.data.cachedUnits).map(([hostId, units]) => [hostId, units.map((unit) => ({ ...unit, hostId, hostName: store.data.settings.hosts.find((host) => host.id === hostId)?.name || hostId }))]));
   const healthCache = new Map();
   const cpuSamples = new Map();
+  const gpuProbedAt = new Map();
 
   async function health() {
     if (healthFlight) return healthFlight;
     healthFlight = (async () => {
       const hosts = store.data.settings.hosts.filter((h) => h.enabled);
-      const results = await Promise.allSettled(hosts.map(async (h) => ({ sample: await runRemote({ action: 'health' }, h.id), receivedAt: Date.now() })));
+      const results = await Promise.allSettled(hosts.map(async (h) => {
+        const startedAt = Date.now();
+        const sample = await runRemote({ action: 'health', includeGpu: startedAt - (gpuProbedAt.get(h.id) || 0) >= 30000 }, h.id);
+        return { sample, receivedAt: Date.now(), roundTripMs: Date.now() - startedAt };
+      }));
       const readings = results.map((result, index) => {
         const host = hosts[index];
-        if (result.status === 'rejected') return { ...healthCache.get(host.id), hostId: host.id, name: host.name, connected: false, error: result.reason.message };
-        const { sample, receivedAt } = result.value;
+        if (result.status === 'rejected') { cpuSamples.delete(host.id); return { ...healthCache.get(host.id), hostId: host.id, name: host.name, connected: false, error: result.reason.message }; }
+        const { sample, receivedAt, roundTripMs } = result.value;
         const previous = cpuSamples.get(host.id);
         const totalDelta = previous ? sample.cpuTotal - previous.cpuTotal : 0;
         const idleDelta = previous ? sample.cpuIdle - previous.cpuIdle : 0;
         const cpuPercent = totalDelta > 0 && idleDelta >= 0 ? Math.max(0, Math.min(100, (1 - idleDelta / totalDelta) * 100)) : null;
         cpuSamples.set(host.id, sample);
-        const reading = { hostId: host.id, name: host.name, connected: true, cpuPercent, memoryTotal: sample.memoryTotal, memoryUsed: sample.memoryUsed, disks: sample.disks, sampledAt: receivedAt };
+        if (sample.gpu) gpuProbedAt.set(host.id, receivedAt);
+        const activeChannels = [...terminals.sessions.values()].filter((record) => record.hostId === host.id && !record.disposed && record.connection === 'connected').reduce((count, record) => count + record.handles.size, 0);
+        const reading = { hostId: host.id, name: host.name, connected: true, cpuPercent, memoryTotal: sample.memoryTotal, memoryUsed: sample.memoryUsed, disks: sample.disks, sampledAt: receivedAt, sshRoundTripMs: roundTripMs, activeChannels, gpu: sample.gpu || healthCache.get(host.id)?.gpu || { status: 'unknown', sampledAt: null, devices: [] } };
         healthCache.set(host.id, reading);
         return reading;
       });
@@ -58,6 +82,7 @@ function createService({ directory, home }) {
     return host;
   }
   function sshArgs(host) { return [...SSH_ARGS, '-p', String(host.port)]; }
+  const tunnels = new Tunnels({ binary: SSH_BINARY, argsForHost: sshArgs, onUpdate: (sessionKey, urls) => events.emit('tunnel:updated', { sessionKey, urls }) });
 
   async function inventory() {
     if (inventoryFlight) return inventoryFlight;
@@ -67,32 +92,64 @@ function createService({ directory, home }) {
       const statuses = results.map((result, index) => {
         const h = hosts[index];
         if (result.status === 'fulfilled') {
-          hostCache.set(h.id, result.value.sessions.map((s) => ({ ...s, hostId: h.id, hostName: h.name, key: `${h.id}/${s.key}` })));
+          const fresh = result.value.sessions.map((s) => ({ ...s, hostId: h.id, hostName: h.name, key: `${h.id}/${s.key}` }));
+          hostCache.set(h.id, fresh);
+          try { store.cacheUnits(h.id, fresh); } catch (error) { console.warn(`Could not cache ${h.name} inventory: ${error.message}`); }
+          void reconcileOpOrders(h.id);
           return { id: h.id, name: h.name, target: h.target, user: result.value.user, connected: true };
         }
+        for (const order of store.data.settings.opOrders || []) if (order.hostId === h.id) { opOrderSynced.delete(order.id); opOrderAttempts.delete(order.id); }
         return { id: h.id, name: h.name, target: h.target, connected: false, error: result.reason.message };
       });
-      const sessions = hosts.flatMap((h) => (hostCache.get(h.id) || []).map((s) => ({ ...s, stale: !statuses.find((status) => status.id === h.id).connected })));
-    attention.update(sessions.filter((s) => !s.stale));
-      const snapshot = { hosts: statuses, sessions, attention: store.data.attention };
+      const sessions = hosts.flatMap((h) => (hostCache.get(h.id) || []).map((s) => ({ ...s, stale: !statuses.find((status) => status.id === h.id).connected }))).filter((session) => !store.data.deletedSessions.includes(session.key));
+      for (const session of sessions) if (session.key.startsWith(`${session.hostId}/tmux:`)) session.outputActivity = terminals.activity(session.id, session.hostId);
+      attention.update(sessions.filter((s) => !s.stale));
+      const raised = loopBreaker.observe(sessions.filter((s) => !s.stale));
+      for (const fault of raised) {
+        const item = { id: crypto.randomUUID(), sessionKey: fault.sessionKey, hostId: fault.sessionKey.split('/')[0], title: sessions.find((s) => s.key === fault.sessionKey)?.title || fault.sessionKey, provider: 'claude', createdAt: fault.at, acknowledged: false, signature: `loop:${fault.id}`, kind: 'failed', confidence: 'confirmed', detail: `${fault.detail}. ${fault.label}. Review the fault before resuming.` };
+        store.save('attention', [...store.data.attention, item].slice(-500));
+        if (fault.autoInterrupt) void interruptFault({ id: 'desktop' }, fault.sessionKey).catch((error) => console.warn(`Automatic interrupt failed: ${error.message}`));
+      }
+      const snapshot = { hosts: statuses, sessions, attention: store.data.attention, faults: loopBreaker.faults() };
+      snapshot.conflicts = [...opOrderConflicts.values()];
       events.emit('inventory:updated', snapshot);
       return snapshot;
     })().finally(() => { inventoryFlight = null; });
     return inventoryFlight;
   }
 
+  async function reconcileOpOrders(hostId) {
+    for (const order of store.data.settings.opOrders || []) {
+      if (!order.enabled || order.hostId !== hostId) continue;
+      const fingerprint = JSON.stringify(order);
+      if (opOrderSynced.get(order.id) === fingerprint || Date.now() - (opOrderAttempts.get(order.id) || 0) < 60000) continue;
+      opOrderAttempts.set(order.id, Date.now());
+      try {
+        await runRemote({ action: 'oporder_sync', order }, hostId);
+        opOrderSynced.set(order.id, fingerprint);
+        if (opOrderConflicts.delete(order.id)) store.save('opOrderConflicts', Object.fromEntries(opOrderConflicts));
+      } catch (error) {
+        opOrderConflicts.set(order.id, { id: order.id, hostId, detail: error.message.slice(0, 300), at: new Date().toISOString() });
+        store.save('opOrderConflicts', Object.fromEntries(opOrderConflicts));
+        console.warn(`OpOrder ${order.id} needs review: ${error.message}`);
+        events.emit('oporder:conflict', { id: order.id, hostId, error: error.message });
+      }
+    }
+  }
+
   function runRemote(payload, hostId) {
     const host = getHost(hostId);
     return new Promise((resolve, reject) => {
       const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
-      const child = spawn(SSH_BINARY, [...sshArgs(host), host.target, 'python3', '-', encoded], {
+      const embedded = encoded.length > 60000;
+      const child = spawn(SSH_BINARY, [...sshArgs(host), host.target, 'python3', '-', ...(embedded ? [] : [encoded])], {
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       let output = '';
       let errors = '';
       let settled = false;
-      const timeout = setTimeout(() => child.kill(), 40000);
+      const timeout = setTimeout(() => child.kill(), payload.action === 'cleanup_delete' && payload.provider === 'antigravity' ? 300000 : 40000);
 
       child.stdout.on('data', (chunk) => {
         output += chunk.toString();
@@ -116,13 +173,15 @@ function createService({ directory, home }) {
           reject(new Error(`Invalid response from remote host: ${error.message}`));
         }
       });
-      child.stdin.end(helperSource);
+      child.stdin.end(embedded ? `AGENTC2_PAYLOAD_B64 = '${encoded}'\n${helperSource}` : helperSource);
     });
   }
 
 
   const terminals = new Terminals({
     emit: (clientId, event, value) => events.emit('client', clientId, event, value),
+    onOutput: (record, data) => tunnels.feed(getHost(record.hostId), `${record.hostId}/tmux:${record.name}`, data),
+    onDispose: (record) => tunnels.release(`${record.hostId}/tmux:${record.name}`),
     configure: async (name, hostId) => {
       if (!OTHER_TMUX_NAME.test(name)) throw new Error('Invalid tmux session name');
       getHost(hostId);
@@ -150,10 +209,16 @@ function createService({ directory, home }) {
   });
 
   async function saveSettings(input) {
+    if (cleanup.isBusy()) throw new Error('Wait for history cleanup before changing settings');
     await inventoryFlight;
     await healthFlight;
     if (terminals.opening.size) throw new Error('Wait for terminal connections before changing settings');
     const settings = validateSettings(input);
+    for (const order of settings.opOrders) {
+      if (!order.enabled) continue;
+      const previous = store.data.settings.opOrders?.find((item) => item.id === order.id);
+      if (!previous?.enabled || JSON.stringify(previous) !== JSON.stringify(order)) throw new Error('Preview and enroll changed OpOrders before enabling sync');
+    }
     for (const record of terminals.sessions.values()) {
       const oldHost = getHost(record.hostId);
       const nextHost = settings.hosts.find((h) => h.id === record.hostId);
@@ -161,37 +226,242 @@ function createService({ directory, home }) {
     }
     for (const h of settings.hosts) {
       const old = store.data.settings.hosts.find((item) => item.id === h.id);
-      if (!old || old.target !== h.target || old.port !== h.port) { hostCache.delete(h.id); healthCache.delete(h.id); cpuSamples.delete(h.id); }
+      if (!old || old.target !== h.target || old.port !== h.port) { hostCache.delete(h.id); healthCache.delete(h.id); cpuSamples.delete(h.id); gpuProbedAt.delete(h.id); }
     }
-    const result = store.save('settings', settings);
+    const retained = Object.fromEntries(Object.entries(store.data.cachedUnits).filter(([hostId]) => {
+      const old = store.data.settings.hosts.find((host) => host.id === hostId);
+      const next = settings.hosts.find((host) => host.id === hostId);
+      return old && next && next.target === old.target && next.port === old.port;
+    }));
+    const result = settings;
+    store.update({ settings, cachedUnits: retained });
+    for (const order of store.data.settings.opOrders || []) if (!order.enabled) { opOrderSynced.delete(order.id); opOrderAttempts.delete(order.id); opOrderConflicts.delete(order.id); }
+    for (const id of opOrderConflicts.keys()) if (!store.data.settings.opOrders.some((order) => order.id === id)) opOrderConflicts.delete(id);
+    if (JSON.stringify(Object.fromEntries(opOrderConflicts)) !== JSON.stringify(store.data.opOrderConflicts)) store.save('opOrderConflicts', Object.fromEntries(opOrderConflicts));
     events.emit('state:updated');
     return result;
   }
 
+  function validatedOpOrder(input) {
+    if (!input || typeof input !== 'object') throw new Error('Invalid OpOrder');
+    const existing = store.data.settings.opOrders || [];
+    const opOrders = [...existing.filter((item) => item.id !== input?.id), input];
+    return validateSettings({ ...store.data.settings, opOrders }).opOrders.find((item) => item.id === input.id);
+  }
+  async function previewOpOrder(input) {
+    const order = { ...validatedOpOrder(input), enabled: true };
+    getHost(order.hostId);
+    return runRemote({ action: 'oporder_preview', order }, order.hostId);
+  }
+  async function enrollOpOrder(input, revision) {
+    if (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision)) throw new Error('Preview this OpOrder before enrollment');
+    const order = { ...validatedOpOrder(input), enabled: true };
+    getHost(order.hostId);
+    await runRemote({ action: 'oporder_sync', order, revision }, order.hostId);
+    // A separate SSH read must observe every managed file before we advertise
+    // this order as enabled. This also catches a partial or delayed sync.
+    let observed;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      observed = await runRemote({ action: 'oporder_preview', order }, order.hostId);
+      if (observed.ready && observed.changes.every((change) => change.status === 'unchanged')) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    if (!observed?.ready || observed.changes.some((change) => change.status !== 'unchanged')) throw new Error('OpOrder sync is not visible on the SSH host; review before enabling it');
+    const settings = validateSettings({ ...store.data.settings, opOrders: [...(store.data.settings.opOrders || []).filter((item) => item.id !== order.id), order] });
+    store.save('settings', settings);
+    opOrderSynced.set(order.id, JSON.stringify(order));
+    events.emit('state:updated');
+    return settings;
+  }
+
   async function create(input, requirePreset = false) {
+    if (input?.conversationId && store.data.deletedSessions.includes(`${input.hostId || 'default'}/${input.provider}:${input.conversationId}`)) throw new Error('This saved history has been deleted. Start a new session instead.');
+    const release = cleanup.beginLaunch(getHost(input?.hostId).id);
+    try { return await createSession(input, requirePreset); } finally { release(); }
+  }
+  async function createSession(input, requirePreset = false, internalSitrep = null) {
     const provider = input?.provider;
     if (!['codex', 'claude', 'antigravity', 'terminal'].includes(provider)) throw new Error('Invalid provider');
     const isTerminal = provider === 'terminal';
     if (isTerminal && (input.presetId || input.conversationId || input.agentId || input.instructions)) throw new Error('Terminal sessions do not accept agent launch options');
     const preset = input.presetId ? store.data.settings.presets.find((p) => p.id === input.presetId && p.provider === provider) : null;
     if ((input.presetId || (requirePreset && !isTerminal)) && !preset) throw new Error('Launch preset is unavailable');
-    getHost(input.hostId);
+    const host = getHost(input.hostId);
+    if (input.agentId && input.roeProfile) throw new Error('An existing background agent keeps its original permission mode');
+    const roeProfile = resolveRoeProfile(store.data.settings, host.id, preset, input.roeProfile);
+    validateRoeLaunch(provider, preset, roeProfile);
+    const isolated = input.worktree;
+    if (input.recoverSitrep !== undefined && input.recoverSitrep !== true) throw new Error('Invalid SitRep recovery flag');
+    if (input.recoverSitrep && !isolated) throw new Error('SitRep recovery requires an owned worktree');
+    if (isolated && (isTerminal || input.conversationId || input.agentId || !/^[a-f0-9]{32}$/.test(isolated.operationId || '') || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(isolated.slug || '') || typeof isolated.repository !== 'string' || isolated.repository.length > 4096 || typeof isolated.baseRef !== 'string' || isolated.baseRef.length > 200)) throw new Error('Invalid isolated task');
     const created = await runRemote({
-      action: 'create', provider,
+      action: isolated ? 'worktree_launch' : 'create', provider,
       cwd: String(input.cwd || '').slice(0, 4096), title: String(input.title || '').slice(0, 100),
       conversationId: input.conversationId ? String(input.conversationId) : null,
       agentId: input.agentId ? String(input.agentId) : null,
-      preset, hookSource, instructions: String(input.instructions || '').slice(0, 20000),
+      preset, roeProfile, hookSource, instructions: String(input.instructions || '').slice(0, 20000),
+      ...(isolated ? { operationId: isolated.operationId, repository: isolated.repository, baseRef: isolated.baseRef, slug: isolated.slug, ...(input.recoverSitrep ? { recoverSitrep: true } : {}) } : {}),
+      ...(internalSitrep ? { sitrep: internalSitrep } : {}),
     }, input.hostId);
     void inventory().catch(() => {});
     return created;
   }
 
-  function action(client, action, name, hostId) {
+  function worktrees(hostId) { return runRemote({ action: 'worktree_list' }, hostId); }
+  async function flashQueue() {
+    if (flashFlight) return flashFlight;
+    flashFlight = (async () => {
+      const hosts = store.data.settings.hosts.filter((host) => host.enabled);
+      const results = await Promise.allSettled(hosts.map((host) => runRemote({ action: 'flash_list' }, host.id)));
+      const queue = results.flatMap((result, index) => {
+        const host = hosts[index];
+        if (result.status === 'fulfilled') {
+          const items = result.value.filter((item) => item?.provider === 'claude' && /^[a-f0-9]{32}$/.test(item.id || '') && TMUX_NAME.test(item.name || '')).map((item) => ({ ...item, hostId: host.id, hostName: host.name, connected: true, branch: item.branch || hostCache.get(host.id)?.find((unit) => unit.id === item.name)?.branch || '' }));
+          flashCache.set(host.id, items);
+          attention.resolveRequests(items.filter((item) => ['resolved', 'expired'].includes(item.state)).map((item) => item.id));
+          return items;
+        }
+        return (flashCache.get(host.id) || []).map((item) => ({ ...item, connected: false }));
+      });
+      return queue.sort((a, b) => a.createdAt - b.createdAt);
+    })().finally(() => { flashFlight = null; });
+    return flashFlight;
+  }
+  async function flashDecide(client, input) {
+    if (!input || !['allow', 'deny'].includes(input.decision) || !TMUX_NAME.test(input.name || '') || !/^[a-f0-9]{32}$/.test(input.id || '')) throw new Error('Invalid Flash Traffic decision');
+    const hostId = getHost(input.hostId).id;
+    terminals.assertSessionOwner(client, input.name, hostId);
+    const terminal = terminals.sessions.get(`${hostId}/${input.name}`);
+    if (terminal && (terminal.connection !== 'connected' || terminal.exitCode !== null)) throw new Error('Target terminal is disconnected or exited');
+    const current = await runRemote({ action: 'flash_list' }, hostId);
+    const request = current.find((item) => item.id === input.id && item.name === input.name);
+    if (!request || !['pending', 'submitted', 'resolved'].includes(request.state)) throw new Error('Permission request is unavailable or expired');
+    if (request.decision && request.decision !== input.decision) throw new Error('Permission request already has a different decision');
+    const result = await runRemote({ action: 'flash_decide', name: input.name, id: input.id, decision: input.decision }, hostId);
+    void flashQueue().catch(() => {});
+    return result;
+  }
+  function archiveWorktree(hostId, operationId) {
+    if (typeof operationId !== 'string' || !/^[a-f0-9]{32}$/.test(operationId)) throw new Error('Invalid worktree operation ID');
+    return runRemote({ action: 'worktree_archive', operationId }, hostId);
+  }
+  function diffRequest(client, input, action) {
+    if (!input || !TMUX_NAME.test(input.name || '') || !/^[a-f0-9]{32}$/.test(input.operationId || '') || !['diff_files', 'diff_detail', 'diff_hunk'].includes(action)) throw new Error('Invalid worktree diff request');
+    if (action !== 'diff_files' && !/^[a-f0-9]{64}$/.test(input.fileId || '')) throw new Error('Invalid changed file');
+    if (action === 'diff_hunk' && (!/^[a-f0-9]{64}$/.test(input.revision || '') || !/^[a-f0-9]{64}$/.test(input.hunkId || '') || !['stage', 'revert'].includes(input.operation))) throw new Error('Invalid hunk action');
+    const hostId = getHost(input.hostId).id;
+    if (action === 'diff_hunk') terminals.assertSessionOwner(client, input.name, hostId);
+    return runRemote({ action, name: input.name, operationId: input.operationId, ...(action === 'diff_files' ? {} : { fileId: input.fileId }), ...(action === 'diff_hunk' ? { revision: input.revision, hunkId: input.hunkId, operation: input.operation } : {}) }, hostId);
+  }
+
+  async function previewSitrep(client, input) {
+    if (!input || !TMUX_NAME.test(input.name || '') || !/^[a-f0-9]{32}$/.test(input.operationId || '') || typeof input.repository !== 'string' || (input.repository && !input.repository.startsWith('/')) || input.repository.length > 4096 || typeof input.testCommand !== 'string' || input.testCommand.length > 500) throw new Error('Invalid SitRep preview request');
+    const sourceHostId = getHost(input.sourceHostId).id;
+    const targetHostId = getHost(input.targetHostId).id;
+    if (input.testCommand) terminals.assertSessionOwner(client, input.name, sourceHostId);
+    const source = await runRemote({ action: 'sitrep_source_preview', name: input.name, operationId: input.operationId, testCommand: input.testCommand }, sourceHostId);
+    const repository = input.repository || (sourceHostId === targetHostId ? source.source.repository : '');
+    if (!repository) throw new Error('Enter the primary Git checkout on the target host');
+    const target = await runRemote({ action: 'sitrep_target_preview', repository, source: source.source, patchBase64: source.patchBase64 }, targetHostId);
+    const id = crypto.randomBytes(16).toString('hex');
+    sitrepPreviews.set(id, { sourceHostId, targetHostId, name: input.name, operationId: input.operationId, repository, revision: source.revision, test: source.test, createdAt: Date.now(), launchOperationId: null });
+    for (const [key, value] of sitrepPreviews) if (Date.now() - value.createdAt > 15 * 60_000) sitrepPreviews.delete(key);
+    return { version: 1, id, source: source.source, target, revision: source.revision, patchPreview: source.patchPreview, patchPreviewTruncated: source.patchPreviewTruncated, patchBytes: source.patchBytes, untracked: source.untracked, warnings: source.warnings, test: source.test, ready: target.ready && !source.warnings.length };
+  }
+
+  async function launchSitrep(client, input) {
+    const preview = sitrepPreviews.get(input?.id);
+    if (!preview || Date.now() - preview.createdAt > 15 * 60_000 || !/^[a-f0-9]{32}$/.test(input?.operationId || '') || (preview.launchOperationId && preview.launchOperationId !== input.operationId)) throw new Error('SitRep preview expired or operation changed; preview again');
+    terminals.assertSessionOwner(client, preview.name, preview.sourceHostId);
+    const field = (value, max) => { if (typeof value !== 'string' || value.length > max || value.includes('\0')) throw new Error('Invalid SitRep text'); return value.trim(); };
+    const objective = field(input.objective, 2000);
+    const summary = field(input.summary, 4000);
+    const nextSteps = field(input.nextSteps, 2000);
+    const title = field(input.title, 100);
+    const slug = field(input.slug, 40);
+    if (!objective || !summary || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(slug) || !['codex', 'claude', 'antigravity'].includes(input.provider)) throw new Error('SitRep needs an objective, summary, provider, and task slug');
+    const source = await runRemote({ action: 'sitrep_source_preview', name: preview.name, operationId: preview.operationId, testCommand: '' }, preview.sourceHostId);
+    if (source.revision !== preview.revision || source.warnings.length) throw new Error('Source changed after SitRep preview; review again');
+    const target = await runRemote({ action: 'sitrep_target_preview', repository: preview.repository, source: source.source, patchBase64: source.patchBase64 }, preview.targetHostId);
+    if (!target.ready) throw new Error(target.reason || 'Target base changed; review again');
+    const test = preview.test;
+    const evidence = test ? `Ran on ${preview.sourceHostId} in ${source.source.path} at ${new Date(test.ranAt).toISOString()}\nCommand: ${test.command}\nExit: ${test.timedOut ? 'timed out' : test.exitCode}\nOutput${test.outputTruncated ? ' (tail, truncated)' : ''}:\n${test.output}` : 'No test command was run for this handoff.';
+    const instructions = `SitRep handoff\nObjective: ${objective}\nSummary: ${summary}\nNext steps: ${nextSteps || 'Review the applied changes and continue the objective.'}\nSource: ${preview.sourceHostId}/${source.source.name} · ${source.source.repository} · ${source.source.branch}\nSource base: ${source.source.baseCommit}\nSource HEAD: ${source.source.headCommit}\nReviewed patch: ${source.patchBytes} bytes, applied to this worktree before launch.\nTest evidence: ${evidence}`;
+    if (instructions.length > 20000) throw new Error('SitRep exceeds provider input limit');
+    preview.launchOperationId = input.operationId;
+    const patch = Buffer.from(source.patchBase64, 'base64');
+    const release = cleanup.beginLaunch(preview.targetHostId);
+    try {
+      const result = await createSession({ provider: input.provider, presetId: input.presetId, hostId: preview.targetHostId, title, instructions, roeProfile: input.roeProfile, worktree: { operationId: input.operationId, repository: preview.repository, baseRef: source.source.baseCommit, slug } }, false,
+        { patchBase64: source.patchBase64, digest: crypto.createHash('sha256').update(patch).digest('hex'), source: { version: 1, hostId: preview.sourceHostId, operationId: preview.operationId, name: preview.name, repository: source.source.repository, revision: preview.revision } });
+      return { ...result, hostId: preview.targetHostId };
+    } finally { release(); }
+  }
+
+  async function action(client, action, name, hostId) {
     const host = getHost(hostId);
     if (!['interrupt', 'stop'].includes(action) || !TMUX_NAME.test(name)) throw new Error('Invalid session name');
     terminals.assertSessionOwner(client, name, host.id);
-    return runRemote({ action, name }, host.id);
+    const pending = action === 'stop' ? await runRemote({ action: 'flash_list' }, host.id).catch(() => []) : [];
+    const result = await runRemote({ action, name }, host.id);
+    if (action === 'stop') attention.resolveRequests(pending.filter((item) => item.name === name).map((item) => item.id));
+    return result;
+  }
+  async function interruptFault(client, sessionKey) {
+    const fault = loopBreaker.faults().find((item) => item.sessionKey === sessionKey);
+    if (!fault || !['pending', 'review', 'failed', 'unknown'].includes(fault.status)) throw new Error('No eligible confirmed fault');
+    const match = /^([A-Za-z0-9_-]{1,80})\/tmux:(hq-[a-f0-9]{12})$/.exec(sessionKey);
+    if (!match) throw new Error('Invalid fault target');
+    if (faultFlights.has(sessionKey)) throw new Error('Fault interrupt is already in progress');
+    faultFlights.add(sessionKey);
+    const [, hostId, name] = match;
+    try {
+      terminals.assertSessionOwner(client, name, hostId);
+      const host = getHost(hostId);
+      const fresh = await runRemote({ action: 'inventory' }, host.id);
+      const unit = fresh.sessions.find((item) => item.key === `tmux:${name}`);
+      if (!unit || unit.kind !== 'managed' || unit.provider !== 'claude' || unit.state !== 'live' || !unit.canInterrupt || !unit.presetId || unit.presetId !== (hostCache.get(hostId) || []).find((item) => item.key === sessionKey)?.presetId) throw new Error('Faulted managed unit changed or exited; refresh and review');
+      terminals.assertSessionOwner(client, name, hostId);
+      loopBreaker.record(sessionKey, 'attempted', 'A scoped Ctrl+C was sent; awaiting remote acceptance');
+      await runRemote({ action: 'interrupt', name }, hostId);
+      return loopBreaker.record(sessionKey, 'interrupted', 'Remote tmux accepted one scoped Ctrl+C');
+    } catch (error) {
+      if (loopBreaker.faults().some((item) => item.sessionKey === sessionKey && item.status !== 'interrupted')) loopBreaker.record(sessionKey, 'failed', error.message);
+      throw error;
+    } finally { faultFlights.delete(sessionKey); events.emit('state:updated'); void inventory().catch(() => {}); }
+  }
+  async function interruptFaults(client) {
+    const targets = loopBreaker.faults().filter((item) => ['review', 'failed', 'unknown'].includes(item.status));
+    const results = [];
+    for (const target of targets) {
+      try { results.push(await interruptFault(client, target.sessionKey)); }
+      catch (error) { results.push({ sessionKey: target.sessionKey, status: 'failed', result: error.message }); }
+    }
+    return results;
+  }
+  function resetFault(sessionKey) {
+    if (typeof sessionKey !== 'string' || !/^[A-Za-z0-9_-]{1,80}\/tmux:hq-[a-f0-9]{12}$/.test(sessionKey)) throw new Error('Invalid fault target');
+    const result = loopBreaker.reset(sessionKey);
+    events.emit('state:updated');
+    return result;
+  }
+  async function uploadClipboardImage(client, id, png) {
+    const { record } = terminals.get(client, id);
+    terminals.assertOwner(client, record);
+    const host = getHost(record.hostId);
+    const remotePath = await uploadPng({ binary: SSH_BINARY, args: sshArgs(host), target: host.target, png });
+    if (terminals.get(client, id).record !== record) throw new Error('Terminal changed during image upload');
+    terminals.assertOwner(client, record);
+    return remotePath;
+  }
+  function devUrls(sessionKey) {
+    if (typeof sessionKey !== 'string' || sessionKey.length > 300) throw new Error('Invalid session key');
+    return tunnels.list(sessionKey);
+  }
+  function openDevUrl(client, id, url) {
+    const { record } = terminals.get(client, id);
+    const host = getHost(record.hostId);
+    return tunnels.open(host, `${record.hostId}/tmux:${record.name}`, url);
   }
   function acknowledge(id) {
     const items = attention.acknowledge(id);
@@ -199,10 +469,65 @@ function createService({ directory, home }) {
     return items;
   }
   function saveWorkspace(input) {
-    const result = store.save('workspace', validateWorkspace(input));
+    const result = store.saveWorkspace(input);
     events.emit('state:updated');
     return result;
   }
-  return { store, events, terminals, inventory, health, create, action, saveSettings, saveWorkspace, acknowledge, hostId: (id) => getHost(id).id };
+  function setSessionPinned(key, pinned) {
+    const hostId = validateSessionPin(key, pinned);
+    if (cleanup.isDeleting(key)) throw new Error('History deletion is in progress; wait for its result');
+    if (store.data.deletedSessions.includes(key)) throw new Error('History has been deleted; refresh sessions');
+    if (!store.data.settings.hosts.some((host) => host.id === hostId) || !(Object.hasOwn(store.data.workspace.metadata, key) || hostCache.get(hostId)?.some((session) => session.key === key))) throw new Error('Session is unavailable. Refresh sessions before pinning it.');
+    const result = store.setSessionPinned(key, pinned);
+    events.emit('session:pinned', key, result);
+    events.emit('state:updated');
+    return result;
+  }
+  function cachedSession(key) {
+    if (typeof key !== 'string' || key.length > 300) throw new Error('Invalid session key');
+    const session = [...hostCache.values()].flat().find((item) => item.key === key);
+    if (!session || store.data.deletedSessions.includes(key)) throw new Error('Session unavailable; refresh inventory');
+    getHost(session.hostId);
+    return session;
+  }
+  async function terminalPreviews(keys) {
+    if (!Array.isArray(keys) || keys.length > 16 || new Set(keys).size !== keys.length) throw new Error('Choose up to 16 unique units');
+    const sessions = keys.map(cachedSession);
+    const results = [];
+    for (let index = 0; index < sessions.length; index += 4) {
+      results.push(...await Promise.all(sessions.slice(index, index + 4).map(async (session) => {
+        if (!session.canAttach) return { key: session.key, text: 'This process has no attachable terminal.', sampledAt: null, error: true };
+        try {
+          const mirror = await terminals.preview(session.id, session.hostId);
+          const text = mirror === null ? (await runRemote({ action: 'preview', name: session.id }, session.hostId)).text : mirror;
+          return { key: session.key, text, sampledAt: Date.now(), error: false };
+        } catch { return { key: session.key, text: 'Snapshot unavailable. Check this theater or refresh inventory.', sampledAt: null, error: true }; }
+      })));
+    }
+    return results;
+  }
+  async function searchHistory(query, keys) {
+    if (typeof query !== 'string' || query.length < 3 || query.length > 200 || query.includes('\0') || !Array.isArray(keys) || keys.length > 200) throw new Error('History search needs 3–200 characters and up to 200 unit keys');
+    const sessions = [...new Set(keys)].map(cachedSession).filter((session) => session.canAttach);
+    const selected = sessions.slice(0, 8), matches = [], errors = [];
+    let truncated = sessions.length > selected.length;
+    for (let index = 0; index < selected.length; index += 2) {
+      const results = await Promise.allSettled(selected.slice(index, index + 2).map((session) => runRemote({ action: 'history', name: session.id }, session.hostId)));
+      results.forEach((result, offset) => {
+        const session = selected[index + offset];
+        if (result.status === 'rejected') { errors.push(session.key); return; }
+        truncated ||= result.value.truncated;
+        const lines = result.value.text.split('\n');
+        let count = 0;
+        for (let line = 0; line < lines.length; line++) if (lines[line].toLowerCase().includes(query.toLowerCase())) {
+          if (++count > 5) { truncated = true; break; }
+          const position = lines[line].toLowerCase().indexOf(query.toLowerCase());
+          matches.push({ key: session.key, line: line + 1, excerpt: lines[line].slice(Math.max(0, position - 70), position + query.length + 100) });
+        }
+      });
+    }
+    return { matches, searched: selected.length, total: sessions.length, truncated, errors };
+  }
+  return { store, events, terminals, tunnels, cleanup, exercises, inventory, health, create, worktrees, flashQueue, flashDecide, archiveWorktree, diffRequest, previewSitrep, launchSitrep, action, interruptFaults, resetFault, loopBreaker, uploadClipboardImage, devUrls, openDevUrl, saveSettings, previewOpOrder, enrollOpOrder, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
 }
 module.exports = { createService };

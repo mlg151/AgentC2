@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
-import type { ReactNode } from 'react';
+import type { ReactNode, RefObject } from 'react';
 
-export function Modal({ title, onClose, children, wide = false }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+export function Modal({ title, onClose, children, wide = false, restoreFocus }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean; restoreFocus?: RefObject<boolean> }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
@@ -15,7 +15,7 @@ export function Modal({ title, onClose, children, wide = false }: { title: strin
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
     }
     document.addEventListener('keydown', key);
-    return () => { document.removeEventListener('keydown', key); previous?.focus(); };
-  }, [onClose]);
+    return () => { document.removeEventListener('keydown', key); if (restoreFocus?.current !== false) previous?.focus(); };
+  }, [onClose, restoreFocus]);
   return <div className="dialog-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}><div ref={ref} role="dialog" aria-modal="true" aria-label={title} className={`create-dialog${wide ? ' wide-dialog' : ''}`}>{children}</div></div>;
 }

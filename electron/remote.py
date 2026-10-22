@@ -2,6 +2,8 @@
 
 import base64
 import getpass
+import hashlib
+import fcntl
 import json
 import os
 import pwd
@@ -13,6 +15,9 @@ import sqlite3
 import socket
 import subprocess
 import sys
+import stat
+import tempfile
+from contextlib import contextmanager
 import time
 import uuid
 
@@ -31,6 +36,20 @@ SESSION_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
 HOOK_ROOT = HOME / ".cache" / "agent-hq"
 
 
+@contextmanager
+def cleanup_lock():
+    descriptor = os.open(HOME / ".agentc2-history.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, "w") as lock:
+        info = os.fstat(lock.fileno())
+        if info.st_uid != os.getuid() or info.st_nlink != 1 or not stat.S_ISREG(info.st_mode):
+            raise ValueError("Shared cleanup lock is unsupported")
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise ValueError("Another AgentC2 launch or history operation is running; retry after it finishes")
+        yield
+
+
 def session_events(name):
     if not TMUX_RE.fullmatch(name):
         return []
@@ -44,8 +63,9 @@ def session_events(name):
 def hook_arguments(provider, name, payload):
     preset = payload.get("preset")
     enabled = preset.get("attentionHooks", False) if preset else True
+    gated_claude = provider == "claude" and payload.get("roeProfile") == "gated" and not payload.get("agentId")
     if not enabled or provider not in ("codex", "claude") or payload.get("agentId") or not payload.get("hookSource"):
-        return []
+        return ["--settings", json.dumps({"permissions": {"ask": ["Bash", "Edit", "Write", "NotebookEdit"]}})] if gated_claude else []
     directory = HOOK_ROOT / name
     directory.mkdir(parents=True, mode=0o700, exist_ok=True)
     directory.chmod(0o700)
@@ -60,10 +80,13 @@ def hook_arguments(provider, name, payload):
         profile = next((args[index + 1] for index, arg in enumerate(args[:-1]) if arg in ("-p", "--profile")), "")
         return ["-c", "notify=" + json.dumps(["python3", str(script), provider, "notify", "PROFILE=" + profile])]
     command = shlex.join(["python3", str(script), provider, "hook"])
-    hooks = {event: [{"hooks": [{"type": "command", "command": command, "timeout": 5}]}] for event in ("Stop", "StopFailure", "PermissionRequest", "UserPromptSubmit")}
+    hooks = {event: [{"hooks": [{"type": "command", "command": command, "timeout": 310 if event == "PermissionRequest" else 5}]}] for event in ("Stop", "StopFailure", "PermissionRequest", "UserPromptSubmit", "PostToolUse", "PostToolUseFailure")}
     hooks["Notification"] = [{"matcher": "permission_prompt|elicitation_dialog", "hooks": [{"type": "command", "command": command, "timeout": 5}]}]
     hooks["PreToolUse"] = [{"matcher": "AskUserQuestion", "hooks": [{"type": "command", "command": command, "timeout": 5}]}]
-    return ["--settings", json.dumps({"hooks": hooks})]
+    settings = {"hooks": hooks}
+    if gated_claude:
+        settings["permissions"] = {"ask": ["Bash", "Edit", "Write", "NotebookEdit"]}
+    return ["--settings", json.dumps(settings)]
 
 
 def run(args, timeout=15):
@@ -198,30 +221,43 @@ def claude_sessions():
 
 
 def antigravity_sessions():
-    root = HOME / ".gemini" / "antigravity" / "conversations"
-    result = []
-    if not root.exists():
-        return result
-    for path in root.glob("*.pb"):
-        session_id = path.stem
-        if not ID_RE.fullmatch(session_id):
+    # CLI 1.4.x stores one SQLite trajectory per conversation. Older layouts
+    # used protobuf files under a different directory. Neither is a complete
+    # deletion contract: the picker also updates provider-managed references.
+    locations = (
+        (HOME / ".gemini" / "antigravity-cli" / "conversations", "*.db", True),
+        (HOME / ".gemini" / "antigravity" / "conversations", "*.pb", False),
+    )
+    result = {}
+    for root, pattern, sqlite_layout in locations:
+        if not root.is_dir() or root.is_symlink():
             continue
-        try:
-            modified = path.stat().st_mtime
-        except OSError:
-            continue
-        result.append({
-            "key": f"antigravity:{session_id}",
-            "provider": "antigravity",
-            "id": session_id,
-            "title": f"Antigravity conversation {session_id[:8]}",
-            "cwd": "",
-            "updatedAt": iso_from_epoch(modified),
-            "state": "saved",
-            "kind": "conversation",
-            "canResume": True,
-        })
-    return result
+        for path in root.glob(pattern):
+            session_id = path.stem
+            if session_id in result or not ID_RE.fullmatch(session_id) or path.is_symlink():
+                continue
+            try:
+                if not path.is_file():
+                    continue
+                if sqlite_layout:
+                    with path.open("rb") as stream:
+                        if stream.read(16) != b"SQLite format 3\0":
+                            continue
+                modified = path.stat().st_mtime
+            except OSError:
+                continue
+            result[session_id] = {
+                "key": f"antigravity:{session_id}",
+                "provider": "antigravity",
+                "id": session_id,
+                "title": f"Antigravity conversation {session_id[:8]}",
+                "cwd": "",
+                "updatedAt": iso_from_epoch(modified),
+                "state": "saved",
+                "kind": "conversation",
+                "canResume": True,
+            }
+    return list(result.values())
 
 
 def tmux_option(name, option):
@@ -259,17 +295,26 @@ def tmux_sessions():
             if recorded and recorded[1] == fields[8] and 0 <= int(recorded[2]) <= 255:
                 exit_code = int(recorded[2])
         output = run(["tmux", "capture-pane", "-p", "-J", "-t", name, "-S", "-40"], timeout=3)
+        events = session_events(name) if managed else []
+        provider_session = next((event.get("session") for event in reversed(events)
+                                 if event.get("source") == provider and isinstance(event.get("session"), str)), None)
         result.append({
             "key": f"tmux:{name}", "provider": provider, "id": name,
             "title": title or name,
             "cwd": tmux_option(name, "@hq_cwd") if managed else cwd,
             "updatedAt": iso_from_epoch(fields[7] if len(fields) > 7 else created),
+            "startedAt": iso_from_epoch(created),
             "state": "exited" if dead else "live", "kind": "managed" if managed else "external-tmux",
             "managed": managed, "attached": attached != "0", "canAttach": True,
             "canInterrupt": managed and not dead, "canStop": managed,
             "exitCode": exit_code, "outputTail": output.stdout[-12000:],
             "presetName": tmux_option(name, "@hq_preset") if managed else "",
-            "events": session_events(name) if managed else [],
+            "presetId": tmux_option(name, "@hq_preset_id") if managed else "",
+            "roeProfile": (tmux_option(name, "@hq_roe") or "unknown") if managed else "unknown",
+            "worktreeOperation": tmux_option(name, "@hq_worktree") if managed else "",
+            "events": events,
+            "providerSessionId": provider_session,
+            "telemetry": provider_telemetry(provider, provider_session, HOME),
         })
     return result
 
@@ -318,10 +363,24 @@ def inventory():
         + claude_sessions() + antigravity_sessions()
     )
     sessions.sort(key=lambda s: str(s.get("updatedAt") or ""), reverse=True)
+    repositories = {}
+    for session in sessions:
+        if "telemetry" not in session:
+            session["telemetry"] = provider_telemetry(session.get("provider"), None, HOME)
+        if "roeProfile" not in session:
+            session["roeProfile"] = "unknown"
+        cwd = session.get("cwd")
+        if not cwd or session.get("kind") == "conversation":
+            continue
+        if cwd not in repositories and len(repositories) < 16:
+            info = run(["git", "-C", cwd, "rev-parse", "--show-toplevel", "--abbrev-ref", "HEAD", "HEAD"], timeout=0.5)
+            lines = info.stdout.strip().splitlines()
+            repositories[cwd] = {"repository": lines[0], "branch": lines[1], "headCommit": lines[2]} if info.returncode == 0 and len(lines) == 3 else {"repository": None, "branch": None, "headCommit": None}
+        session.update(repositories.get(cwd, {}))
     return {"host": socket.gethostname(), "user": getpass.getuser(), "sessions": sessions}
 
 
-def health():
+def health(payload=None):
     # Return counters; the desktop computes CPU utilization between samples.
     # Guest ticks are already included in user/nice, so exclude them from total.
     cpu = [int(value) for value in Path("/proc/stat").read_text().splitlines()[0].split()[1:9]]
@@ -338,10 +397,28 @@ def health():
     for directory in paths:
         usage = shutil.disk_usage(directory)
         disks.append({"path": str(directory), "total": usage.total, "used": usage.used, "free": usage.free})
-    return {"cpuTotal": sum(cpu), "cpuIdle": cpu[3] + cpu[4], "memoryTotal": total, "memoryUsed": max(0, total - available), "disks": disks, "sampledAt": time.time() * 1000}
+    result = {"cpuTotal": sum(cpu), "cpuIdle": cpu[3] + cpu[4], "memoryTotal": total, "memoryUsed": max(0, total - available), "disks": disks, "sampledAt": time.time() * 1000}
+    if payload and payload.get("includeGpu"):
+        if not shutil.which("nvidia-smi"):
+            result["gpu"] = {"status": "unsupported", "sampledAt": None, "devices": []}
+        else:
+            probe = run(["nvidia-smi", "--query-gpu=name,memory.total,memory.used", "--format=csv,noheader,nounits"], timeout=2)
+            devices = []
+            if probe.returncode == 0:
+                for line in probe.stdout.splitlines()[:16]:
+                    fields = [field.strip() for field in line.rsplit(",", 2)]
+                    try:
+                        if len(fields) == 3 and fields[0]:
+                            total_mib, used_mib = int(fields[1]), int(fields[2])
+                            if 0 <= used_mib <= total_mib:
+                                devices.append({"name": fields[0][:100], "memoryTotal": total_mib * 1024 * 1024, "memoryUsed": used_mib * 1024 * 1024})
+                    except ValueError:
+                        pass
+            result["gpu"] = {"status": "reported" if devices else "unknown", "sampledAt": time.time() * 1000 if devices else None, "devices": devices}
+    return result
 
 
-def agent_command(provider, conversation_id=None, agent_id=None, preset=None, instructions=""):
+def agent_command(provider, conversation_id=None, agent_id=None, preset=None, instructions="", roe_profile=None):
     command = [PROVIDERS[provider]] if not preset else shlex.split(preset.get("args", ""))
     # Custom command prefixes are evaluated by the user's login shell; arguments
     # and conversation IDs are always shell quoted separately by create().
@@ -349,8 +426,18 @@ def agent_command(provider, conversation_id=None, agent_id=None, preset=None, in
         # Attach opens an already-running agent; its launch settings belong to
         # that process. No new agent is started by this command.
         return command + ["attach", agent_id]
-    if not preset or preset.get("fullPermissions", True):
+    mode = roe_profile or ("provider-default" if preset and preset.get("fullPermissions") is False else "full")
+    if mode == "full":
         command.append(PERMISSION_FLAGS[provider])
+    elif mode == "gated":
+        if provider == "codex":
+            command += ["--sandbox", "read-only", "--ask-for-approval", "on-request"]
+        elif provider == "claude":
+            command += ["--permission-mode", "default"]
+        else:
+            raise ValueError("Provider does not support a verified gated mode")
+    elif mode != "provider-default":
+        raise ValueError("Invalid Rules of Engagement profile")
     if conversation_id:
         if provider == "codex":
             command += ["resume", conversation_id]
@@ -380,19 +467,26 @@ def create(payload):
     if agent_id and not ID_RE.fullmatch(agent_id):
         raise ValueError("Invalid background agent ID")
     preset = payload.get("preset")
+    roe_profile = payload.get("roeProfile")
+    if not is_terminal and roe_profile not in (None, "full", "gated", "provider-default"):
+        raise ValueError("Invalid Rules of Engagement profile")
+    if roe_profile == "gated" and (provider == "antigravity" or (preset and (preset.get("command") != provider or any(flag in preset.get("args", "") for flag in ("--dangerously", "--sandbox", "--ask-for-approval", "--permission-mode", "--settings", "--allowedTools", "--allowed-tools", "--config", "--profile")) or re.search(r"(^|\s)-c(\s|=)", preset.get("args", ""))))):
+        raise ValueError("Gated mode requires a supported, unmodified provider command")
     title = " ".join(str(payload.get("title") or "").split())[:100]
     if not title:
         title = f"{provider.title()} session"
-    name = "hq-" + uuid.uuid4().hex[:12]
+    name = payload.get("managedName") or "hq-" + uuid.uuid4().hex[:12]
+    if not TMUX_RE.fullmatch(name):
+        raise ValueError("Invalid managed session name")
     if is_terminal:
         shell = pwd.getpwuid(os.getuid()).pw_shell or "/bin/bash"
         launch = shlex.join([shell, "-l", "-i"])
     else:
-        command = agent_command(provider, conversation_id, agent_id, preset, payload.get("instructions", ""))
+        command = agent_command(provider, conversation_id, agent_id, preset, payload.get("instructions", ""), roe_profile)
         extra = hook_arguments(provider, name, payload)
         # Put provider options before the resume subcommand and positional prompt.
         command = extra + command if preset else command[:1] + extra + command[1:]
-        launch = (preset["command"] + " " + shlex.join(command)) if preset else shlex.join(command)
+        launch = ("builtin command " + provider + " " + shlex.join(command if preset else command[1:])) if roe_profile == "gated" else (preset["command"] + " " + shlex.join(command)) if preset else shlex.join(command)
         # bash -lic supports aliases/functions such as the user's claude3.
         launch = shlex.join(["bash", "-lic", launch])
     launch = ('tmux set-window-option -t "$TMUX_PANE" remain-on-exit on; '
@@ -408,7 +502,7 @@ def create(payload):
             shutil.rmtree(HOOK_ROOT / name)
         raise RuntimeError(launched.stderr.strip() or "Could not start tmux session")
     try:
-        for key, value in (("provider", provider), ("title", title), ("cwd", str(cwd)), ("preset", preset.get("name", "") if preset else "")):
+        for key, value in (("provider", provider), ("title", title), ("cwd", str(cwd)), ("preset", preset.get("name", "") if preset else ""), ("preset_id", preset.get("id", "") if preset else ""), ("worktree", payload.get("worktreeOperation") or ""), ("roe", "unknown" if agent_id else roe_profile or ("provider-default" if preset and preset.get("fullPermissions") is False else "full"))):
             checked(["tmux", "set-option", "-t", name, f"@hq_{key}", value])
         configure_session({"name": name})
         checked(["tmux", "set-window-option", "-t", name, "remain-on-exit", "on"])
@@ -495,20 +589,75 @@ def managed_action(payload, action):
 
 
 def main():
-    payload = json.loads(base64.b64decode(sys.argv[1]).decode("utf-8"))
+    encoded = sys.argv[1] if len(sys.argv) > 1 else globals().get("AGENTC2_PAYLOAD_B64")
+    if not encoded:
+        raise ValueError("Missing remote request")
+    payload = json.loads(base64.b64decode(encoded).decode("utf-8"))
     action = payload.get("action")
     if action == "inventory":
         result = inventory()
     elif action == "health":
-        result = health()
+        result = health(payload)
     elif action == "create":
-        result = create(payload)
+        with cleanup_lock():
+            result = create(payload)
+    elif action == "worktree_list":
+        result = worktree_list(payload)
+    elif action == "worktree_launch":
+        with cleanup_lock():
+            result = worktree_launch(payload)
+    elif action == "worktree_archive":
+        with cleanup_lock():
+            result = worktree_archive(payload)
+    elif action == "oporder_preview":
+        result = oporder_preview(payload)
+    elif action == "oporder_sync":
+        with cleanup_lock():
+            result = oporder_sync(payload)
+    elif action == "sitrep_source_preview":
+        result = sitrep_source_preview(payload)
+    elif action == "sitrep_target_preview":
+        result = sitrep_target_preview(payload)
+    elif action == "exercise_base":
+        result = exercise_base(payload)
+    elif action == "exercise_capabilities":
+        result = exercise_capabilities(payload)
+    elif action == "exercise_inspect":
+        result = exercise_inspect(payload)
+    elif action == "exercise_target_preview":
+        result = exercise_target(payload)
+    elif action == "exercise_promote":
+        with cleanup_lock():
+            result = exercise_target(payload, True)
+    elif action == "flash_list":
+        result = flash_list(payload)
+    elif action == "flash_decide":
+        result = flash_decide(payload)
+    elif action == "diff_files":
+        result = diff_files(payload)
+    elif action == "diff_detail":
+        result = diff_detail(payload)
+    elif action == "diff_hunk":
+        with cleanup_lock():
+            result = diff_hunk_action(payload)
+    elif action == "cleanup_preview":
+        result = cleanup_preview(payload)
+    elif action == "cleanup_delete":
+        result = cleanup_delete(payload)
     elif action == "configure":
         result = configure_session(payload)
     elif action == "scroll":
         result = scroll_session(payload)
     elif action == "history":
         result = history(payload)
+    elif action == "preview":
+        name = payload.get("name", "")
+        if not SESSION_RE.fullmatch(name):
+            raise ValueError("Invalid session name")
+        captured = run(["tmux", "capture-pane", "-p", "-J", "-t", name], timeout=3)
+        if captured.returncode != 0:
+            raise ValueError("Terminal preview is unavailable")
+        result = {"text": "\n".join(captured.stdout.splitlines()[-30:])[:16000]}
     elif action in ("interrupt", "stop"):
         result = managed_action(payload, action)
     else:
