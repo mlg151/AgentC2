@@ -83,6 +83,9 @@ class Journal:
         if "managed_name" not in {row[1] for row in self.db.execute("PRAGMA table_info(sessions)")}:
             self.db.execute("ALTER TABLE sessions ADD COLUMN managed_name TEXT")
 
+        if "model" not in {row[1] for row in self.db.execute("PRAGMA table_info(sessions)")}:
+            self.db.execute("ALTER TABLE sessions ADD COLUMN model TEXT")
+
     @contextmanager
     def transaction(self):
         with self.lock:
@@ -102,7 +105,7 @@ class Journal:
 
     @staticmethod
     def _view(row):
-        return dict(id=row["id"], managedName=row["managed_name"], provider=row["provider"], providerSessionId=row["provider_session_id"], title=row["title"], cwd=row["cwd"], roeProfile=row["roe_profile"], state=row["state"], activeTurnId=row["active_turn_id"], capabilities=json.loads(row["capabilities"]), createdAt=row["created_at"], updatedAt=row["updated_at"])
+        return dict(id=row["id"], model=row["model"], managedName=row["managed_name"], provider=row["provider"], providerSessionId=row["provider_session_id"], title=row["title"], cwd=row["cwd"], roeProfile=row["roe_profile"], state=row["state"], activeTurnId=row["active_turn_id"], capabilities=json.loads(row["capabilities"]), createdAt=row["created_at"], updatedAt=row["updated_at"])
 
     @staticmethod
     def _receipt(row):
@@ -135,6 +138,7 @@ class Journal:
                 at = now()
                 self.db.execute("INSERT INTO sessions(id,provider,provider_session_id,title,cwd,roe_profile,state,capabilities,created_at,updated_at) VALUES(?,?,?,?,?,?,'starting',?,?,?)", (identifier, payload["provider"], payload.get("providerSessionId"), payload["title"], payload["cwd"], payload["roeProfile"], encoded(capabilities), at, at))
                 self.db.execute("UPDATE sessions SET managed_name=? WHERE id=?", (payload.get("managedName"), identifier))
+                self.db.execute("UPDATE sessions SET model=? WHERE id=?", (payload.get("model"), identifier))
                 self._append(identifier, "session.updated", dict(state="starting", detail="Starting remote provider"))
             else:
                 identifier = command["sessionId"]

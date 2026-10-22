@@ -30,14 +30,16 @@
     "test:platform": "node tests/platform.cjs",
     "test:desktop": "node tests/desktop.e2e.cjs",
     "test:package": "node tests/desktop.e2e.cjs --packaged",
-    "test:ci": "npm run build && node tests/chat-protocol.cjs && node tests/chat-service.cjs && node tests/chat-timeline.cjs && npm run test:productivity && node tests/loop-breaker.cjs && node tests/readiness.cjs && node tests/exercises.cjs && node tests/cleanup.cjs && node tests/situation.cjs && node tests/reconnect.cjs && node tests/remote-control.cjs && node tests/image-upload.cjs && node tests/tunnels.cjs && node tests/local.cjs && node tests/companion-client.cjs && npm run test:platform && node tests/packaging.cjs && node tests/native-pty.cjs",
+    "test:ci": "npm run build && node tests/specops.cjs && node tests/chat-protocol.cjs && node tests/chat-service.cjs && node tests/chat-timeline.cjs && npm run test:productivity && node tests/loop-breaker.cjs && node tests/readiness.cjs && node tests/exercises.cjs && node tests/cleanup.cjs && node tests/situation.cjs && node tests/reconnect.cjs && node tests/remote-control.cjs && node tests/image-upload.cjs && node tests/tunnels.cjs && node tests/local.cjs && node tests/companion-client.cjs && npm run test:platform && node tests/packaging.cjs && node tests/native-pty.cjs",
     "test:chat:runtime": "python3 tests/chat-runtime.py",
     "test:chat:ui": "node tests/chat-ui.e2e.cjs",
     "test:desktop:sessions": "npm run build && node tests/desktop-sessions.e2e.cjs",
     "test:chat:ssh": "npm run build && node tests/chat-launch.e2e.cjs",
     "test:chat:sdk-evaluation": "python3 tests/antigravity-sdk-evaluation.py",
     "test:companion:filters": "npm run build && node tests/companion-filters.e2e.cjs",
-    "test:chat:local": "npm run build && cross-env AGENTC2_CHAT_TEST_LOCAL=1 node tests/chat-launch.e2e.cjs"
+    "test:chat:local": "npm run build && cross-env AGENTC2_CHAT_TEST_LOCAL=1 node tests/chat-launch.e2e.cjs",
+    "test:specops": "node tests/specops.cjs && python3 tests/github.py",
+    "test:specops:ui": "npm run build && node tests/specops.ui.e2e.cjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
@@ -52,7 +54,8 @@
     "react-dom": "^19.0.0",
     "react-markdown": "10.1.0",
     "remark-gfm": "4.0.1",
-    "ws": "^8.22.0"
+    "ws": "^8.22.0",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@electron/osx-sign": "1.3.3",

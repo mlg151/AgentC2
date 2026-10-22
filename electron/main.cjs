@@ -94,7 +94,7 @@ app.whenReady().then(async () => {
   const legacyDirectory = legacyDirectories.find((candidate) => fs.existsSync(path.join(candidate, 'workspace.json')));
   const directory = process.env.AGENTC2_DATA_DIR || process.env.AGENT_HQ_DATA_DIR || (fs.existsSync(path.join(app.getPath('userData'), 'workspace.json')) ? app.getPath('userData') : legacyDirectory || app.getPath('userData'));
   try {
-    service = createService({ directory, home: app.getPath('home') });
+    service = createService({ directory, home: app.getPath('home'), specopsDirectory: process.env.AGENTC2_DATA_DIR || process.env.AGENT_HQ_DATA_DIR ? undefined : path.join(app.getPath('home'), '.agentc2', 'specops') });
     gateway = new Gateway({ directory, assets: path.join(__dirname, '..', 'dist'), service });
     service.events.on('client', (clientId, event, value) => {
       if (clientId !== 'desktop') return;
@@ -129,6 +129,12 @@ app.whenReady().then(async () => {
   handle('oporder:enroll', (order, revision) => service.enrollOpOrder(order, revision));
   handle('sitrep:preview', (input) => service.previewSitrep(desktop, input));
   handle('sitrep:launch', (input) => service.launchSitrep(desktop, input));
+  handle('github:request', (input) => service.github(input));
+  handle('specops:list', () => service.specops.list());
+  handle('specops:definition', () => service.specops.definition());
+  handle('specops:configure', (yaml) => service.specops.configure(yaml));
+  handle('specops:launch', (input) => service.specops.launch(input));
+  handle('specops:control', (id, action) => service.specops.control(id, action));
   handle('exercise:list', () => service.exercises.list());
   handle('exercise:capabilities', (hostId) => service.exercises.capabilities(hostId));
   handle('exercise:create', (input) => service.exercises.create(input));
@@ -220,7 +226,7 @@ const notified = new Set();
 app.on('before-quit', () => {
   quitting = true;
   clearInterval(monitor); clearInterval(healthMonitor); clearInterval(cleanupMonitor);
-  void gateway?.dispose(); service?.terminals.closeAll(); service?.chats.closeAll(); tray?.destroy(); tray = null;
+  service?.specops.dispose(); void gateway?.dispose(); service?.terminals.closeAll(); service?.chats.closeAll(); tray?.destroy(); tray = null;
   service?.tunnels.closeAll();
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

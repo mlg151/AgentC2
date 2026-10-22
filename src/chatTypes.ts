@@ -50,7 +50,7 @@ export type ChatEvent = ChatEventData & {
   itemId: string | null;
 };
 type ChatOperation =
-  | { operation: 'create'; sessionId?: never; payload: { provider: ChatProvider; cwd: string; title: string; roeProfile: 'full' | 'gated' | 'provider-default'; providerSessionId?: string; managedName?: string; instructions?: string } }
+  | { operation: 'create'; sessionId?: never; payload: { provider: ChatProvider; cwd: string; title: string; roeProfile: 'full' | 'gated' | 'provider-default'; providerSessionId?: string; managedName?: string; instructions?: string; model?: string } }
   | { operation: 'send'; sessionId: string; payload: { text: string } }
   | { operation: 'steer'; sessionId: string; payload: { text: string; expectedTurnId: string } }
   | { operation: 'respond'; sessionId: string; payload: { requestId: string; turnId: string | null; itemId: string | null } & ({ decision: 'allow' | 'deny'; answers?: never } | { answers: ChatAnswer[]; decision?: never }) }
@@ -58,6 +58,7 @@ type ChatOperation =
 export type ChatCommand = ChatOperation & { protocolVersion: 1; commandId: string };
 export interface ChatReceipt { commandId: string; sessionId: string; state: ChatCommandState; result: Record<string, unknown> | null; error: string | null }
 export interface ChatSession {
+  model?: string | null;
   managedName?: string | null;
   canStop?: boolean;
   id: string;

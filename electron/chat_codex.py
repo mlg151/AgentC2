@@ -100,6 +100,8 @@ class CodexAdapter:
             if account["requiresOpenaiAuth"] and account["account"] is None:
                 raise ProviderRejected("Sign in with codex login on the selected host, then create or resume this conversation again")
             params = dict(cwd=self.session["cwd"])
+            if self.session.get("model"):
+                params["model"] = self.session["model"]
             profile = self.session["roeProfile"]
             if profile == "full":
                 params.update(approvalPolicy="never", sandbox="danger-full-access")

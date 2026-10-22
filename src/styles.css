@@ -312,3 +312,22 @@ kbd{font:10px Consolas,monospace;background:#29404e;padding:3px 5px;border-radiu
 .flash-detail kbd { font-size: 9px; opacity: .8; }
 
 .situation-roster .session-main .unit-session-name{flex-shrink:0;min-height:14px;font-size:11px;line-height:14px;color:#c5d8ee}
+
+.specops-content { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow: auto; }
+.specops-content > * { flex-shrink: 0; }
+.specops-content .field-note { margin: 0; }
+.specops-content .inline-actions { flex-wrap: wrap; }
+.specops-yaml { font-family: monospace; font-size: 12px; min-height: 320px; tab-size: 2; }
+.specops-profiles { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.specops-profiles > div { display: grid; gap: 4px; padding: 10px; border: 1px solid var(--c2-border); border-radius: 6px; }
+.specops-run { margin: 12px 0; padding: 12px; border: 1px solid var(--c2-border); border-radius: 6px; }
+.specops-run.halted { border-color: #dba747; }
+.specops-breadcrumb, .specops-roster { font-family: monospace; overflow-wrap: anywhere; }
+.specops-run pre, .specops-result { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow: auto; font-size: 12px; }
+.specops-escalation { background: #463617; color: #ffdb83; border: 1px solid #dba747; padding: 8px; text-align: left; }
+
+
+@media (max-width: 1100px) { .situation-header .quick-trigger { display: none; } }
+
+.specops-progress { display: flex; gap: 12px; overflow-x: auto; flex-shrink: 0; padding: 5px 12px; border-bottom: 1px solid var(--c2-border); }
+.specops-progress button { background: transparent; border: 0; color: #9fb4ce; white-space: nowrap; font: 11px/1.5 monospace; }

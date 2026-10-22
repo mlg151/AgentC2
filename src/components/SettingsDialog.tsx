@@ -4,7 +4,7 @@ import { Modal } from './Modal';
 import { RemoteAccess } from './RemoteAccess';
 import { OpOrdersSettings } from './OpOrdersSettings';
 
-export function SettingsDialog({ settings, onSave, onExternalSettings, onClose }: { settings: Settings; onSave: (value: Settings) => Promise<void>; onExternalSettings: (value: Settings) => void; onClose: () => void }) {
+export function SettingsDialog({ settings, onSave, onExternalSettings, onSpecops, onClose }: { settings: Settings; onSave: (value: Settings) => Promise<void>; onExternalSettings: (value: Settings) => void; onSpecops?: () => void; onClose: () => void }) {
   const [draft, setDraft] = useState(() => structuredClone(settings));
   const [section, setSection] = useState<'hosts' | 'presets' | 'oporders' | 'remote'>('hosts');
   const [error, setError] = useState('');
@@ -46,6 +46,6 @@ export function SettingsDialog({ settings, onSave, onExternalSettings, onClose }
     </div>
     {section !== 'oporders' ? <label className="checkbox-label"><input type="checkbox" checked={draft.notifications} onChange={(e) => setDraft({ ...draft, notifications: e.target.checked })} /> Desktop notifications for new attention items</label> : null}
     {error ? <p role="alert" className="form-error">{error}</p> : null}
-    <div className="dialog-actions"><button className="button-secondary" disabled={busy} onClick={onClose}>{section === 'oporders' ? 'Close' : 'Cancel'}</button>{section !== 'oporders' ? <button className="button-primary" disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save settings'}</button> : null}</div>
+    <div className="dialog-actions">{onSpecops ? <button className="button-secondary" onClick={onSpecops}>SPECOPS ranks and workflows</button> : null}<button className="button-secondary" disabled={busy} onClick={onClose}>{section === 'oporders' ? 'Close' : 'Cancel'}</button>{section !== 'oporders' ? <button className="button-primary" disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save settings'}</button> : null}</div>
   </Modal>;
 }

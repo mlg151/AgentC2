@@ -57,9 +57,11 @@ class CodexTests(unittest.TestCase):
             os.environ["AGENTC2_CODEX_FIXTURE_DIR"] = self.old_env
         self.temp.cleanup()
 
-    def start(self, resume=False, profile="gated"):
+    def start(self, resume=False, profile="gated", model=None):
         caps = dict(provider="codex", version=BUNDLE["version"], status="supported", reason=None, **{name: name not in ("attachments", "forks") for name in CONTRACT["capabilities"]})
         payload = dict(provider="codex", cwd=str(self.root), title="Codex protocol fixture", roeProfile=profile)
+        if model:
+            payload["model"] = model
         if resume:
             payload["providerSessionId"] = "saved-native-thread"
         command = dict(protocolVersion=1, commandId=str(uuid.uuid4()), operation="create", payload=payload)
@@ -86,6 +88,16 @@ class CodexTests(unittest.TestCase):
         command = dict(protocolVersion=1, commandId=str(uuid.uuid4()), operation="respond", sessionId=self.identifier, payload=payload)
         self.journal.accept(command)
         return self.adapter.respond(payload)
+
+    def test_configured_model_reaches_provider_and_survives_journal_reopen(self):
+        self.start(model="fixture-model")
+        requests = [json.loads(line) for line in (self.root / "requests.jsonl").read_text().splitlines()]
+        self.assertEqual(next(item for item in requests if item.get("method") == "thread/start")["params"]["model"], "fixture-model")
+        reopened = Journal(self.root / "journal")
+        try:
+            self.assertEqual(reopened.history(self.identifier)["session"]["model"], "fixture-model")
+        finally:
+            reopened.close()
 
     def test_streamed_text_final_and_cumulative_usage(self):
         self.start()

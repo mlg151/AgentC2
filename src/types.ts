@@ -4,6 +4,7 @@ export type Provider = 'codex' | 'claude' | 'antigravity' | 'terminal';
 export interface ProviderTelemetry { status: 'reported' | 'stale' | 'unknown' | 'unsupported'; sampledAt: string | null; source: string | null; context: { usedTokens: number; capacityTokens: number; percent: number } | null; totalTokens: number | null; tokensPerMinute: number | null; costUsd: number | null; costBasis: string | null }
 
 export interface Session {
+  specops?: { id: string; state: string; breadcrumb: string };
   key: string;
   provider: Provider;
   id: string;
@@ -45,7 +46,14 @@ export interface Session {
   roeProfile?: RoeProfile | 'unknown';
 }
 
+export interface SpecopsProfile { id: string; name: string; provider: string; model: string; ranks: string[] }
+export interface SpecopsWorkflow { version: 1; id: string; name: string; trigger: string; stages: { id: string; profile: string; rank: string; role: string }[] }
+export interface SpecopsDefinition { profiles: SpecopsProfile[]; workflows: SpecopsWorkflow[]; yaml: string; directory: string }
+export interface SpecopsRun { canResume: boolean; canRetry: boolean; id: string; hostId: string; repo: string; state: string; stage: string; error: string; workflow: SpecopsWorkflow; visits: { id: string; stage: string; name: string; output: string; outcome: string }[]; costUsd: number; costKnown: boolean }
+export interface GithubResult { [key: string]: unknown }
+
 export interface Inventory {
+  missions?: SpecopsRun[];
   hosts: { id: string; name: string; target: string; user?: string; connected: boolean; error?: string }[];
   sessions: Session[];
   attention: AttentionItem[];
@@ -95,6 +103,7 @@ export interface RemoteStatus extends RemoteConfig { running: boolean; error: st
 export interface CompanionState { settings: Settings; metadata: Record<string, SessionMetadata>; attention: AttentionItem[] }
 
 export interface CreateInput {
+  model?: string;
   launchId?: string;
   transport?: 'chat' | 'terminal';
   provider: Provider;
@@ -124,6 +133,12 @@ export interface AgentHQApi {
   enrollOpOrder(order: OpOrder, revision: string): Promise<Settings>;
   previewSitrep(input: SitrepPreviewInput): Promise<SitrepPreview>;
   launchSitrep(input: SitrepLaunchInput): Promise<{ name: string; hostId: string }>;
+  githubRequest(input: Record<string, unknown>): Promise<GithubResult>;
+  listSpecops(): Promise<SpecopsRun[]>;
+  specopsDefinition(): Promise<SpecopsDefinition>;
+  configureSpecops(yaml: string): Promise<SpecopsDefinition>;
+  launchSpecops(input: Record<string, unknown>): Promise<SpecopsRun>;
+  controlSpecops(id: string, action: string): Promise<SpecopsRun>;
   listExercises(): Promise<ExerciseRecord[]>;
   exerciseCapabilities(hostId: string): Promise<Record<Exclude<Provider, 'terminal'>, boolean>>;
   createExercise(input: ExerciseInput): Promise<ExerciseRecord>;

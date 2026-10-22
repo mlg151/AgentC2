@@ -549,7 +549,7 @@ def create(payload):
             checked(["tmux", "new-session", "-d", "-s", name, "-c", str(cwd), "printf 'AgentC2 structured chat session. Open Chat to interact.\\n'; while :; do sleep 86400; done"])
             for key, value in (("provider", provider), ("title", title), ("cwd", str(cwd)), ("preset", preset.get("name", "") if preset else ""), ("preset_id", preset.get("id", "") if preset else ""), ("worktree", payload.get("worktreeOperation") or ""), ("roe", roe_profile or "full"), ("chat_session_id", identifier)):
                 checked(["tmux", "set-option", "-t", name, "@hq_" + key, value])
-        command = {"protocolVersion": 1, "commandId": command_id, "operation": "create", "payload": {"provider": provider, "cwd": str(cwd), "title": title, "roeProfile": roe_profile or "full", "managedName": name, "instructions": payload.get("instructions") or "", **({"providerSessionId": conversation_id} if conversation_id else {})}}
+        command = {"protocolVersion": 1, "commandId": command_id, "operation": "create", "payload": {"provider": provider, "cwd": str(cwd), "title": title, "roeProfile": roe_profile or "full", "managedName": name, "instructions": payload.get("instructions") or "", **({"model": payload["model"]} if payload.get("model") else {}), **({"providerSessionId": conversation_id} if conversation_id else {})}}
         # Do not remove the reservation when acknowledgement is lost: retrying
         # this exact command checks its durable receipt without relaunching.
         receipt = chat_remote({**payload, "request": {"protocolVersion": 1, "action": "command", "command": command}})
@@ -674,6 +674,8 @@ def main():
     action = payload.get("action")
     if action == "inventory":
         result = inventory(payload)
+    elif action == "github":
+        result = github_request(payload)
     elif action == "chat":
         result = chat_remote(payload)
     elif action == "health":

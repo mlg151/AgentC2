@@ -10,6 +10,8 @@ const event = (type, data) => ({ protocolVersion: 1, sessionId, sequence: 1, tim
 const cases = [];
 const add = (kind, value, valid) => cases.push({ kind, value, valid });
 const create = command('create', { provider: 'codex', cwd: '/tmp/repo', title: 'Fixture', roeProfile: 'gated' });
+add('command', { ...create, payload: { ...create.payload, model: 'fixture-model' } }, true);
+for (const model of ['', 42, 'x'.repeat(201)]) add('command', { ...create, payload: { ...create.payload, model } }, false);
 for (const provider of contract.providers) add('command', { ...create, payload: { ...create.payload, provider } }, true);
 for (const operation of ['send', 'steer', 'respond', 'interrupt', 'stop']) add('command', command(operation, operation === 'send' ? { text: 'Hello 👋' } : operation === 'steer' ? { text: 'Continue', expectedTurnId: 'turn-one' } : operation === 'respond' ? { requestId: 'request-one', turnId: 'turn-one', itemId: null, decision: 'deny' } : {}), true);
 add('command', command('respond', { requestId: 'q', turnId: null, itemId: null, answers: [{ questionId: 'q1', answers: ['Answer'] }] }), true);
