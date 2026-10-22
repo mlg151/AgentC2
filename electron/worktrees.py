@@ -126,7 +126,7 @@ def worktree_launch(payload):
             raise ValueError("Invalid SitRep patch") from error
         if len(patch) > SITREP_PATCH_LIMIT or hashlib.sha256(patch).hexdigest() != sitrep["digest"] or b"GIT binary patch" in patch or b"Binary files " in patch:
             raise ValueError("SitRep patch is too large, binary, or changed")
-    request = {key: payload.get(key) for key in ("provider", "title", "preset", "instructions")}
+    request = {key: payload.get(key) for key in ("provider", "title", "preset", "instructions", "transport")}
     if sitrep:
         request["sitrepDigest"] = sitrep["digest"]
     request.update({"repository": str(root), "baseRef": base_ref, "branch": branch, "path": str(path), "name": name})

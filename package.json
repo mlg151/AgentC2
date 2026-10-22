@@ -10,7 +10,7 @@
     "start": "cross-env NODE_ENV=production electron .",
     "dist": "npm run build && electron-builder --publish never",
     "test:terminal": "npm run build && node tests/terminal.e2e.cjs",
-    "test:chat": "npm run build && node tests/chat-protocol.cjs && node tests/chat-service.cjs",
+    "test:chat": "npm run build && node tests/chat-protocol.cjs && node tests/chat-service.cjs && node tests/chat-timeline.cjs",
     "test:launch-modes": "node tests/launch-modes.cjs",
     "test:claude-gated": "node tests/claude-gated.cjs",
     "test:oporders": "npm run build && python3 tests/oporders.py && node tests/oporders.e2e.cjs && node tests/oporders.ui.e2e.cjs",
@@ -30,7 +30,11 @@
     "test:platform": "node tests/platform.cjs",
     "test:desktop": "node tests/desktop.e2e.cjs",
     "test:package": "node tests/desktop.e2e.cjs --packaged",
-    "test:ci": "npm run build && node tests/chat-protocol.cjs && node tests/chat-service.cjs && npm run test:productivity && node tests/loop-breaker.cjs && node tests/readiness.cjs && node tests/exercises.cjs && node tests/cleanup.cjs && node tests/situation.cjs && node tests/reconnect.cjs && node tests/remote-control.cjs && node tests/image-upload.cjs && node tests/tunnels.cjs && npm run test:platform && node tests/packaging.cjs && node tests/native-pty.cjs"
+    "test:ci": "npm run build && node tests/chat-protocol.cjs && node tests/chat-service.cjs && node tests/chat-timeline.cjs && npm run test:productivity && node tests/loop-breaker.cjs && node tests/readiness.cjs && node tests/exercises.cjs && node tests/cleanup.cjs && node tests/situation.cjs && node tests/reconnect.cjs && node tests/remote-control.cjs && node tests/image-upload.cjs && node tests/tunnels.cjs && npm run test:platform && node tests/packaging.cjs && node tests/native-pty.cjs",
+    "test:chat:ui": "node tests/chat-ui.e2e.cjs",
+    "test:chat:ssh": "npm run build && node tests/chat-launch.e2e.cjs",
+    "test:chat:sdk-evaluation": "python3 tests/antigravity-sdk-evaluation.py",
+    "test:companion:filters": "npm run build && node tests/companion-filters.e2e.cjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
@@ -43,9 +47,12 @@
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1",
     "ws": "^8.22.0"
   },
   "devDependencies": {
+    "@electron/osx-sign": "1.3.3",
     "@types/node": "^22.10.0",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.0.0",
@@ -58,8 +65,7 @@
     "playwright-core": "^1.64.1",
     "typescript": "^5.7.2",
     "vite": "^6.0.5",
-    "wait-on": "^8.0.1",
-    "@electron/osx-sign": "1.3.3"
+    "wait-on": "^8.0.1"
   },
   "build": {
     "appId": "com.agentc2.desktop",

@@ -2,6 +2,7 @@ const crypto = require('node:crypto');
 
 // Terminal text is evidence of a possible prompt, never proof of task completion.
 function classify(session) {
+  if (session.transport === 'chat') return null; // Structured events carry authoritative lifecycle evidence.
   if (session.exitCode !== undefined && session.exitCode !== null) return { kind: Number(session.exitCode) === 0 ? 'completed' : 'failed', confidence: 'confirmed', detail: `Process exited with code ${session.exitCode}.` };
   if (['blocked', 'waiting_for_input', 'requires_action'].includes(session.state)) return { kind: 'input', confidence: 'confirmed', detail: 'The provider reports that this agent needs attention.' };
   const tail = (session.outputTail || '').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').split('\n').filter((l) => l.trim()).slice(-8).join('\n');
@@ -28,7 +29,7 @@ class Attention {
         if (Number.isFinite(eventAt) && eventAt < cursorAt - 1000) continue;
         const signature = `hook:${event.id}`;
         if (items.some((i) => i.sessionKey === session.key && i.signature === signature)) continue;
-        const item = { id: crypto.randomUUID(), sessionKey: session.key, hostId: session.hostId, title: session.title, provider: session.provider, createdAt: event.at || new Date().toISOString(), acknowledged: Boolean(event.requestId && this.store.data.flashResolved?.includes(event.requestId)), requestId: event.requestId || undefined, signature, kind: event.kind, confidence: 'confirmed', detail: event.kind === 'completed' ? 'The provider reported that its turn finished. Review the result in the terminal.' : event.kind === 'failed' ? 'The provider reported a failed turn.' : event.tool ? `The provider requested permission for ${event.tool}. Review the exact action in Flash Traffic.` : 'The provider reported an input or approval request.' };
+        const item = { id: crypto.randomUUID(), sessionKey: session.key, hostId: session.hostId, title: session.title, provider: session.provider, createdAt: event.at || new Date().toISOString(), acknowledged: Boolean(event.requestId && this.store.data.flashResolved?.includes(event.requestId)), requestId: event.requestId || undefined, signature, kind: event.kind, confidence: 'confirmed', detail: event.kind === 'completed' ? `The provider reported that its turn finished. Review the result in ${session.transport === 'chat' ? 'chat' : 'the terminal'}.` : event.kind === 'failed' ? 'The provider reported a failed turn.' : session.transport === 'chat' ? 'The provider needs your input. Open chat to review the exact request.' : event.tool ? `The provider requested permission for ${event.tool}. Review the exact action in Flash Traffic.` : 'The provider reported an input or approval request.' };
         items = [...items, item].slice(-500); added.push(item);
       }
       if (events.length && cursorId !== events.at(-1).id) {

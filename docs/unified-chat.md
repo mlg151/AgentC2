@@ -4,7 +4,9 @@ Tracked by [epic #28](https://github.com/mlg151/AgentC2/issues/28) and native su
 
 ## Current state
 
-The versioned contract, remote journal, detached worker/bootstrap, and shared desktop/companion service APIs are implemented. The Codex 0.163.0 adapter has pinned-schema protocol fixtures and an installed-CLI unauthenticated handshake test. Antigravity CLI 1.4.4 has text-stream fixtures. Claude SDK 0.2.172 with CLI 2.1.306 has installed-SDK/CLI permission and question tests against a loopback model fixture. Rendered chat views, session migration, SDK investigation, remaining adapter scenarios, and the integrated live-provider matrix remain in progress. Terminal sessions remain the normal user-facing execution path until session migration is delivered.
+The versioned contract, remote journal, detached worker/bootstrap, provider adapters, shared service APIs, and desktop/phone chat views are implemented on `feature/unified-chat-ui`. Standard provider launches select structured chat after a host capability check; the launch dialog offers explicit Terminal mode. Custom commands/arguments, shells, and existing background-agent attachment retain terminal execution. Unsupported chat versions fail with an actionable Terminal fallback message.
+
+Codex 0.163.0 has pinned-schema protocol fixtures and an installed-CLI unauthenticated handshake test. Antigravity CLI 1.4.4 has stream fixtures. Claude SDK 0.2.172 with CLI 2.1.306 has installed-SDK/CLI permission and question tests against a loopback model fixture. Actual isolated SSH/tmux/worker/Electron launch, retry, approval, inventory, and worktree checks pass with a disposable Codex protocol executable. This is transport/UI evidence, not a live authenticated provider/model result. Cross-provider release validation remains incomplete in #41.
 
 The contract has JavaScript/Python runtime validation and renderer types. Its manifest is `electron/chat-protocol.json`; command/event definitions are in `electron/chat-protocol.cjs`, `electron/chat_protocol.py`, and `src/chatTypes.ts`. Protocol version 1 rejects unknown commands and unexpected command fields. Candidate CLI versions are research targets, not a claim of end-to-end support. A provider must probe its actual host version and return verified capabilities before creating a structured session.
 
@@ -28,7 +30,7 @@ Events have monotonic per-session sequences and provider session/turn/item ident
 
 Automatic transcript expiration is disabled by default. Structured transcripts and tool/request content are durable remote data beyond the existing metadata-only desktop workspace file. Only the remote account and authenticated paired clients through AgentC2 may access them. Companion static caching must never include transcripts or API responses.
 
-The journal supports an explicit local-worker prune operation for confirmed stopped/failed sessions. Live, starting, waiting, and unknown sessions cannot be pruned. Pruning removes transcript/request content while retaining session mappings and command fingerprints/receipts to prevent old retries from repeating work. Sequence numbers never restart; a history response exposes `retainedFrom` and `truncated` when content was removed. User-facing retention controls and integration with provider history cleanup are tracked in #40/#41.
+The journal supports an explicit local-worker prune operation for confirmed stopped/failed sessions. Live, starting, waiting, and unknown sessions cannot be pruned. Pruning removes transcript/request content while retaining session mappings and command fingerprints/receipts to prevent old retries from repeating work. Sequence numbers never restart; a history response exposes `retainedFrom` and `truncated` when content was removed. Native-history cleanup rejects active or uncertain managed chat associations. User-facing transcript pruning and coordinated deletion of both native history and journal content remain tracked in #40/#41; deleting native provider history must not be described as erasing the separate journal.
 
 ## Validation
 
@@ -42,7 +44,7 @@ Codex uses app-server over stdio with an initialization handshake, host-side aut
 
 ROE matches existing terminal behavior: full sets `approvalPolicy=never` and `sandbox=danger-full-access`; gated sets `approvalPolicy=on-request`, `sandbox=read-only`, and `approvalsReviewer=user`. The adapter checks the returned effective values before accepting a session. Provider-default inherits the host configuration. The adapter does not change the terminal launch flags. Attachments and forks remain unavailable in the structured adapter until their controls are implemented and validated.
 
-The Codex fixtures cover streamed/final reconciliation, cumulative token usage with unknown cost, allowed/denied writes, questions, expected-turn steering, interruption, paginated resume, authentication failure, effective ROE, bounded output, and command/receipt dispatch through the deployed worker bundle. The installed CLI test uses an isolated unauthenticated Codex home and submits no model request. Live authenticated Codex turns and live SSH/UI checks remain required; no SSH QA host is configured in the current environment.
+The Codex fixtures cover streamed/final reconciliation, cumulative token usage with unknown cost, allowed/denied writes, questions, expected-turn steering, interruption, paginated resume, authentication failure, effective ROE, bounded output, and command/receipt dispatch through the deployed worker bundle. The installed CLI test uses an isolated unauthenticated Codex home and submits no model request. Live authenticated Codex turns remain unverified. `tests/chat-launch.e2e.cjs` provisions its own disposable localhost SSH daemon, key material, isolated HOME, tmux socket, repository, and fixture provider; it exercises actual SSH and optionally the production Electron view under Xvfb without touching a configured user host.
 
 ## Claude SDK integration
 
@@ -60,4 +62,32 @@ The adapter keeps stdin open, sends text-only user NDJSON, and waits for each tu
 
 CLI approvals, questions, steering, attachments, and native-history import are unavailable. Resume passes the native conversation ID and retains provider context; prior CLI-rendered messages cannot be recovered through this stream. AgentC2's journal retains managed structured turns. Gated ROE is rejected because this CLI transport cannot return approval decisions. Full adds the existing skip-permissions flag and checks the init event; provider-default inherits host policy. Interrupt targets only the adapter's owned process group.
 
-Fixtures cover two-turn serialization, cumulative counters, stream/final reconciliation, resume IDs, soft denials, tool errors, interruption, nonterminal outcomes, and effective launch mode. Live authenticated CLI validation remains in the provider matrix. The SDK evaluation is a separate deliverable in #39 and does not replace this adapter automatically.
+Fixtures cover two-turn serialization, cumulative counters, stream/final reconciliation, resume IDs, soft denials, tool errors, interruption, nonterminal outcomes, and effective launch mode. Live authenticated CLI validation remains in the provider matrix. The [SDK evaluation](antigravity-sdk-evaluation.md) records an evidence-backed deferral. Installed SDK 0.1.22 persistence/resume passed against a loopback model fixture. CLI authentication and history interoperability remain explicitly unknown; the SDK does not replace this adapter.
+
+
+## Desktop and companion operation
+
+Choose **New → Interaction mode → Structured chat** for a standard supported provider command. Choose **Terminal** for legacy CLI interaction or custom preset arguments. Credentials and Python dependencies must be available to the remote SSH environment, not only to a shell alias. Claude requires the pinned SDK in the Python environment that runs the worker; API/cloud authentication must already be configured on that host. AgentC2 does not provision or copy keys.
+
+Chat renders safe Markdown, collapsed tool input/results, explicit outcomes, and exact approval/question cards. Messages are text only. Unsupported attachments/forks are not offered. Ctrl/Command+Enter sends; regular Enter inserts a newline. **Take control** owns mutation rights for the current desktop/phone connection. **Detach** closes only the view, **Interrupt** cancels the active turn when supported, and **Stop** ends the worker-owned process. A stopped conversation remains readable and can be resumed using its native provider ID.
+
+Managed chat sessions keep an `hq-…` tmux reservation for existing worktree and orchestration associations. This reservation displays an informational message; it does not run a second provider. The worker stops a reservation only when its chat identity tag matches. The roster, attention events, usage, Overwatch previews, and explicit history search consume structured data. Notes and pins retain the existing host-qualified key. Worktree diffs and SitRep mutations require chat ownership. Development-tunnel discovery and full cross-workflow release regression remain open validation work.
+
+A failed submission checks its durable receipt. The view never automatically resends a prompt. **Retry same action** explicitly reuses the original command ID; this can recover a missing acknowledgement without creating a second accepted command. If the worker reports `unknown`, inspect native provider history before creating or resuming work. Worker loss cannot reconstruct an orphaned native stdio connection, and Stop never targets an unowned PID.
+
+## Validation commands and release gaps
+
+- `npm run test:ci`: build, protocol/worker/provider fixtures, controller/gateway tests, timeline normalization, and existing host-independent regressions.
+- `npm run test:chat:ui`: rendered desktop/phone chat interactions and safe content, using a fixture worker.
+- `node tests/companion-filters.e2e.cjs`: real built companion plus authenticated gateway, managed filtering/search/attention, and mobile layout.
+- `npm run test:chat:ssh`: provisions isolated Linux SSH/tmux/provider fixtures; use Xvfb to include actual Electron chat rendering.
+- `python3 tests/chat-claude-native.py`: optional pinned SDK/CLI against a loopback model fixture; reports skips if unavailable.
+- `npm run test:chat:sdk-evaluation`: optional pinned Antigravity SDK persistence/resume probe.
+
+Live authenticated provider turns, Claude resume/interrupt/background edge coverage, native packaging checks, the complete existing terminal/workspace/companion/launch-mode matrix, and user-facing coordinated transcript cleanup remain release gates. Fixture success does not close these gaps.
+
+Fixture screenshots show the shared presentation and contain no real user transcript:
+
+![Desktop chat and approval](screenshots/structured-chat-desktop.png)
+
+![Phone chat and question](screenshots/structured-chat-phone.png)

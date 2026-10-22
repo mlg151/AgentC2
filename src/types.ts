@@ -1,5 +1,5 @@
 import type { ChatCapabilities, ChatClientState, ChatCommand, ChatPage, ChatReceipt, ChatSnapshot, ChatUpdate } from './chatTypes';
-export type { ChatProvider, ChatSessionState, ChatCommandState, ChatCapabilities, ChatUsage, ChatQuestion, ChatAnswer, ChatEvent, ChatCommand, ChatReceipt, ChatSession, ChatPage, ChatPendingRequest, ChatClientState, ChatSnapshot, ChatUpdate } from './chatTypes';
+export type { ChatProvider, ChatSessionState, ChatCommandState, ChatCapabilities, ChatUsage, ChatQuestion, ChatAnswer, ChatEvent, ChatCommand, ChatReceipt, ChatSession, ChatPage, ChatPendingRequest, ChatClientState, ChatSnapshot, ChatUpdate, ChatApi } from './chatTypes';
 export type Provider = 'codex' | 'claude' | 'antigravity' | 'terminal';
 export interface ProviderTelemetry { status: 'reported' | 'stale' | 'unknown' | 'unsupported'; sampledAt: string | null; source: string | null; context: { usedTokens: number; capacityTokens: number; percent: number } | null; totalTokens: number | null; tokensPerMinute: number | null; costUsd: number | null; costBasis: string | null }
 
@@ -7,6 +7,8 @@ export interface Session {
   key: string;
   provider: Provider;
   id: string;
+  transport?: 'terminal' | 'chat';
+  chatSessionId?: string;
   title: string;
   cwd: string;
   updatedAt: string | null;
@@ -92,6 +94,8 @@ export interface RemoteStatus extends RemoteConfig { running: boolean; error: st
 export interface CompanionState { settings: Settings; metadata: Record<string, SessionMetadata>; attention: AttentionItem[] }
 
 export interface CreateInput {
+  launchId?: string;
+  transport?: 'chat' | 'terminal';
   provider: Provider;
   cwd: string;
   title: string;

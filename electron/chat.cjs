@@ -48,7 +48,7 @@ class Chats {
     const key = `${host}/${identifier}`;
     let record = this.sessions.get(key);
     if (!record) {
-      record = { key, hostId: host, sessionId: identifier, session: page.session, owner: null, connection: 'connected', handles: new Set(), timer: null, flight: null, disposed: false, queue: Promise.resolve() };
+      record = { key, hostId: host, sessionId: identifier, session: page.session, latestCursor: page.latestCursor, retainedFrom: page.retainedFrom, owner: null, connection: 'connected', handles: new Set(), timer: null, flight: null, disposed: false, queue: Promise.resolve() };
       this.sessions.set(key, record);
     }
     const id = crypto.randomUUID();
@@ -91,12 +91,14 @@ class Chats {
       previous = value.sequence;
     }
     if (cursor(page.cursor) < previous || (page.events.length && page.cursor !== previous)) throw new Error('Invalid chat replay cursor');
+    if (cursor(page.latestCursor) < page.cursor || !Array.isArray(page.pendingCommands) || !Array.isArray(page.pendingRequests)) throw new Error('Invalid chat recovery metadata');
     return page;
   }
 
-  async ready(client, id, after = 0) {
+  async ready(client, id, after) {
     const handle = this.get(client, id);
-    const page = await this.read(handle.record.hostId, handle.record.sessionId, after);
+    const initial = after === undefined ? Math.max(handle.record.retainedFrom - 1, handle.record.latestCursor - 200) : after;
+    const page = await this.read(handle.record.hostId, handle.record.sessionId, initial);
     this.get(client, id);
     handle.cursor = page.cursor;
     handle.ready = true;
@@ -115,7 +117,8 @@ class Chats {
     if (record.disposed || record.timer || record.flight || ![...record.handles].some((id) => this.handles.get(id)?.ready)) return;
     record.timer = setTimeout(() => {
       record.timer = null;
-      record.flight = this.poll(record).finally(() => { record.flight = null; this.schedule(record, record.connection === 'connected' ? this.interval : 2000); });
+      let more = false;
+      record.flight = this.poll(record).then((value) => { more = Boolean(value); }).finally(() => { record.flight = null; this.schedule(record, record.connection === 'connected' ? more ? 0 : this.interval : 2000); });
     }, delay);
     record.timer.unref?.();
   }
@@ -129,6 +132,8 @@ class Chats {
       const restored = record.connection !== 'connected';
       record.connection = 'connected';
       record.session = page.session;
+      record.latestCursor = page.latestCursor;
+      record.retainedFrom = page.retainedFrom;
       for (const handle of handles) {
         if (!this.handles.has(handle.id) || handle.client.closed) continue;
         const events = page.events.filter((event) => event.sequence > handle.cursor);
@@ -137,6 +142,7 @@ class Chats {
         handle.cursor = next;
       }
       if (restored) this.publish(record);
+      return page.hasMore;
     } catch {
       if (!record.disposed && record.connection !== 'reconnecting') { record.connection = 'reconnecting'; this.publish(record); }
     }
@@ -157,6 +163,12 @@ class Chats {
       this.publish(record);
       return this.state(client, id);
     });
+  }
+
+  assertSessionOwner(client, identifier, hostId) {
+    const record = this.sessions.get(`${this.resolveHost(hostId)}/${identifier}`);
+    if (client.closed || !record || record.owner?.id !== client.id || record.connection !== 'connected') throw new Error('Open the chat and take control before changing this session');
+    return record;
   }
 
   submit(client, id, input) {

@@ -50,7 +50,7 @@ export type ChatEvent = ChatEventData & {
   itemId: string | null;
 };
 type ChatOperation =
-  | { operation: 'create'; sessionId?: never; payload: { provider: ChatProvider; cwd: string; title: string; roeProfile: 'full' | 'gated' | 'provider-default'; providerSessionId?: string } }
+  | { operation: 'create'; sessionId?: never; payload: { provider: ChatProvider; cwd: string; title: string; roeProfile: 'full' | 'gated' | 'provider-default'; providerSessionId?: string; managedName?: string; instructions?: string } }
   | { operation: 'send'; sessionId: string; payload: { text: string } }
   | { operation: 'steer'; sessionId: string; payload: { text: string; expectedTurnId: string } }
   | { operation: 'respond'; sessionId: string; payload: { requestId: string; turnId: string | null; itemId: string | null } & ({ decision: 'allow' | 'deny'; answers?: never } | { answers: ChatAnswer[]; decision?: never }) }
@@ -58,6 +58,8 @@ type ChatOperation =
 export type ChatCommand = ChatOperation & { protocolVersion: 1; commandId: string };
 export interface ChatReceipt { commandId: string; sessionId: string; state: ChatCommandState; result: Record<string, unknown> | null; error: string | null }
 export interface ChatSession {
+  managedName?: string | null;
+  canStop?: boolean;
   id: string;
   provider: ChatProvider;
   providerSessionId: string | null;
@@ -70,8 +72,22 @@ export interface ChatSession {
   updatedAt: string;
   capabilities: ChatCapabilities;
 }
-export interface ChatPendingRequest { requestId: string; turnId: string | null; itemId: string | null; state: 'pending' | 'submitted'; type: 'approval.requested' | 'question.requested'; data: Record<string, unknown> }
-export interface ChatPage { session: ChatSession; events: ChatEvent[]; cursor: number; hasMore: boolean; retainedFrom: number; truncated: boolean; pendingRequests: ChatPendingRequest[] }
+export type ChatPendingRequest = { requestId: string; turnId: string | null; itemId: string | null; state: 'pending' | 'submitted' } & (
+  | Extract<ChatEventData, { type: 'approval.requested' }>
+  | Extract<ChatEventData, { type: 'question.requested' }>
+);
+export interface ChatPage { session: ChatSession; events: ChatEvent[]; cursor: number; latestCursor: number; hasMore: boolean; retainedFrom: number; truncated: boolean; pendingRequests: ChatPendingRequest[]; pendingCommands: ChatReceipt[] }
 export interface ChatClientState { id: string; sessionId: string; controller: { id: string; name: string } | null; canControl: boolean; connection: 'connected' | 'reconnecting' }
 export type ChatSnapshot = ChatPage & { state: ChatClientState };
 export type ChatUpdate = ChatSnapshot & { id: string };
+export interface ChatApi {
+  open(id: string, hostId: string): Promise<string>;
+  ready(id: string, after?: number): Promise<ChatSnapshot>;
+  history(id: string, after?: number, limit?: number): Promise<ChatPage>;
+  take(id: string): Promise<ChatClientState>;
+  submit(id: string, command: ChatCommand): Promise<ChatReceipt>;
+  receipt(id: string, commandId: string): Promise<ChatReceipt>;
+  close(id: string): Promise<void>;
+  onEvents(callback: (update: ChatUpdate) => void): () => void;
+  onState(callback: (state: ChatClientState) => void): () => void;
+}

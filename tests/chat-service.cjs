@@ -26,7 +26,7 @@ function fixture() {
     if (request.action === 'history') {
       if (gate?.action === 'history') await gate.promise;
       const rows = journal.filter((event) => event.sequence > request.after), list = rows.slice(0, request.limit);
-      return { session: structuredClone(session), events: structuredClone(list), cursor: list.at(-1)?.sequence || request.after, hasMore: rows.length > list.length, retainedFrom: 1, truncated: false, pendingRequests: [] };
+      return { session: structuredClone(session), events: structuredClone(list), cursor: list.at(-1)?.sequence || request.after, latestCursor: journal.length, hasMore: rows.length > list.length, retainedFrom: 1, truncated: false, pendingRequests: [], pendingCommands: [] };
     }
     if (request.action === 'command') {
       commands.push({ hostId, command: request.command });

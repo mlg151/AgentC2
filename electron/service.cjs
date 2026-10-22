@@ -92,7 +92,7 @@ function createService({ directory, home }) {
     if (inventoryFlight) return inventoryFlight;
     inventoryFlight = (async () => {
       const hosts = store.data.settings.hosts.filter((h) => h.enabled);
-      const results = await Promise.allSettled(hosts.map((h) => runRemote({ action: 'inventory' }, h.id)));
+      const results = await Promise.allSettled(hosts.map((h) => runRemote({ action: 'inventory', sourceDigest: chatDigest, chatFiles, allowUpgrade: true }, h.id)));
       const statuses = results.map((result, index) => {
         const h = hosts[index];
         if (result.status === 'fulfilled') {
@@ -306,6 +306,8 @@ function createService({ directory, home }) {
     const provider = input?.provider;
     if (!['codex', 'claude', 'antigravity', 'terminal'].includes(provider)) throw new Error('Invalid provider');
     const isTerminal = provider === 'terminal';
+    if (input.transport !== undefined && !['chat', 'terminal'].includes(input.transport)) throw new Error('Invalid session transport');
+    if (input.launchId !== undefined && !/^[a-f0-9]{32}$/.test(input.launchId)) throw new Error('Invalid launch ID');
     if (isTerminal && (input.presetId || input.conversationId || input.agentId || input.instructions)) throw new Error('Terminal sessions do not accept agent launch options');
     const preset = input.presetId ? store.data.settings.presets.find((p) => p.id === input.presetId && p.provider === provider) : null;
     if ((input.presetId || (requirePreset && !isTerminal)) && !preset) throw new Error('Launch preset is unavailable');
@@ -314,11 +316,20 @@ function createService({ directory, home }) {
     const roeProfile = resolveRoeProfile(store.data.settings, host.id, preset, input.roeProfile);
     validateRoeLaunch(provider, preset, roeProfile);
     const isolated = input.worktree;
+    const customCommand = preset && (preset.command !== (provider === 'antigravity' ? 'agy' : provider) || preset.args.trim());
+    const transport = isTerminal || input.agentId || customCommand ? 'terminal' : input.transport || 'chat';
+    if (input.transport === 'chat' && transport !== 'chat') throw new Error('This launch requires terminal mode because it uses a custom command or an existing background agent');
+    if (transport === 'chat') {
+      const capability = (await chats.capabilities(host.id)).find((item) => item.provider === provider);
+      if (capability?.status !== 'supported') throw new Error(`${capability?.reason || 'Structured chat is unavailable'}. Select Terminal in the launch dialog to use the existing CLI flow.`);
+    }
     if (input.recoverSitrep !== undefined && input.recoverSitrep !== true) throw new Error('Invalid SitRep recovery flag');
     if (input.recoverSitrep && !isolated) throw new Error('SitRep recovery requires an owned worktree');
     if (isolated && (isTerminal || input.conversationId || input.agentId || !/^[a-f0-9]{32}$/.test(isolated.operationId || '') || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(isolated.slug || '') || typeof isolated.repository !== 'string' || isolated.repository.length > 4096 || typeof isolated.baseRef !== 'string' || isolated.baseRef.length > 200)) throw new Error('Invalid isolated task');
     const created = await runRemote({
-      action: isolated ? 'worktree_launch' : 'create', provider,
+      action: isolated ? 'worktree_launch' : 'create', provider, transport,
+      ...(!isolated && transport === 'chat' ? { managedName: `hq-${crypto.createHash('sha256').update(input.launchId || crypto.randomUUID()).digest('hex').slice(0, 12)}` } : {}),
+      ...(transport === 'chat' ? { sourceDigest: chatDigest, chatFiles, allowUpgrade: true } : {}),
       cwd: String(input.cwd || '').slice(0, 4096), title: String(input.title || '').slice(0, 100),
       conversationId: input.conversationId ? String(input.conversationId) : null,
       agentId: input.agentId ? String(input.agentId) : null,
@@ -331,6 +342,11 @@ function createService({ directory, home }) {
   }
 
   function worktrees(hostId) { return runRemote({ action: 'worktree_list' }, hostId); }
+  function assertManagedOwner(client, name, hostId) {
+    const session = hostCache.get(hostId)?.find((item) => item.id === name);
+    if (session?.transport === 'chat') return chats.assertSessionOwner(client, session.chatSessionId, hostId);
+    return terminals.assertSessionOwner(client, name, hostId);
+  }
   async function flashQueue() {
     if (flashFlight) return flashFlight;
     flashFlight = (async () => {
@@ -353,7 +369,7 @@ function createService({ directory, home }) {
   async function flashDecide(client, input) {
     if (!input || !['allow', 'deny'].includes(input.decision) || !TMUX_NAME.test(input.name || '') || !/^[a-f0-9]{32}$/.test(input.id || '')) throw new Error('Invalid Flash Traffic decision');
     const hostId = getHost(input.hostId).id;
-    terminals.assertSessionOwner(client, input.name, hostId);
+    assertManagedOwner(client, input.name, hostId);
     const terminal = terminals.sessions.get(`${hostId}/${input.name}`);
     if (terminal && (terminal.connection !== 'connected' || terminal.exitCode !== null)) throw new Error('Target terminal is disconnected or exited');
     const current = await runRemote({ action: 'flash_list' }, hostId);
@@ -373,7 +389,7 @@ function createService({ directory, home }) {
     if (action !== 'diff_files' && !/^[a-f0-9]{64}$/.test(input.fileId || '')) throw new Error('Invalid changed file');
     if (action === 'diff_hunk' && (!/^[a-f0-9]{64}$/.test(input.revision || '') || !/^[a-f0-9]{64}$/.test(input.hunkId || '') || !['stage', 'revert'].includes(input.operation))) throw new Error('Invalid hunk action');
     const hostId = getHost(input.hostId).id;
-    if (action === 'diff_hunk') terminals.assertSessionOwner(client, input.name, hostId);
+    if (action === 'diff_hunk') assertManagedOwner(client, input.name, hostId);
     return runRemote({ action, name: input.name, operationId: input.operationId, ...(action === 'diff_files' ? {} : { fileId: input.fileId }), ...(action === 'diff_hunk' ? { revision: input.revision, hunkId: input.hunkId, operation: input.operation } : {}) }, hostId);
   }
 
@@ -381,7 +397,7 @@ function createService({ directory, home }) {
     if (!input || !TMUX_NAME.test(input.name || '') || !/^[a-f0-9]{32}$/.test(input.operationId || '') || typeof input.repository !== 'string' || (input.repository && !input.repository.startsWith('/')) || input.repository.length > 4096 || typeof input.testCommand !== 'string' || input.testCommand.length > 500) throw new Error('Invalid SitRep preview request');
     const sourceHostId = getHost(input.sourceHostId).id;
     const targetHostId = getHost(input.targetHostId).id;
-    if (input.testCommand) terminals.assertSessionOwner(client, input.name, sourceHostId);
+    if (input.testCommand) assertManagedOwner(client, input.name, sourceHostId);
     const source = await runRemote({ action: 'sitrep_source_preview', name: input.name, operationId: input.operationId, testCommand: input.testCommand }, sourceHostId);
     const repository = input.repository || (sourceHostId === targetHostId ? source.source.repository : '');
     if (!repository) throw new Error('Enter the primary Git checkout on the target host');
@@ -395,7 +411,7 @@ function createService({ directory, home }) {
   async function launchSitrep(client, input) {
     const preview = sitrepPreviews.get(input?.id);
     if (!preview || Date.now() - preview.createdAt > 15 * 60_000 || !/^[a-f0-9]{32}$/.test(input?.operationId || '') || (preview.launchOperationId && preview.launchOperationId !== input.operationId)) throw new Error('SitRep preview expired or operation changed; preview again');
-    terminals.assertSessionOwner(client, preview.name, preview.sourceHostId);
+    assertManagedOwner(client, preview.name, preview.sourceHostId);
     const field = (value, max) => { if (typeof value !== 'string' || value.length > max || value.includes('\0')) throw new Error('Invalid SitRep text'); return value.trim(); };
     const objective = field(input.objective, 2000);
     const summary = field(input.summary, 4000);
@@ -424,6 +440,12 @@ function createService({ directory, home }) {
   async function action(client, action, name, hostId) {
     const host = getHost(hostId);
     if (!['interrupt', 'stop'].includes(action) || !TMUX_NAME.test(name)) throw new Error('Invalid session name');
+    const unit = hostCache.get(host.id)?.find((item) => item.id === name);
+    if (unit?.transport === 'chat') {
+      const record = chats.assertSessionOwner(client, unit.chatSessionId, host.id);
+      const handle = [...record.handles].find((id) => chats.handles.get(id)?.client.id === client.id);
+      return chats.submit(client, handle, { protocolVersion: 1, commandId: crypto.randomUUID(), operation: action, sessionId: unit.chatSessionId, payload: {} });
+    }
     terminals.assertSessionOwner(client, name, host.id);
     const pending = action === 'stop' ? await runRemote({ action: 'flash_list' }, host.id).catch(() => []) : [];
     const result = await runRemote({ action, name }, host.id);
@@ -521,7 +543,7 @@ function createService({ directory, home }) {
       results.push(...await Promise.all(sessions.slice(index, index + 4).map(async (session) => {
         if (!session.canAttach) return { key: session.key, text: 'This process has no attachable terminal.', sampledAt: null, error: true };
         try {
-          const mirror = await terminals.preview(session.id, session.hostId);
+          const mirror = session.transport === 'chat' ? (await chatText(session, 100)).text : await terminals.preview(session.id, session.hostId);
           const text = mirror === null ? (await runRemote({ action: 'preview', name: session.id }, session.hostId)).text : mirror;
           return { key: session.key, text, sampledAt: Date.now(), error: false };
         } catch { return { key: session.key, text: 'Snapshot unavailable. Check this theater or refresh inventory.', sampledAt: null, error: true }; }
@@ -529,13 +551,20 @@ function createService({ directory, home }) {
     }
     return results;
   }
+  async function chatText(session, limit = 200) {
+    const first = await chats.read(session.hostId, session.chatSessionId, 0, 1);
+    const after = Math.max(first.retainedFrom - 1, first.latestCursor - limit);
+    const page = await chats.read(session.hostId, session.chatSessionId, after, limit);
+    const text = page.events.map((event) => event.type === 'message.completed' ? `${event.data.role}: ${event.data.text}` : event.type === 'tool.completed' ? `${event.data.name}: ${event.data.output}` : event.type === 'error' ? event.data.message : '').filter(Boolean).join('\n');
+    return { text: text.slice(-100000), truncated: after > 0 || page.hasMore || text.length > 100000 };
+  }
   async function searchHistory(query, keys) {
     if (typeof query !== 'string' || query.length < 3 || query.length > 200 || query.includes('\0') || !Array.isArray(keys) || keys.length > 200) throw new Error('History search needs 3–200 characters and up to 200 unit keys');
     const sessions = [...new Set(keys)].map(cachedSession).filter((session) => session.canAttach);
     const selected = sessions.slice(0, 8), matches = [], errors = [];
     let truncated = sessions.length > selected.length;
     for (let index = 0; index < selected.length; index += 2) {
-      const results = await Promise.allSettled(selected.slice(index, index + 2).map((session) => runRemote({ action: 'history', name: session.id }, session.hostId)));
+      const results = await Promise.allSettled(selected.slice(index, index + 2).map((session) => session.transport === 'chat' ? chatText(session) : runRemote({ action: 'history', name: session.id }, session.hostId)));
       results.forEach((result, offset) => {
         const session = selected[index + offset];
         if (result.status === 'rejected') { errors.push(session.key); return; }

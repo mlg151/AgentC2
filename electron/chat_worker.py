@@ -11,7 +11,9 @@ import socket
 import socketserver
 import stat
 import struct
+import subprocess
 import threading
+import time
 import uuid
 
 from chat_adapters import ProviderRejected, create_adapter, probe_capabilities
@@ -53,11 +55,12 @@ class Worker:
             return [self.probe(provider) for provider in CONTRACT["providers"]]
         if action == "list":
             fields(request, ["protocolVersion", "action"])
-            return self.journal.list_sessions()
+            return [dict(session, canStop=session["id"] in self.adapters) for session in self.journal.list_sessions()]
         if action == "history":
             fields(request, ["protocolVersion", "action", "sessionId", "after", "limit"], ["protocolVersion", "action", "sessionId"])
             result = self.journal.history(request["sessionId"], request.get("after", 0), request.get("limit", 200))
             result["pendingRequests"] = self.journal.pending_requests(request["sessionId"])
+            result["session"]["canStop"] = request["sessionId"] in self.adapters
             return result
         if action == "receipt":
             fields(request, ["protocolVersion", "action", "commandId"])
@@ -99,6 +102,15 @@ class Worker:
                     with self.lock:
                         self.adapters[identifier] = adapter
                     result = adapter.start()
+                    if command["payload"].get("instructions"):
+                        deadline = time.monotonic() + 120
+                        while self.journal.history(identifier, limit=1)["session"]["state"] == "starting":
+                            if time.monotonic() >= deadline:
+                                raise TimeoutError("Initial instructions were not sent because provider history is still loading")
+                            time.sleep(0.05)
+                        # A separate durable, deterministic command protects the initial
+                        # prompt from duplicate creates and exposes uncertain dispatch.
+                        self.handle(dict(protocolVersion=1, action="command", command=dict(protocolVersion=1, commandId=str(uuid.uuid5(uuid.UUID(command["commandId"]), "initial-instructions")), operation="send", sessionId=identifier, payload=dict(text=command["payload"]["instructions"]))))
                 else:
                     with self.lock:
                         adapter = self.adapters.get(identifier)
@@ -106,6 +118,11 @@ class Worker:
                         raise ProviderRejected("This worker no longer owns a live provider process; inspect history before resuming")
                     if operation == "stop":
                         result = adapter.stop()
+                        name = session.get("managedName")
+                        if name:
+                            tagged = subprocess.run(["tmux", "show-options", "-qv", "-t", name, "@hq_chat_session_id"], capture_output=True, text=True, timeout=5)
+                            if tagged.returncode == 0 and tagged.stdout.strip() == identifier:
+                                subprocess.run(["tmux", "kill-session", "-t", name], capture_output=True, timeout=5, check=True)
                         self.journal.append(identifier, "session.updated", dict(state="stopped", detail="Managed provider stopped"))
                     elif operation == "send":
                         result = adapter.send(command["payload"]["text"], command["commandId"])

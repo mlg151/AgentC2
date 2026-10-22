@@ -179,7 +179,7 @@ function validateCachedUnits(value) {
       const id = text(unit.id, 200);
       if (!unit.key.endsWith(`:${id}`)) throw new Error('Cached unit identity changed');
       const updatedAt = unit.updatedAt && Number.isFinite(Date.parse(unit.updatedAt)) ? text(unit.updatedAt, 80) : null;
-      return { key: unit.key, id, provider: unit.provider, kind: unit.kind, title: text(unit.title || '', 150), cwd: text(unit.cwd || '', 500), updatedAt, state: text(unit.state || '', 40), managed: Boolean(unit.managed), canAttach: Boolean(unit.canAttach), canResume: Boolean(unit.canResume), canInterrupt: Boolean(unit.canInterrupt), canStop: Boolean(unit.canStop), exitCode: Number.isInteger(unit.exitCode) ? unit.exitCode : null, presetName: text(unit.presetName || '', 100), presetId: text(unit.presetId || '', 80), roeProfile: ['full', 'gated', 'provider-default'].includes(unit.roeProfile) ? unit.roeProfile : 'unknown', branch: text(unit.branch || '', 200), repository: text(unit.repository || '', 500), worktreeOperation: text(unit.worktreeOperation || '', 32) };
+      return { transport: unit.transport === 'chat' && /^chat-[a-f0-9]{32}$/.test(unit.chatSessionId || '') ? 'chat' : 'terminal', chatSessionId: /^chat-[a-f0-9]{32}$/.test(unit.chatSessionId || '') ? unit.chatSessionId : undefined, providerSessionId: typeof unit.providerSessionId === 'string' ? text(unit.providerSessionId, 200) : undefined, key: unit.key, id, provider: unit.provider, kind: unit.kind, title: text(unit.title || '', 150), cwd: text(unit.cwd || '', 500), updatedAt, state: text(unit.state || '', 40), managed: Boolean(unit.managed), canAttach: Boolean(unit.canAttach), canResume: Boolean(unit.canResume), canInterrupt: Boolean(unit.canInterrupt), canStop: Boolean(unit.canStop), exitCode: Number.isInteger(unit.exitCode) ? unit.exitCode : null, presetName: text(unit.presetName || '', 100), presetId: text(unit.presetId || '', 80), roeProfile: ['full', 'gated', 'provider-default'].includes(unit.roeProfile) ? unit.roeProfile : 'unknown', branch: text(unit.branch || '', 200), repository: text(unit.repository || '', 500), worktreeOperation: text(unit.worktreeOperation || '', 32) };
     });
   }
   return cached;
@@ -242,7 +242,7 @@ class Store {
     // Persist only a bounded summary. Terminal output, event details, and
     // transcripts must never enter workspace.json through inventory caching.
     const summary = sessions.filter((unit) => !this.data.deletedSessions.includes(unit.key)).slice(0, 200).map((unit) => ({
-      key: unit.key, id: unit.id, provider: unit.provider, kind: unit.kind,
+      transport: unit.transport, chatSessionId: unit.chatSessionId, providerSessionId: unit.providerSessionId, key: unit.key, id: unit.id, provider: unit.provider, kind: unit.kind,
       title: String(unit.title || '').slice(0, 150), cwd: String(unit.cwd || '').slice(0, 500),
       updatedAt: unit.updatedAt, state: String(unit.state || '').slice(0, 40),
       managed: unit.managed, canAttach: unit.canAttach, canResume: unit.canResume,
