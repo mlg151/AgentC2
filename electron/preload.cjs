@@ -54,6 +54,7 @@ contextBridge.exposeInMainWorld('agentHQ', {
   takeChat: (id) => ipcRenderer.invoke('chat:take', id),
   submitChat: (id, command) => ipcRenderer.invoke('chat:submit', id, command),
   chatReceipt: (id, commandId) => ipcRenderer.invoke('chat:receipt', id, commandId),
+  pruneChat: (id) => ipcRenderer.invoke('chat:prune', id),
   closeChat: (id) => ipcRenderer.invoke('chat:close', id),
   onChatEvents: (callback) => {
     const listener = (_event, value) => callback(value);

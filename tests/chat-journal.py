@@ -164,6 +164,12 @@ class JournalTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "confirmed stopped"):
             self.journal.prune_transcript(self.identifier)
         self.journal.append(self.identifier, "session.updated", dict(state="stopped", detail="Stopped"))
+        with self.assertRaisesRegex(ValueError, "pending commands"):
+            self.journal.prune_transcript(self.identifier)
+        for receipt in self.journal.history(self.identifier)["pendingCommands"]:
+            if receipt["state"] == "accepted":
+                self.journal.command_state(receipt["commandId"], "dispatching")
+            self.journal.command_state(receipt["commandId"], "completed", {})
         last = self.journal.history(self.identifier)["cursor"]
         self.journal.prune_transcript(self.identifier)
         page = self.journal.history(self.identifier)

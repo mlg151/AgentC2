@@ -24,7 +24,7 @@ const path = require('node:path');
     const listener = net.createServer().listen(0, '127.0.0.1'); await once(listener, 'listening'); const port = listener.address().port; await new Promise((resolve) => listener.close(resolve));
     const url = `http://127.0.0.1:${port}`; await gateway.configure({ enabled: true, port, url });
     const secret = crypto.randomBytes(32).toString('base64url'); gateway.data.devices.push({ id: crypto.randomUUID(), name: 'Filter QA phone', secretHash: crypto.createHash('sha256').update(secret).digest('hex'), expiresAt: Date.now() + 60000 });
-    browser = await chromium.launch({ executablePath: process.env.AGENTC2_CHROMIUM || path.join(os.homedir(), '.cache/ms-playwright/chromium-1248/chrome-linux64/chrome'), headless: true, args: ['--no-sandbox'] });
+    browser = await chromium.launch({ executablePath: process.env.AGENTC2_CHROMIUM || chromium.executablePath(), headless: true, args: ['--no-sandbox'] });
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } }); await context.addCookies([{ name: 'agenthq-test', value: secret, url, httpOnly: true, sameSite: 'Strict' }]);
     const page = await context.newPage(), errors = []; page.on('pageerror', (error) => errors.push(error.message)); page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
     await page.goto(url); await page.locator('.phone-session-row').filter({ hasText: 'Alpha managed' }).waitFor();

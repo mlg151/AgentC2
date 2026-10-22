@@ -61,7 +61,7 @@ for line in sys.stdin:
             approved = message.get("result", {}).get("decision") == "accept"
             if approved:
                 (root / "approved.txt").write_text("Approved fixture write")
-            item_event(dict(id="tool-one", type="commandExecution", command="fixture write", cwd=str(root), commandActions=[], status="completed" if approved else "declined", aggregatedOutput="Wrote fixture" if approved else "Permission denied", exitCode=0 if approved else 1), True)
+            item_event(dict(id="tool-" + turn_id, type="commandExecution", command="fixture write", cwd=str(root), commandActions=[], status="completed" if approved else "declined", aggregatedOutput="Wrote fixture" if approved else "Permission denied", exitCode=0 if approved else 1), True)
             finish(text="Fixture approved" if approved else "Fixture denied")
         else:
             (root / "answers.json").write_text(json.dumps(message["result"]))
@@ -97,13 +97,15 @@ for line in sys.stdin:
         item_event(dict(id="user-" + turn_id, type="userMessage", content=[dict(type="text", text=text)]), True)
         if text in ("approval", "question", "secret"):
             if text == "approval":
-                item_event(dict(id="tool-one", type="commandExecution", command="fixture write", cwd=str(root), commandActions=[], status="inProgress"))
-                interactive[100] = "approval"
-                write(dict(id=100, method="item/commandExecution/requestApproval", params=dict(threadId=thread_id, turnId=turn_id, itemId="tool-one", command="fixture write", cwd=str(root), startedAtMs=0)))
+                item_event(dict(id="tool-" + turn_id, type="commandExecution", command="fixture write", cwd=str(root), commandActions=[], status="inProgress"))
+                interactive[100 + turn_number * 2] = "approval"
+                write(dict(id=100 + turn_number * 2, method="item/commandExecution/requestApproval", params=dict(threadId=thread_id, turnId=turn_id, itemId="tool-" + turn_id, command="fixture write", cwd=str(root), startedAtMs=0)))
             else:
-                interactive[101] = "question"
+                interactive[101 + turn_number * 2] = "question"
                 question = dict(id="choice", header="Choice", question="Which option?", isSecret=text == "secret", options=[dict(label="One", description="First choice"), dict(label="Two", description="Second choice")])
-                write(dict(id=101, method="item/tool/requestUserInput", params=dict(threadId=thread_id, turnId=turn_id, itemId="question-one", isBlocking=True, questions=[question])))
+                write(dict(id=101 + turn_number * 2, method="item/tool/requestUserInput", params=dict(threadId=thread_id, turnId=turn_id, itemId="question-" + turn_id, isBlocking=True, questions=[question])))
+        elif text == "dev-server":
+            finish(text="Development server " + settings["devUrl"] + "\n")
         elif text == "hold":
             pass
         else:

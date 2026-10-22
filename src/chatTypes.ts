@@ -88,6 +88,7 @@ export interface ChatApi {
   submit(id: string, command: ChatCommand): Promise<ChatReceipt>;
   receipt(id: string, commandId: string): Promise<ChatReceipt>;
   close(id: string): Promise<void>;
+  prune(id: string): Promise<ChatPage>;
   onEvents(callback: (update: ChatUpdate) => void): () => void;
   onState(callback: (state: ChatClientState) => void): () => void;
 }

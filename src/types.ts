@@ -158,6 +158,7 @@ export interface AgentHQApi {
   submitChat(id: string, command: ChatCommand): Promise<ChatReceipt>;
   chatReceipt(id: string, commandId: string): Promise<ChatReceipt>;
   closeChat(id: string): Promise<void>;
+  pruneChat(id: string): Promise<ChatPage>;
   onChatEvents(callback: (update: ChatUpdate) => void): () => void;
   onChatState(callback: (state: ChatClientState) => void): () => void;
   listWorktrees(hostId: string): Promise<WorktreeRecord[]>;

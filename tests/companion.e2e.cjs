@@ -82,7 +82,7 @@ async function freePort() {
     app = await _electron.launch({ executablePath: packaged || require('electron'), args: [...(packaged ? [] : ['.']), `--user-data-dir=${path.join(directory, 'browser')}`], cwd: root, env: { ...process.env, NODE_ENV: 'production', AGENTC2_HOST: host, AGENT_HQ_DATA_DIR: directory } });
     const desktop = await app.firstWindow();
     desktop.on('pageerror', (error) => errors.push(`desktop: ${error.message}`));
-    await desktop.locator('.session-row').filter({ hasText: marker }).waitFor({ timeout: 60000 });
+    await desktop.locator('.session-row').filter({ has: desktop.getByText(marker, { exact: true }) }).waitFor({ timeout: 60000 });
     await desktop.locator('.session-pane:visible .terminal-panel.is-attached').waitFor({ timeout: 30000 });
     assert.equal((await desktop.evaluate(() => window.agentHQ.remoteStatus())).enabled, false);
     const port = await freePort();

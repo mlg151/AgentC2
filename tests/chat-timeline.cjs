@@ -11,7 +11,7 @@ function load(file) {
   return exports;
 }
 const { emptyChatTimeline: empty, reduceChatTimeline: reduce } = load('chatTimeline.ts');
-const { chatLink, chatCommandId } = load('chatClient.ts');
+const { chatLink, chatCommandId, companionChatApi } = load('chatClient.ts');
 function event(sequence, type, data, itemId = 'message-one') {
   return { protocolVersion: 1, sessionId: 'chat-' + 'a'.repeat(32), provider: 'codex', providerSessionId: 'native-one', turnId: 'turn-one', itemId, sequence, timestamp: '2026-10-22T00:00:00.000Z', type, data };
 }
@@ -72,4 +72,13 @@ assert.equal(chatLink('https://example.com/docs'), 'https://example.com/docs');
 assert.equal(chatLink('HTTP://example.com'), 'http://example.com/');
 for (const value of ['javascript:alert(1)', 'data:text/html,test', 'file:///etc/passwd', 'mailto:test@example.com', '/relative', '//example.com']) assert.equal(chatLink(value), undefined);
 for (let index = 0; index < 20; index++) assert.match(chatCommandId(), /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
+const calls = [];
+const companionApi = companionChatApi({ request: (method, ...args) => { calls.push(JSON.parse(JSON.stringify({ method, args }))); return Promise.resolve({}); } });
+void companionApi.ready('view'); void companionApi.ready('view', 0); void companionApi.ready('view', 27); void companionApi.history('view');
+assert.deepEqual(calls, [
+  { method: 'chat:ready', args: ['view'] },
+  { method: 'chat:ready', args: ['view', 0] },
+  { method: 'chat:ready', args: ['view', 27] },
+  { method: 'chat:history', args: ['view', 0, 200] },
+], 'Optional companion cursors must remain omitted, never serialized to null');
 console.log('PASS chat stream/final reconciliation, replay identity, backward history order, tool errors, request expiry, pruning, cumulative usage, and URL safety');

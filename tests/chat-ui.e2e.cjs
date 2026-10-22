@@ -13,8 +13,8 @@ const timestamp = '2026-10-22T12:00:00.000Z';
 const caps = { provider: 'codex', version: '0.163.0 fixture', status: 'supported', reason: null, ...Object.fromEntries(contract.capabilities.map((name) => [name, ['streaming','history','resume','interrupt','approvals','questions'].includes(name)])) };
 const session = { id, canStop: true, provider: 'codex', providerSessionId: 'native-fixture', title: 'Mission review', cwd: '/workspace/agentc2', roeProfile: 'gated', state: 'idle', activeTurnId: null, createdAt: timestamp, updatedAt: timestamp, capabilities: caps };
 const rows = [], pending = [], receipts = new Map(), commands = [], views = new Map(), errors = [];
-let delay = false, drop = false, accepted = 0;
-function append(type, data, itemId = null) { rows.push({ protocolVersion: 1, sessionId: id, sequence: rows.length + 1, timestamp, provider: 'codex', providerSessionId: 'native-fixture', turnId: 'turn-fixture', itemId, type, data }); }
+let delay = false, drop = false, accepted = 0, sequence = 0, retainedFrom = 1;
+function append(type, data, itemId = null) { rows.push({ protocolVersion: 1, sessionId: id, sequence: ++sequence, timestamp, provider: 'codex', providerSessionId: 'native-fixture', turnId: 'turn-fixture', itemId, type, data }); }
 for (let i = 0; i < 210; i++) append('provider.event', { method: 'fixture', payload: {} });
 append('message.completed', { role: 'assistant', text: '## Review complete\nThe worker keeps running when you detach.\n\n| Check | Result |\n| --- | --- |\n| Replay | Verified |\n| Control | Scoped |\n\n```typescript\nawait chat.ready(cursor);\n```\n\n[Documentation](https://example.com/docs)\n\n<script>window.qaXss = 1</script>\n[bad](javascript:alert(1)) ![remote](https://example.invalid/pixel.png)' }, 'intro');
 append('tool.started', { name: 'git diff --stat', input: '{"cwd":"/workspace/agentc2"}' }, 'tool');
@@ -23,8 +23,9 @@ append('turn.completed', { outcome: 'completed', detail: 'Review the changes bef
 const chats = new Chats({ resolveHost: () => 'fixture', interval: 50, emit: (client, event, value) => { const page = views.get(client); if (page && !page.isClosed()) void page.evaluate(({ event, value }) => window.dispatchEvent(new CustomEvent(event, { detail: value })), { event, value }).catch(() => {}); }, remote: async (_host, request) => {
   if (request.action === 'history') {
     const selected = rows.filter((row) => row.sequence > request.after).slice(0, request.limit);
-    return { session: structuredClone(session), events: structuredClone(selected), cursor: selected.at(-1)?.sequence || request.after, latestCursor: rows.length, retainedFrom: 1, truncated: false, hasMore: rows.length > (selected.at(-1)?.sequence || request.after), pendingRequests: structuredClone(pending), pendingCommands: [] };
+    return { session: structuredClone(session), events: structuredClone(selected), cursor: selected.at(-1)?.sequence || Math.max(request.after, retainedFrom - 1), latestCursor: sequence, retainedFrom, truncated: request.after < retainedFrom - 1, hasMore: rows.some((row) => row.sequence > (selected.at(-1)?.sequence || Math.max(request.after, retainedFrom - 1))), pendingRequests: structuredClone(pending), pendingCommands: [] };
   }
+  if (request.action === 'prune') { assert.equal(session.state, 'stopped'); rows.splice(0); retainedFrom = sequence + 1; return { pruned: true }; }
   if (request.action === 'receipt') { if (!receipts.has(request.commandId)) throw new Error('No receipt recorded'); return receipts.get(request.commandId); }
   if (request.action === 'command') {
     const command = request.command; commands.push(command);
@@ -58,7 +59,7 @@ function request(type, data) {
   try {
     server = await createServer({ root: path.resolve(__dirname, '..'), server: { port: 0, strictPort: false, host: '127.0.0.1' } }); await server.listen();
     const address = server.httpServer.address();
-    browser = await chromium.launch({ executablePath: process.env.AGENTC2_CHROMIUM || path.join(os.homedir(), '.cache/ms-playwright/chromium-1248/chrome-linux64/chrome'), headless: true, args: ['--no-sandbox'] });
+    browser = await chromium.launch({ executablePath: process.env.AGENTC2_CHROMIUM || chromium.executablePath(), headless: true, args: ['--no-sandbox'] });
     async function pageFor(client, viewport) {
       const context = await browser.newContext({ viewport }); const page = await context.newPage(); views.set(client.id,page);
       page.on('pageerror', (error)=>errors.push(error.message)); page.on('console',(message)=>{if(message.type()==='error') errors.push(message.text());});
@@ -95,6 +96,18 @@ function request(type, data) {
     const retryId=commands.at(-1).commandId; drop=false; await desktop.getByRole('button',{name:'Retry same action'}).click();
     await poll(()=>accepted===4,'Explicit retry did not settle'); assert.equal(commands.at(-1).commandId,retryId);
     assert.equal(await phone.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'Mobile page overflows horizontally');
+    await desktop.getByText('Transcript storage', { exact: true }).click();
+    assert.equal(await desktop.getByRole('button', { name: 'Remove managed transcript', exact: true }).isDisabled(), true);
+    session.state = 'stopped'; session.canStop = false;
+    await poll(async () => await desktop.getByRole('button', { name: 'Remove managed transcript', exact: true }).isEnabled(), 'Stopped transcript removal unavailable');
+    desktop.once('dialog', (dialog) => dialog.accept());
+    await desktop.getByRole('button', { name: 'Remove managed transcript', exact: true }).click();
+    await desktop.getByText('Earlier transcript content was removed under the retention policy.').waitFor();
+    assert.equal(await desktop.getByText('Streamed final answer', { exact: true }).count(), 0);
+    assert.equal(receipts.get(retryId).state, 'completed', 'Pruning removed a deduplication receipt');
+    await phone.getByRole('button', { name: 'Attach chat', exact: true }).click();
+    await phone.getByText('Earlier transcript content was removed under the retention policy.').waitFor();
+    assert.equal(await phone.getByText('Streamed final answer', { exact: true }).count(), 0);
     assert.deepEqual(errors,[]); console.log(`PASS desktop/mobile Markdown, streaming identity, history, request decisions, ownership, safe content, delayed acknowledgements, and explicit deduplicated retry. Screenshots: ${directory}`);
   } finally { chats.closeAll(); await browser?.close(); await server?.close(); }
 })().catch((error)=>{console.error(error);process.exitCode=1;});

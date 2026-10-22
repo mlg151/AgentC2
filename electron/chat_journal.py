@@ -277,6 +277,8 @@ class Journal:
             row = self._session(identifier)
             if row["state"] not in ("stopped", "failed"):
                 raise ValueError("Only confirmed stopped or failed sessions can be pruned")
+            if self.db.execute("SELECT 1 FROM commands WHERE session_id=? AND state IN ('accepted','dispatching') LIMIT 1", (identifier,)).fetchone():
+                raise ValueError("Wait for pending commands to settle before removing transcript content")
             self.db.execute("DELETE FROM events WHERE session_id=?", (identifier,))
             self.db.execute("DELETE FROM requests WHERE session_id=?", (identifier,))
             self.db.execute("UPDATE sessions SET retained_from=last_sequence+1 WHERE id=?", (identifier,))

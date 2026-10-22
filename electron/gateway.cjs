@@ -258,6 +258,7 @@ class Gateway {
       case 'chat:take': return service.chats.take(client, args[0]);
       case 'chat:submit': return service.chats.submit(client, args[0], args[1]);
       case 'chat:receipt': return service.chats.receipt(client, args[0], args[1]);
+      case 'chat:prune': return service.chats.prune(client, args[0]);
       case 'chat:close': return service.chats.close(client, args[0]);
       case 'interrupt': case 'stop': return this.once(device, request, () => service.action(client, request.method, args[0], args[1]));
       case 'terminal:open': {

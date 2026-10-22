@@ -50,6 +50,7 @@ export function ChatView({ api, sessionId, hostId, enabled = true, connected = t
   const [connecting, setConnecting] = useState(false);
   const [taking, setTaking] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [pruning, setPruning] = useState(false);
   const [following, setFollowing] = useState(true);
   const [attempt, setAttempt] = useState(0);
   const [receiptAttempt, setReceiptAttempt] = useState(0);
@@ -160,6 +161,18 @@ export function ChatView({ api, sessionId, hostId, enabled = true, connected = t
     finally { if (epoch === generation.current) setLoadingHistory(false); }
   }
 
+  async function pruneTranscript() {
+    if (!handle.current || !canControl || pruning || !window.confirm('Remove the managed transcript and tool/request content from this SSH host? Native provider history is separate and stays available. Session identities and command receipts are retained to prevent duplicate retries.')) return;
+    const epoch = generation.current;
+    setPruning(true); setError('');
+    try {
+      const page = await api.prune(handle.current);
+      if (epoch === generation.current) apply(page);
+    } catch (cause) {
+      if (epoch === generation.current) setError(`Transcript removal could not be confirmed. Reopen chat to check retained content. ${String(cause)}`);
+    } finally { setPruning(false); }
+  }
+
   const active = session?.state === 'running' || session?.state === 'waiting';
   const sendable = writable && session?.state === 'idle' && !pending && Boolean(draft.trim());
   const unknown = pendingCommands.filter((receipt) => receipt.state === 'unknown');
@@ -178,5 +191,6 @@ export function ChatView({ api, sessionId, hostId, enabled = true, connected = t
     <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); if (sendable) void submit({ protocolVersion: 1, commandId: chatCommandId(), operation: 'send', sessionId, payload: { text: draft } }); }}><label className="sr-only" htmlFor={`chat-draft-${sessionId}`}>Message to agent</label><textarea id={`chat-draft-${sessionId}`} aria-label="Message to agent" rows={3} maxLength={200000} value={draft} disabled={!writable} placeholder={!wanted ? 'Attach this chat to continue' : !canControl ? 'Take control to send a message' : session?.state === 'unknown' ? 'Inspect the uncertain session before resuming' : 'Message your agent…'} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing && sendable) { event.preventDefault(); void submit({ protocolVersion: 1, commandId: chatCommandId(), operation: 'send', sessionId, payload: { text: draft } }); } }} /><div className="chat-composer-footer"><span>Text messages · Ctrl/⌘ + Enter to send</span><div>{session?.capabilities.steering && session.state === 'running' && session.activeTurnId ? <button type="button" disabled={!writable || Boolean(pending) || !draft.trim()} onClick={() => void submit({ protocolVersion: 1, commandId: chatCommandId(), operation: 'steer', sessionId, payload: { text: draft, expectedTurnId: session.activeTurnId! } })}>Send to active turn</button> : null}<button className="button-primary" type="submit" disabled={!sendable}><Send size={15} />{pending?.command.operation === 'send' ? 'Sending…' : 'Send'}</button></div></div></form>
     <div className="chat-usage" aria-label="Chat usage"><span>{session?.provider || 'Agent'} · {session?.capabilities.version || 'Version unavailable'}</span><span>Tokens {timeline.usage?.totalTokens == null ? 'unknown' : timeline.usage.totalTokens.toLocaleString()}</span><span>Est. cost {timeline.usage?.costUsd == null ? 'unknown' : `$${timeline.usage.costUsd.toFixed(4)}`}</span><span>Context {timeline.usage?.contextUsedTokens == null || !timeline.usage.contextCapacityTokens ? 'unknown' : `${Math.round(timeline.usage.contextUsedTokens / timeline.usage.contextCapacityTokens * 100)}%`}</span></div>
     {session?.capabilities.reason ? <p className="chat-capability-note">{session.capabilities.reason}</p> : null}
+    <details className="chat-storage"><summary>Transcript storage</summary><p>Messages and tool/request content stay on the SSH host until you remove them. Native provider history is separate. Session identities and command receipts remain after removal to prevent duplicate retries.</p><button disabled={!canControl || pruning || Boolean(pending) || !session || !['stopped', 'failed'].includes(session.state) || pendingCommands.some((command) => command.state === 'accepted' || command.state === 'dispatching')} onClick={() => void pruneTranscript()}>{pruning ? 'Removing transcript…' : 'Remove managed transcript'}</button>{session && !['stopped', 'failed'].includes(session.state) ? <small>Stop this session before removing its managed transcript. Uncertain sessions require inspection first.</small> : null}</details>
   </div>;
 }

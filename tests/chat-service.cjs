@@ -18,28 +18,30 @@ const deferred = () => { let resolve; const promise = new Promise((done) => { re
 
 function fixture() {
   const events = new EventEmitter(), sent = [], commands = [], journal = [];
-  let fail = false, gate = null;
-  const append = (text) => journal.push({ protocolVersion: 1, sessionId, sequence: journal.length + 1, timestamp: '2026-10-22T12:00:00.000Z', provider: 'codex', providerSessionId: 'native-one', turnId: 'turn-one', itemId: 'message-one', type: 'message.delta', data: { text } });
+  let fail = false, gate = null, sequence = 0, retainedFrom = 1;
+  const currentSession = structuredClone(session);
+  const append = (text) => journal.push({ protocolVersion: 1, sessionId, sequence: ++sequence, timestamp: '2026-10-22T12:00:00.000Z', provider: 'codex', providerSessionId: 'native-one', turnId: 'turn-one', itemId: 'message-one', type: 'message.delta', data: { text } });
   append('First');
   const remote = async (hostId, request) => {
     if (fail) throw new Error('SSH offline');
     if (request.action === 'history') {
       if (gate?.action === 'history') await gate.promise;
       const rows = journal.filter((event) => event.sequence > request.after), list = rows.slice(0, request.limit);
-      return { session: structuredClone(session), events: structuredClone(list), cursor: list.at(-1)?.sequence || request.after, latestCursor: journal.length, hasMore: rows.length > list.length, retainedFrom: 1, truncated: false, pendingRequests: [], pendingCommands: [] };
+      return { session: structuredClone(currentSession), events: structuredClone(list), cursor: list.at(-1)?.sequence || Math.max(request.after, retainedFrom - 1), latestCursor: sequence, hasMore: rows.length > list.length, retainedFrom, truncated: request.after < retainedFrom - 1, pendingRequests: [], pendingCommands: [] };
     }
     if (request.action === 'command') {
       commands.push({ hostId, command: request.command });
       if (gate?.action === 'command') await gate.promise;
       return { commandId: request.command.commandId, sessionId, state: 'accepted', result: null, error: null };
     }
+    if (request.action === 'prune') { if (!['stopped', 'failed'].includes(currentSession.state)) throw new Error('Only confirmed stopped sessions can be pruned'); journal.splice(0); retainedFrom = sequence + 1; return { pruned: true }; }
     if (request.action === 'receipt') return { commandId: request.commandId, sessionId, state: 'completed', result: {}, error: null };
     if (request.action === 'capabilities') return contract.providers.map((provider) => ({ ...caps, provider }));
     if (request.action === 'list') return [structuredClone(session)];
     throw new Error('Unexpected fixture request');
   };
   const chats = new Chats({ remote, resolveHost: (hostId) => { if (!['alpha', 'beta'].includes(hostId)) throw new Error('Host unavailable'); return hostId; }, emit: (client, event, value) => { sent.push({ client, event, value }); events.emit('client', client, event, value); }, interval: 60000 });
-  return { chats, events, sent, commands, append, setFail: (value) => { fail = value; }, gate: (action) => { gate = { action, ...deferred() }; return gate; } };
+  return { chats, events, sent, commands, append, setState: (value) => { currentSession.state = value; }, setFail: (value) => { fail = value; }, gate: (action) => { gate = { action, ...deferred() }; return gate; } };
 }
 
 async function controllerTests() {
@@ -99,6 +101,23 @@ async function controllerTests() {
   assert.equal(late.chats.sessions.size, 0, 'A disconnected opening cannot resurrect a subscription');
 }
 
+async function retentionTests() {
+  const f = fixture(), desktop = { id: 'desktop', name: 'Desktop' }, phone = { id: 'phone', name: 'Phone' };
+  try {
+    const d = await f.chats.open(desktop, sessionId, 'alpha'), p = await f.chats.open(phone, sessionId, 'alpha');
+    await f.chats.ready(desktop, d); await f.chats.ready(phone, p);
+    await assert.rejects(f.chats.prune(phone, p), /Take control/);
+    await assert.rejects(f.chats.prune(desktop, d), /confirmed stopped/);
+    f.setState('stopped');
+    const page = await f.chats.prune(desktop, d);
+    assert.equal(page.retainedFrom, 2); assert.deepEqual(page.events, []);
+    assert.equal((await f.chats.history(phone, p, 0)).truncated, true);
+    assert.equal(f.sent.filter((item) => item.client === 'phone' && item.event === 'chat:events').at(-1).value.retainedFrom, 2);
+    f.chats.disconnect(phone.id);
+    assert.throws(() => f.chats.prune(phone, p), /disconnected/);
+  } finally { f.chats.closeAll(); }
+}
+
 async function gatewayTests() {
   const f = fixture(), directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agentc2-chat-gateway-'));
   const service = { chats: f.chats, events: f.events, store: { data: { settings: {}, workspace: { metadata: {} }, attention: [] } }, terminals: { handles: new Map(), disconnect() {} } };
@@ -142,5 +161,6 @@ async function gatewayTests() {
 (async () => {
   await controllerTests();
   await gatewayTests();
+  await retentionTests();
   console.log('PASS chat scope, control handoff fences, replay, reconnect, late-open cancellation, gateway authentication, and revocation');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

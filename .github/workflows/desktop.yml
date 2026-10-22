@@ -131,6 +131,21 @@ jobs:
       - run: python3 tests/worktree-diff.py
       - run: python3 tests/provider-telemetry.py
       - run: npx playwright-core install chromium
+      - name: Structured chat and managed companion regressions
+        run: |
+          node tests/chat-ui.e2e.cjs
+          node tests/companion-filters.e2e.cjs
+          xvfb-run -a node tests/chat-launch.e2e.cjs
+        env:
+          AGENTC2_QA_SCREENSHOT_DIR: ${{ runner.temp }}/agentc2-chat-screenshots
+      - name: Upload structured chat screenshots
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: Structured-chat-QA-linux
+          path: ${{ runner.temp }}/agentc2-chat-screenshots/*.png
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Terminal, workspace, and companion regressions
         run: xvfb-run -a dbus-run-session -- bash .github/scripts/test-linux-ssh.sh
 

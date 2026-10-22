@@ -17,6 +17,7 @@ export const desktopChatApi: ChatApi = {
   submit: (id, command) => window.agentHQ!.submitChat(id, command),
   receipt: (id, commandId) => window.agentHQ!.chatReceipt(id, commandId),
   close: (id) => window.agentHQ!.closeChat(id),
+  prune: (id) => window.agentHQ!.pruneChat(id),
   onEvents: (callback) => window.agentHQ!.onChatEvents(callback),
   onState: (callback) => window.agentHQ!.onChatState(callback),
 };
@@ -24,12 +25,15 @@ export const desktopChatApi: ChatApi = {
 export function companionChatApi(client: CompanionClient): ChatApi {
   return {
     open: (id, hostId) => client.request('chat:open', id, hostId),
-    ready: (id, after) => client.request('chat:ready', id, after),
-    history: (id, after, limit) => client.request('chat:history', id, after, limit),
+    // JSON array serialization changes undefined to null. Omit absent cursors
+    // so the shared service can distinguish initial tail loading from replay.
+    ready: (id, after) => after === undefined ? client.request('chat:ready', id) : client.request('chat:ready', id, after),
+    history: (id, after = 0, limit = 200) => client.request('chat:history', id, after, limit),
     take: (id) => client.request('chat:take', id),
     submit: (id, command) => client.request('chat:submit', id, command),
     receipt: (id, commandId) => client.request('chat:receipt', id, commandId),
     close: (id) => client.request('chat:close', id),
+    prune: (id) => client.request('chat:prune', id),
     onEvents: (callback) => client.on('chat:events', (value) => callback(value as Parameters<typeof callback>[0])),
     onState: (callback) => client.on('chat:state', (value) => callback(value as Parameters<typeof callback>[0])),
   };

@@ -9,8 +9,8 @@ function cursor(value) {
 // Remote processes belong to the worker. These records own only client views,
 // replay cursors, and input control, so disposing every view never stops work.
 class Chats {
-  constructor({ remote, resolveHost, emit, interval = 750 }) {
-    Object.assign(this, { remote, resolveHost, emit, interval });
+  constructor({ remote, resolveHost, emit, interval = 750, onEvents = () => {}, onDispose = () => {} }) {
+    Object.assign(this, { remote, resolveHost, emit, interval, onEvents, onDispose });
     this.sessions = new Map();
     this.handles = new Map();
     this.epochs = new Map();
@@ -103,6 +103,7 @@ class Chats {
     handle.cursor = page.cursor;
     handle.ready = true;
     handle.record.session = page.session;
+    this.onEvents(handle.record, page.events);
     handle.record.connection = 'connected';
     this.schedule(handle.record, page.hasMore ? 0 : this.interval);
     return { ...page, state: this.state(client, id) };
@@ -134,6 +135,7 @@ class Chats {
       record.session = page.session;
       record.latestCursor = page.latestCursor;
       record.retainedFrom = page.retainedFrom;
+      this.onEvents(record, page.events);
       for (const handle of handles) {
         if (!this.handles.has(handle.id) || handle.client.closed) continue;
         const events = page.events.filter((event) => event.sequence > handle.cursor);
@@ -192,6 +194,21 @@ class Chats {
     });
   }
 
+  prune(client, id) {
+    const { record } = this.get(client, id);
+    return this.exclusive(record, async () => {
+      this.get(client, id);
+      if (record.owner?.id !== client.id || record.connection !== 'connected') throw new Error('Take control of the connected chat before removing its transcript');
+      await this.request(record.hostId, 'prune', { sessionId: record.sessionId });
+      // Keep view cursors monotonic; the retention boundary tells every viewer
+      // to discard removed content on its next snapshot.
+      const page = await this.read(record.hostId, record.sessionId);
+      record.retainedFrom = page.retainedFrom;
+      await this.poll(record);
+      return page;
+    });
+  }
+
   close(client, id) {
     const handle = this.get(client, id);
     this.handles.delete(id);
@@ -202,6 +219,7 @@ class Chats {
       record.disposed = true;
       clearTimeout(record.timer);
       this.sessions.delete(record.key);
+      this.onDispose(record);
     } else this.publish(record);
   }
 

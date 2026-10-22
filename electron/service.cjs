@@ -194,6 +194,18 @@ function createService({ directory, home }) {
     },
     resolveHost: (hostId) => getHost(hostId).id,
     emit: (clientId, event, value) => events.emit('client', clientId, event, value),
+    onEvents: (record, chatEvents) => {
+      const name = record.session.managedName;
+      if (!TMUX_NAME.test(name || '')) return;
+      for (const event of chatEvents) {
+        const output = event.type === 'tool.completed' ? event.data.output : event.type === 'message.completed' ? event.data.text : '';
+        // Feed bounded chunks so links near the start of a long tool result
+        // remain discoverable by the existing terminal URL detector.
+        for (let offset = 0; offset < output.length; offset += 2048) tunnels.feed(getHost(record.hostId), `${record.hostId}/tmux:${name}`, output.slice(offset, offset + 2048));
+        if (output) tunnels.feed(getHost(record.hostId), `${record.hostId}/tmux:${name}`, '\n');
+      }
+    },
+    onDispose: (record) => { if (TMUX_NAME.test(record.session.managedName || '')) tunnels.release(`${record.hostId}/tmux:${record.session.managedName}`); },
   });
 
   const terminals = new Terminals({
@@ -504,6 +516,12 @@ function createService({ directory, home }) {
     return tunnels.list(sessionKey);
   }
   function openDevUrl(client, id, url) {
+    if (typeof id === 'string' && /^[A-Za-z0-9_-]{1,80}\/tmux:hq-[a-f0-9]{12}$/.test(id)) {
+      const session = cachedSession(id);
+      const record = chats.sessions.get(`${session.hostId}/${session.chatSessionId}`);
+      if (session.transport !== 'chat' || client.closed || !record || record.connection !== 'connected' || ![...record.handles].some((handleId) => chats.handles.get(handleId)?.client.id === client.id)) throw new Error('Open this connected chat before forwarding its development URL');
+      return tunnels.open(getHost(session.hostId), session.key, url);
+    }
     const { record } = terminals.get(client, id);
     const host = getHost(record.hostId);
     return tunnels.open(host, `${record.hostId}/tmux:${record.name}`, url);
