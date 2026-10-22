@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld('agentHQ', {
     ipcRenderer.on('sessions:deleted', listener);
     return () => ipcRenderer.removeListener('sessions:deleted', listener);
   },
+  renameSession: (key, title) => ipcRenderer.invoke('session:rename', key, title),
   onSessionPinned: (callback) => {
     const listener = (_event, key, pinned) => callback(key, pinned);
     ipcRenderer.on('session:pinned', listener);

@@ -11,8 +11,10 @@ function ElapsedBadge({ startedAt }: { startedAt?: string | null }) {
   return <span title={startedAt ? `Managed tmux session started ${new Date(startedAt).toLocaleString()}` : 'Start time unavailable'}>Unit elapsed {elapsedClock(startedAt, now)}</span>;
 }
 
-export function SessionPane({ session, visible, primary, focused, slot, callsign, diffOpen, onToggleDiff, onFocus, onAnchor, onCycle, onResume, onRefresh, onDeleteHistory }: { session: Session; visible: boolean; primary: boolean; focused: boolean; slot: 'anchor' | 'target'; callsign?: string; diffOpen: boolean; onToggleDiff: () => void; onFocus: () => void; onAnchor: () => void; onCycle: (direction: number) => void; onResume: (s: Session) => void; onRefresh: () => void; onDeleteHistory: (session: Session) => void }) {
+export function SessionPane({ session, visible, primary, focused, slot, callsign, diffOpen, renameTitle, onApplyRename, onToggleDiff, onFocus, onAnchor, onCycle, onResume, onRefresh, onDeleteHistory }: { session: Session; visible: boolean; primary: boolean; focused: boolean; slot: 'anchor' | 'target'; callsign?: string; diffOpen: boolean; renameTitle: string; onApplyRename: (title: string) => void; onToggleDiff: () => void; onFocus: () => void; onAnchor: () => void; onCycle: (direction: number) => void; onResume: (s: Session) => void; onRefresh: () => void; onDeleteHistory: (session: Session) => void }) {
   const [terminalId, setTerminalId] = useState<string | null>(null);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameInput, setRenameInput] = useState(renameTitle);
   const [wanted, setWanted] = useState(Boolean(session.canAttach));
   const [attempt, setAttempt] = useState(0);
   const [connecting, setConnecting] = useState(false);
@@ -67,6 +69,11 @@ export function SessionPane({ session, visible, primary, focused, slot, callsign
       {session.canAttach ? <button className="button-primary" disabled={busy || Boolean(terminalId) || connecting || session.stale} onClick={() => { setWanted(true); setAttempt((a) => a + 1); }}><TerminalSquare size={15} />{connecting ? 'Attaching…' : 'Attach'}</button> : null}
       {session.canResume ? <button className="button-primary" disabled={session.stale || busy} onClick={() => onResume(session)}><Play size={15} />Resume</button> : null}
       {session.kind === 'conversation' ? <button className="toolbar-button danger" disabled={session.stale || busy} onClick={() => onDeleteHistory(session)}><Trash2 size={14} />Delete history</button> : null}
+      {session.managed === true ? <button className="toolbar-button" disabled={session.stale || busy} onClick={() => setRenameOpen((value) => !value)}>{renameOpen ? 'Cancel rename' : 'Rename'}</button> : null}
+      {renameOpen ? <div className="rename-form" style={{ marginTop: 6, border: '1px solid #2c4157', borderRadius: 2, background: '#0d1520', padding: 6 }}>
+        <label className="rename-form-label">New name<input className="rename-input" value={renameInput} maxLength={100} disabled={renameInput === '' || renameInput.length > 100} onChange={(event) => setRenameInput(event.target.value)} aria-label="Session name" /></label>
+        <div className="inline-actions"><span className="text-button" aria-live="polite">{renameOpen ? 'Saving…' : 'Save rename'}</span><button className="text-button" onClick={() => void onApplyRename(renameInput)}>Save</button><button className="text-button" onClick={() => setRenameOpen(false)}>Cancel</button></div>
+      </div> : null}
       {session.canInterrupt ? <button className="toolbar-button" disabled={session.stale || busy} onClick={() => void window.agentHQ?.interrupt(session.id, session.hostId).catch(showError)}><Zap size={15} />Interrupt</button> : null}
       {session.canAttach ? <button className="toolbar-button" disabled={!terminalId || busy} onClick={() => setWanted(false)}><Link2Off size={15} />Detach</button> : null}
       {session.canStop ? <button className="toolbar-button danger" disabled={session.stale || busy} onClick={() => void stop()}><Square size={14} />Stop</button> : null}

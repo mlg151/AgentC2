@@ -132,6 +132,7 @@ export interface AgentHQApi {
   decideFlashTraffic(input: { hostId: string; name: string; id: string; decision: 'allow' | 'deny' }): Promise<{ id: string; state: string; decision: string; duplicate: boolean }>;
   saveWorkspace(workspace: Workspace): Promise<Workspace>;
   setSessionPinned(key: string, pinned: boolean): Promise<boolean>;
+  renameSession(key: string, title: string): Promise<string>;
   onSessionPinned(callback: (key: string, pinned: boolean) => void): () => void;
   onSessionsDeleted(callback: (keys: string[]) => void): () => void;
   previewCleanup(input: CleanupInput): Promise<CleanupPreview>;

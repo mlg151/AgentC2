@@ -506,6 +506,18 @@ function createService({ directory, home }) {
     events.emit('state:updated');
     return result;
   }
+  async function renameSession(key, title) {
+    validateSessionTitle(title);
+    const unit = [...hostCache.values()].flat().find((item) => item.key === key);
+    if (!unit) throw new Error('Session is unavailable. Refresh sessions before renaming it.');
+    if (cleanup.isDeleting(key)) throw new Error('History deletion is in progress; wait for its result');
+    if (store.data.deletedSessions.includes(key)) throw new Error('History has been deleted; refresh sessions');
+    const host = getHost(unit.hostId);
+    const remoteTitle = await runRemote({ action: 'rename', name: unit.id, title }, host.id);
+    void inventory().catch(() => {});
+    events.emit('state:updated');
+    return title;
+  }
   function cachedSession(key) {
     if (typeof key !== 'string' || key.length > 300) throw new Error('Invalid session key');
     const session = [...hostCache.values()].flat().find((item) => item.key === key);
@@ -551,6 +563,6 @@ function createService({ directory, home }) {
     }
     return { matches, searched: selected.length, total: sessions.length, truncated, errors };
   }
-  return { store, events, terminals, chats, tunnels, cleanup, exercises, inventory, health, create, worktrees, flashQueue, flashDecide, archiveWorktree, diffRequest, previewSitrep, launchSitrep, action, interruptFaults, resetFault, loopBreaker, uploadClipboardImage, devUrls, openDevUrl, saveSettings, previewOpOrder, enrollOpOrder, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
+  return { store, events, terminals, chats, tunnels, cleanup, exercises, inventory, health, create, worktrees, flashQueue, flashDecide, archiveWorktree, diffRequest, previewSitrep, launchSitrep, action, interruptFaults, resetFault, renameSession, loopBreaker, uploadClipboardImage, devUrls, openDevUrl, saveSettings, previewOpOrder, enrollOpOrder, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
 }
 module.exports = { createService };

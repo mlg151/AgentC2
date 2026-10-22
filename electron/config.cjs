@@ -148,6 +148,10 @@ function validateWorkspace(w) {
   const situation = { version: 1, anchorKey, targetKey, focusedPane, callsigns, groupBy: source.groupBy === 'repository' ? 'repository' : 'host', collapsedGroups, urgentFirst: Boolean(source.urgentFirst), rosterCollapsed: Boolean(source.rosterCollapsed), zen: Boolean(source.zen), ligatures: Boolean(source.ligatures), shortcuts, missionStartedAt };
   return { tabs, selectedKey, splitKey, metadata, situation };
 }
+function validateSessionTitle(value) {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 100 || value.includes('\0')) throw new Error('Invalid session title');
+  return value;
+}
 function validateSessionPin(key, pinned) {
   if (typeof key !== 'string' || key.length > 300 || !/^[a-zA-Z0-9_-]{1,80}\/(?:tmux|process|codex|claude|antigravity):[a-zA-Z0-9_.:-]{1,200}$/.test(key) || typeof pinned !== 'boolean') throw new Error('Invalid session pin');
   return key.slice(0, key.indexOf('/'));
@@ -273,4 +277,4 @@ class Store {
     this.update({ deletedSessions: [...deleted].slice(-10000), workspace: validateWorkspace(workspace), attention: this.data.attention.filter((item) => !deleted.has(item.sessionKey)), attentionCursors, cachedUnits, loopState });
   }
 }
-module.exports = { Store, defaults, validateSettings, resolveRoeProfile, validateRoeLaunch, validateWorkspace, validateSessionPin };
+module.exports = { Store, defaults, validateSettings, resolveRoeProfile, validateRoeLaunch, validateWorkspace, validateSessionPin, validateSessionTitle };

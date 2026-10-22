@@ -246,6 +246,7 @@ class Gateway {
       case 'health': return service.health();
       case 'acknowledge': return service.acknowledge(args[0]);
       case 'session:pin': return service.setSessionPinned(args[0], args[1]);
+      case 'session:rename': return service.renameSession(args[0], args[1]);
       case 'create': return this.once(device, request, () => service.create(args[0], true));
       case 'chat:capabilities': return service.chats.capabilities(args[0]);
       case 'chat:open': {
