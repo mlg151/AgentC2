@@ -109,7 +109,7 @@ export interface CreateInput {
   worktree?: { operationId: string; repository: string; baseRef: string; slug: string };
 }
 
-export interface WorktreeRecord { operationId: string; repository?: string; baseRef?: string; baseCommit?: string; branch?: string; path?: string; name?: string; provider?: Provider; slug?: string; title?: string; presetName?: string; hasInstructions?: boolean; sitrepSource?: { version: 1; hostId: string; operationId: string; name: string; repository: string; revision: string }; state: string; status: { exists?: boolean; active?: boolean; owned: boolean; dirty?: boolean | null; merged?: boolean | null } }
+export interface WorktreeRecord { transport?: 'chat' | 'terminal'; operationId: string; repository?: string; baseRef?: string; baseCommit?: string; branch?: string; path?: string; name?: string; provider?: Provider; slug?: string; title?: string; presetName?: string; hasInstructions?: boolean; sitrepSource?: { version: 1; hostId: string; operationId: string; name: string; repository: string; revision: string }; state: string; status: { exists?: boolean; active?: boolean; owned: boolean; dirty?: boolean | null; merged?: boolean | null } }
 export interface DiffScope { hostId: string; name: string; operationId: string }
 export interface DiffFile { id: string; path: string; staged: boolean; unstaged: boolean; untracked: boolean }
 export interface DiffHunk { id: string; text: string; actionable: boolean }

@@ -126,7 +126,11 @@ def worktree_launch(payload):
             raise ValueError("Invalid SitRep patch") from error
         if len(patch) > SITREP_PATCH_LIMIT or hashlib.sha256(patch).hexdigest() != sitrep["digest"] or b"GIT binary patch" in patch or b"Binary files " in patch:
             raise ValueError("SitRep patch is too large, binary, or changed")
-    request = {key: payload.get(key) for key in ("provider", "title", "preset", "instructions", "transport")}
+    request = {key: payload.get(key) for key in ("provider", "title", "preset", "instructions")}
+    # Existing terminal operations predate the transport field. Keep their
+    # fingerprint stable, while preventing a chat retry from changing modes.
+    if payload.get("transport") == "chat":
+        request["transport"] = "chat"
     if sitrep:
         request["sitrepDigest"] = sitrep["digest"]
     request.update({"repository": str(root), "baseRef": base_ref, "branch": branch, "path": str(path), "name": name})
@@ -147,7 +151,7 @@ def worktree_launch(payload):
             raise ValueError("Base ref did not resolve to a commit")
         if path.exists() or run(["git", "-C", str(root), "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"], timeout=5).returncode == 0:
             raise ValueError("Worktree path or branch already exists; no unowned files were changed")
-        record = {"operationId": operation_id, "requestDigest": digest, "repository": str(root), "baseRef": base_ref, "baseCommit": commit, "branch": branch, "path": str(path), "name": name, "provider": payload["provider"], "slug": slug, "title": payload.get("title") or "", "presetName": (payload.get("preset") or {}).get("name") or "", "hasInstructions": bool(payload.get("instructions")), "state": "provisioning", "sitrepSource": sitrep.get("source") if sitrep else None}
+        record = {"operationId": operation_id, "requestDigest": digest, "repository": str(root), "baseRef": base_ref, "baseCommit": commit, "branch": branch, "path": str(path), "name": name, "provider": payload["provider"], "transport": payload.get("transport") or "terminal", "slug": slug, "title": payload.get("title") or "", "presetName": (payload.get("preset") or {}).get("name") or "", "hasInstructions": bool(payload.get("instructions")), "state": "provisioning", "sitrepSource": sitrep.get("source") if sitrep else None}
         worktree_save(record)
     status = worktree_state(record)
     if not status["exists"]:

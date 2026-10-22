@@ -40,6 +40,7 @@ export function CreateDialog({ resume, settings, hostId, onClose, onSubmit, busy
   function retry(record: WorktreeRecord) {
     if (record.state !== 'ready' && record.state !== 'provisioning') return;
     setOperationId(record.operationId);
+    setTransport(record.transport || 'terminal');
     setRecoverSitrep(Boolean(record.sitrepSource));
     setCwd(record.repository || ''); setBaseRef(record.baseRef || 'HEAD');
     setSlug(record.slug || 'task'); setTitle(record.title || '');
