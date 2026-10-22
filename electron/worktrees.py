@@ -131,6 +131,8 @@ def worktree_launch(payload):
     # fingerprint stable, while preventing a chat retry from changing modes.
     if payload.get("transport") == "chat":
         request["transport"] = "chat"
+        if payload.get("model"):
+            request["model"] = payload["model"]
     if sitrep:
         request["sitrepDigest"] = sitrep["digest"]
     request.update({"repository": str(root), "baseRef": base_ref, "branch": branch, "path": str(path), "name": name})

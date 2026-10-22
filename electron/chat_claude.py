@@ -105,7 +105,7 @@ class ClaudeAdapter:
         environment["CLAUDE_CODE_OAUTH_TOKEN"] = ""
         environment["CLAUDE_AGENT_SDK_CLIENT_APP"] = "agentc2/0.4.1"
         return self.sdk.ClaudeAgentOptions(
-            cwd=self.session["cwd"], cli_path=cli_binary(),
+            cwd=self.session["cwd"], cli_path=cli_binary(), model=self.session.get("model"),
             system_prompt=dict(type="preset", preset="claude_code"),
             setting_sources=["user", "project", "local"],
             include_partial_messages=True, permission_mode="bypassPermissions" if profile == "full" else "default" if profile == "gated" else None,

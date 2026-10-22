@@ -58,10 +58,12 @@ class AntigravityAdapter:
             options["policies"] = policy.safe_defaults(handler=approve)
         # Provider defaults retain the SDK's default command-denial policy.
         base_url = self.env.get("AGENTC2_ANTIGRAVITY_BASE_URL")
+        if self.session.get("model"):
+            options["model"] = self.session["model"]
         if base_url:
-            options.update(base_url=base_url, model=self.env.get("AGENTC2_ANTIGRAVITY_MODEL"))
+            options.update(base_url=base_url, model=self.session.get("model") or self.env.get("AGENTC2_ANTIGRAVITY_MODEL"))
             return self.sdk.LocalOpenAIAgentConfig(**options)
-        if self.env.get("AGENTC2_ANTIGRAVITY_MODEL"):
+        if self.env.get("AGENTC2_ANTIGRAVITY_MODEL") and not self.session.get("model"):
             options["model"] = self.env["AGENTC2_ANTIGRAVITY_MODEL"]
         return self.sdk.LocalAgentConfig(**options)
 

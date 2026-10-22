@@ -41,9 +41,10 @@ function validateCommand(input) {
   const payload = input.payload;
   if (input.operation === 'create') {
     if (Object.hasOwn(input, 'sessionId')) throw new Error('Create does not accept a session ID');
-    object(payload, ['provider', 'cwd', 'title', 'roeProfile', 'providerSessionId', 'managedName', 'instructions'], ['provider', 'cwd', 'title', 'roeProfile']);
+    object(payload, ['provider', 'cwd', 'title', 'roeProfile', 'providerSessionId', 'managedName', 'instructions', 'model'], ['provider', 'cwd', 'title', 'roeProfile']);
     if (Object.hasOwn(payload, 'managedName') && (typeof payload.managedName !== 'string' || !/^hq-[a-f0-9]{12}$/.test(payload.managedName))) throw new Error('Invalid managed chat name');
     if (Object.hasOwn(payload, 'instructions')) text(payload.instructions, 20000, true);
+    if (Object.hasOwn(payload, 'model')) text(payload.model, 200);
     choice(payload.provider, contract.providers);
     if (!text(payload.cwd, contract.limits.path).startsWith('/')) throw new Error('Chat working directory must be absolute');
     text(payload.title, contract.limits.title, true);

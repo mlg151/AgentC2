@@ -59,9 +59,11 @@ def validate_command(value):
     if operation == "create":
         if "sessionId" in value:
             raise ValueError("Create does not accept a session ID")
-        fields(payload, ["provider", "cwd", "title", "roeProfile", "providerSessionId", "managedName", "instructions"], ["provider", "cwd", "title", "roeProfile"])
+        fields(payload, ["provider", "cwd", "title", "roeProfile", "providerSessionId", "managedName", "instructions", "model"], ["provider", "cwd", "title", "roeProfile"])
         if "managedName" in payload and (not isinstance(payload["managedName"], str) or not re.fullmatch(r"hq-[a-f0-9]{12}", payload["managedName"])):
             raise ValueError("Invalid managed chat name")
+        if "model" in payload:
+            text(payload["model"], 200)
         if "instructions" in payload:
             text(payload["instructions"], 20000, True)
         choice(payload["provider"], CONTRACT["providers"])

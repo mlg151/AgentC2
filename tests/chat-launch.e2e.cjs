@@ -25,7 +25,8 @@ async function poll(check, label) { for(let i=0;i<100;i++){const result=await ch
     const key=path.join(directory,'client-key'), hostKey=path.join(directory,'host-key');
     for(const file of [key,hostKey])execFileSync('ssh-keygen',['-q','-t','ed25519','-N','','-f',file]);
     const knownHosts=path.join(directory,'known-hosts');fs.writeFileSync(knownHosts,`[127.0.0.1]:${port} ${fs.readFileSync(hostKey+'.pub','utf8')}`);
-    const tmuxSocket=path.join(directory,'tmux.sock');script(path.join(remoteBin,'tmux'),`exec /usr/bin/tmux -S ${quote(tmuxSocket)} "$@"`);
+    // Exercise tty startup that discards input queued before attachment is ready.
+    const tmuxSocket=path.join(directory,'tmux.sock');script(path.join(remoteBin,'tmux'),`if [ "$1" = attach-session ]; then python3 -c 'import termios,time; time.sleep(0.2); termios.tcflush(0, termios.TCIFLUSH)'; fi\nexec /usr/bin/tmux -S ${quote(tmuxSocket)} "$@"`);
     fs.copyFileSync(path.join(root,'tests/fixtures/codex-app-server.py'),path.join(remoteBin,'codex'));fs.chmodSync(path.join(remoteBin,'codex'),0o700);fs.writeFileSync(path.join(home,'settings.json'),'{}');
     const force=path.join(directory,'remote-command');script(force,`export HOME=${quote(home)}\nexport PATH=${quote(remoteBin+':/usr/local/bin:/usr/bin:/bin')}\nexport AGENTC2_CODEX_FIXTURE_DIR=${quote(home)}\nexec /bin/bash -c "$SSH_ORIGINAL_COMMAND"`);
     const config=path.join(directory,'sshd_config');fs.writeFileSync(config,`Port ${port}\nListenAddress 127.0.0.1\nHostKey ${hostKey}\nPidFile ${directory}/sshd.pid\nAuthorizedKeysFile ${key}.pub\nStrictModes no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nUsePAM no\nAllowUsers ${os.userInfo().username}\nForceCommand ${force}\n`);

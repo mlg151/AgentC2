@@ -61,6 +61,7 @@ const local = require('../electron/local.cjs');
     }
     console.log('PASS service path conversion, SSH isolation, WSL/helper error rejection, and successful retry');
   } finally {
+    service?.specops?.dispose();
     service?.tunnels.closeAll();
     fs.rmSync(directory, { recursive: true, force: true });
   }

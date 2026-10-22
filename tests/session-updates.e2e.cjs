@@ -40,6 +40,7 @@ const path = require('node:path');
     await page.goto(url);
     assert.equal(page.url(), url); assert.equal(await page.title(), 'AgentC2');
     await page.locator('.session-row').filter({ hasText: 'OpenCode task' }).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'SPECOPS', exact: true }).isVisible(), true, 'SPECOPS and the update action must coexist after integration');
     await page.getByRole('button', { name: 'Update to v0.4.2', exact: true }).click();
     assert.equal(await page.evaluate(() => window.qa.opened), 1);
     const pane = page.locator('.session-pane.is-focused');
