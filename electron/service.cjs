@@ -5,7 +5,7 @@ const { spawn } = require('node:child_process');
 const { sshBinary } = require('./platform.cjs');
 const { EventEmitter } = require('node:events');
 const pty = require('node-pty');
-const { Store, validateSettings, resolveRoeProfile, validateRoeLaunch, validateSessionPin } = require('./config.cjs');
+const { Store, validateSettings, resolveRoeProfile, validateRoeLaunch, validateSessionPin, validateSessionTitle } = require('./config.cjs');
 const { Attention } = require('./attention.cjs');
 const { TmuxControl } = require('./tmux-control.cjs');
 const { Terminals } = require('./terminals.cjs');
@@ -507,14 +507,18 @@ function createService({ directory, home }) {
     return result;
   }
   async function renameSession(key, title) {
-    validateSessionTitle(title);
+    validateSessionPin(key, false);
+    title = validateSessionTitle(title);
+    await inventoryFlight;
     const unit = [...hostCache.values()].flat().find((item) => item.key === key);
-    if (!unit) throw new Error('Session is unavailable. Refresh sessions before renaming it.');
+    if (!unit || unit.kind !== 'managed' || !unit.managed || !TMUX_NAME.test(unit.id)) throw new Error('Managed session is unavailable. Refresh sessions before renaming it.');
     if (cleanup.isDeleting(key)) throw new Error('History deletion is in progress; wait for its result');
     if (store.data.deletedSessions.includes(key)) throw new Error('History has been deleted; refresh sessions');
     const host = getHost(unit.hostId);
-    const remoteTitle = await runRemote({ action: 'rename', name: unit.id, title }, host.id);
-    void inventory().catch(() => {});
+    await runRemote({ action: 'rename', name: unit.id, title }, host.id);
+    unit.title = title;
+    store.cacheUnits(host.id, hostCache.get(host.id));
+    await inventory();
     events.emit('state:updated');
     return title;
   }

@@ -149,8 +149,8 @@ function validateWorkspace(w) {
   return { tabs, selectedKey, splitKey, metadata, situation };
 }
 function validateSessionTitle(value) {
-  if (typeof value !== 'string' || value.length === 0 || value.length > 100 || value.includes('\0')) throw new Error('Invalid session title');
-  return value;
+  if (typeof value !== 'string' || !value.trim() || value.length > 100 || /[\x00-\x1f\x7f-\x9f]/.test(value)) throw new Error('Use a session title of 1–100 characters without control characters');
+  return value.trim();
 }
 function validateSessionPin(key, pinned) {
   if (typeof key !== 'string' || key.length > 300 || !/^[a-zA-Z0-9_-]{1,80}\/(?:tmux|process|codex|claude|antigravity):[a-zA-Z0-9_.:-]{1,200}$/.test(key) || typeof pinned !== 'boolean') throw new Error('Invalid session pin');

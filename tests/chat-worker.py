@@ -156,7 +156,16 @@ class WorkerProcessTests(unittest.TestCase):
         return receipt["sessionId"], result
 
     def wait_receipt(self, value):
-        return poll(lambda: rpc(self.root, request("receipt", commandId=value["commandId"])), lambda receipt: receipt["state"] in ("completed", "failed", "unknown"))
+        def receipt():
+            try:
+                return rpc(self.root, request("receipt", commandId=value["commandId"]))
+            except ValueError as error:
+                # A fire-and-forget command and this query use separate socket
+                # handlers. The query can arrive before durable acceptance.
+                if str(error) != "Command receipt is unavailable; do not automatically resubmit":
+                    raise
+                return None
+        return poll(receipt, lambda value: value is not None and value["state"] in ("completed", "failed", "unknown"))
 
     def test_client_disconnect_does_not_kill_worker_or_owned_provider(self):
         identifier, created = self.create()

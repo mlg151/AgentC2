@@ -531,19 +531,21 @@ def configure_session(payload):
     # available even on Windows where SSH console mouse events are unreliable.
     checked(["tmux", "set-option", "-t", name, "mouse", "off"])
     checked(["tmux", "set-option", "-t", name, "history-limit", "50000"])
+    return {"name": name}
 
 
 def rename(payload):
     name = payload.get("name", "")
     title = payload.get("title", "")
-    if not TMUX_RE.fullmatch(name) or tmux_option(name, "@hq_provider") not in PROVIDERS:
+    if not TMUX_RE.fullmatch(name) or tmux_option(name, "@hq_provider") not in SESSION_PROVIDERS:
         raise ValueError("This rename is only available for an AgentC2 managed session")
-    if not title:
+    if not isinstance(title, str) or not title.strip():
         raise ValueError("Invalid session title")
-    if len(title) > 100 or any(chunk in title for chunk in ("\x00", "\r", "\n")):
+    if len(title.encode("utf-16-le")) // 2 > 100 or any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in title):
         raise ValueError("Session title must be fewer than 101 characters without control characters")
-    checked(["tmux", "set-option", "-t", name, "@hq_title", title])
-    return {"name": name, "title"}
+    title = title.strip()
+    checked(["tmux", "set-option", "-t", name, "--", "@hq_title", title])
+    return {"name": name, "title": title}
 
 
 def scroll_session(payload):
