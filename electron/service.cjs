@@ -3,6 +3,7 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { sshBinary } = require('./platform.cjs');
+const { localCommand, connectionKey } = require('./local.cjs');
 const { EventEmitter } = require('node:events');
 const pty = require('node-pty');
 const { Store, validateSettings, resolveRoeProfile, validateRoeLaunch, validateSessionPin, validateSessionTitle } = require('./config.cjs');
@@ -25,7 +26,7 @@ function createService({ directory, home }) {
   const OTHER_TMUX_NAME = /^[A-Za-z0-9_.:-]{1,80}$/;
   const helperSource = fs.readFileSync(path.join(__dirname, 'antigravity-cleanup.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'session-cleanup.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktrees.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktree-diff.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'sitrep.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'exercises.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'flash.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'provider_telemetry.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'oporders.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'chat_remote.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'remote.py'), 'utf8');
   const hookSource = fs.readFileSync(path.join(__dirname, 'session-hook.py'), 'utf8');
-  const chatFiles = Object.fromEntries(['chat_worker.py', 'chat_protocol.py', 'chat_journal.py', 'chat_adapters.py', 'chat-protocol.json', 'chat_format.py', 'chat_codex.py', 'chat_codex_schema.py', 'chat-codex-schema.json', 'chat_antigravity.py', 'chat_claude.py'].sort().map((name) => [name, fs.readFileSync(path.join(__dirname, name), 'utf8')]));
+  const chatFiles = Object.fromEntries(['chat_runtime.py', 'chat_antigravity_cli.py', 'chat_worker.py', 'chat_protocol.py', 'chat_journal.py', 'chat_adapters.py', 'chat-protocol.json', 'chat_format.py', 'chat_codex.py', 'chat_codex_schema.py', 'chat-codex-schema.json', 'chat_antigravity.py', 'chat_claude.py'].sort().map((name) => [name, fs.readFileSync(path.join(__dirname, name), 'utf8')]));
   const chatDigest = crypto.createHash('sha256').update(JSON.stringify(chatFiles)).digest('hex');
   const chatBootstrapped = new Set();
 
@@ -44,6 +45,7 @@ function createService({ directory, home }) {
   const flashCache = new Map();
   let flashFlight;
   const faultFlights = new Set();
+  const deletionFlights = new Set();
 
   const hostCache = new Map(Object.entries(store.data.cachedUnits).map(([hostId, units]) => [hostId, units.map((unit) => ({ ...unit, hostId, hostName: store.data.settings.hosts.find((host) => host.id === hostId)?.name || hostId }))]));
   const healthCache = new Map();
@@ -92,7 +94,7 @@ function createService({ directory, home }) {
     if (inventoryFlight) return inventoryFlight;
     inventoryFlight = (async () => {
       const hosts = store.data.settings.hosts.filter((h) => h.enabled);
-      const results = await Promise.allSettled(hosts.map((h) => runRemote({ action: 'inventory' }, h.id)));
+      const results = await Promise.allSettled(hosts.map((h) => runRemote({ action: 'inventory', sourceDigest: chatDigest, chatFiles, allowUpgrade: true }, h.id)));
       const statuses = results.map((result, index) => {
         const h = hosts[index];
         if (result.status === 'fulfilled') {
@@ -107,6 +109,7 @@ function createService({ directory, home }) {
       });
       const sessions = hosts.flatMap((h) => (hostCache.get(h.id) || []).map((s) => ({ ...s, stale: !statuses.find((status) => status.id === h.id).connected }))).filter((session) => !store.data.deletedSessions.includes(session.key));
       for (const session of sessions) if (session.key.startsWith(`${session.hostId}/tmux:`)) session.outputActivity = terminals.activity(session.id, session.hostId);
+      attention.resolveRequests(sessions.filter((s) => !s.stale).flatMap((s) => s.resolvedRequestIds || []));
       attention.update(sessions.filter((s) => !s.stale));
       const raised = loopBreaker.observe(sessions.filter((s) => !s.stale));
       for (const fault of raised) {
@@ -142,18 +145,21 @@ function createService({ directory, home }) {
   }
 
   function runRemote(payload, hostId) {
+    if (payload.action === 'inventory' && !payload.sourceDigest) payload = { ...payload, sourceDigest: chatDigest, chatFiles, allowUpgrade: true };
     const host = getHost(hostId);
     return new Promise((resolve, reject) => {
       const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
       const embedded = encoded.length > 60000;
-      const child = spawn(SSH_BINARY, [...sshArgs(host), host.target, 'python3', '-', ...(embedded ? [] : [encoded])], {
+      const execution = host.kind === 'local' ? localCommand('python3', ['-', ...(embedded ? [] : [encoded])]) : { binary: SSH_BINARY, args: [...sshArgs(host), host.target, 'python3', '-', ...(embedded ? [] : [encoded])], env: process.env };
+      const child = spawn(execution.binary, execution.args, {
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],
+        env: execution.env,
       });
       let output = '';
       let errors = '';
       let settled = false;
-      const timeout = setTimeout(() => child.kill(), payload.action === 'cleanup_delete' && payload.provider === 'antigravity' ? 300000 : 40000);
+      const timeout = setTimeout(() => child.kill(), payload.request?.prepareProvider ? 330000 : payload.action === 'cleanup_delete' && payload.provider === 'antigravity' ? 300000 : 40000);
 
       child.stdout.on('data', (chunk) => {
         output += chunk.toString();
@@ -168,7 +174,7 @@ function createService({ directory, home }) {
         if (settled) return;
         settled = true;
         clearTimeout(timeout);
-        if (code !== 0) return reject(new Error(errors.trim() || 'SSH connection failed'));
+        if (code !== 0) return reject(new Error(errors.trim() || (host.kind === 'local' ? 'Local execution failed. Install Python 3 and tmux (inside the default WSL distribution on Windows).' : 'SSH connection failed')));
         try {
           const response = JSON.parse(output.trim());
           if (!response.ok) return reject(new Error(response.error || 'Remote action failed'));
@@ -185,7 +191,7 @@ function createService({ directory, home }) {
   const chats = new Chats({
     remote: async (hostId, request) => {
       const host = getHost(hostId);
-      const key = `${host.id}/${host.target}/${host.port}`;
+      const key = `${host.id}/${connectionKey(host)}`;
       try {
         const result = await runRemote({ action: 'chat', sourceDigest: chatDigest, allowUpgrade: true, ...(!chatBootstrapped.has(key) ? { chatFiles } : {}), request }, hostId);
         chatBootstrapped.add(key);
@@ -194,6 +200,18 @@ function createService({ directory, home }) {
     },
     resolveHost: (hostId) => getHost(hostId).id,
     emit: (clientId, event, value) => events.emit('client', clientId, event, value),
+    onEvents: (record, chatEvents) => {
+      const name = record.session.managedName;
+      if (!TMUX_NAME.test(name || '')) return;
+      for (const event of chatEvents) {
+        const output = event.type === 'tool.completed' ? event.data.output : event.type === 'message.completed' ? event.data.text : '';
+        // Feed bounded chunks so links near the start of a long tool result
+        // remain discoverable by the existing terminal URL detector.
+        for (let offset = 0; offset < output.length; offset += 2048) tunnels.feed(getHost(record.hostId), `${record.hostId}/tmux:${name}`, output.slice(offset, offset + 2048));
+        if (output) tunnels.feed(getHost(record.hostId), `${record.hostId}/tmux:${name}`, '\n');
+      }
+    },
+    onDispose: (record) => { if (TMUX_NAME.test(record.session.managedName || '')) tunnels.release(`${record.hostId}/tmux:${record.session.managedName}`); },
   });
 
   const terminals = new Terminals({
@@ -207,14 +225,18 @@ function createService({ directory, home }) {
     },
     spawn: (name, hostId, size) => {
       const host = getHost(hostId);
-      return pty.spawn(SSH_BINARY, [...sshArgs(host), '-tt', host.target, 'env', 'TERM=xterm-256color', 'tmux', 'attach-session', '-t', name], {
-        name: 'xterm-256color', ...size, cwd: home, env: { ...process.env, TERM: 'xterm-256color' },
+      const execution = host.kind === 'local' ? localCommand('tmux', ['attach-session', '-t', name]) : { binary: SSH_BINARY, args: [...sshArgs(host), '-tt', host.target, 'env', 'TERM=xterm-256color', 'tmux', 'attach-session', '-t', name], env: process.env };
+      return pty.spawn(execution.binary, execution.args, {
+        name: 'xterm-256color', ...size, cwd: home, env: { ...execution.env, TERM: 'xterm-256color' },
       });
     },
     history: (name, hostId) => runRemote({ action: 'history', name }, hostId),
     scroll: async (record, direction, count) => {
       const host = getHost(record.hostId);
-      if (!record.control || record.control.closed) record.control = new TmuxControl(SSH_BINARY, sshArgs(host), host.target, record.name);
+      if (!record.control || record.control.closed) {
+        const local = host.kind === 'local' ? localCommand('tmux', []) : null;
+        record.control = local ? new TmuxControl(local.binary, local.args, null, record.name, local.env) : new TmuxControl(SSH_BINARY, sshArgs(host), host.target, record.name);
+      }
       const target = record.name;
       try {
         record.historyActive = await scrollTerminal((text) => record.control.command(text), target, direction, count);
@@ -227,6 +249,7 @@ function createService({ directory, home }) {
   });
 
   async function saveSettings(input) {
+    if (deletionFlights.size) throw new Error('Wait for session deletion before changing settings');
     if (cleanup.isBusy()) throw new Error('Wait for history cleanup before changing settings');
     await inventoryFlight;
     await healthFlight;
@@ -240,21 +263,21 @@ function createService({ directory, home }) {
     for (const record of terminals.sessions.values()) {
       const oldHost = getHost(record.hostId);
       const nextHost = settings.hosts.find((h) => h.id === record.hostId);
-      if (!nextHost || !nextHost.enabled || nextHost.target !== oldHost.target || nextHost.port !== oldHost.port) throw new Error('Close this host’s terminal tabs on every device before changing its connection settings');
+      if (!nextHost || !nextHost.enabled || connectionKey(nextHost) !== connectionKey(oldHost)) throw new Error('Close this host’s terminal tabs on every device before changing its connection settings');
     }
     for (const record of chats.sessions.values()) {
       const oldHost = getHost(record.hostId);
       const nextHost = settings.hosts.find((host) => host.id === record.hostId);
-      if (!nextHost || !nextHost.enabled || nextHost.target !== oldHost.target || nextHost.port !== oldHost.port) throw new Error('Close this host’s chat views on every device before changing its connection settings');
+      if (!nextHost || !nextHost.enabled || connectionKey(nextHost) !== connectionKey(oldHost)) throw new Error('Close this host’s chat views on every device before changing its connection settings');
     }
     for (const h of settings.hosts) {
       const old = store.data.settings.hosts.find((item) => item.id === h.id);
-      if (!old || old.target !== h.target || old.port !== h.port) { hostCache.delete(h.id); healthCache.delete(h.id); cpuSamples.delete(h.id); gpuProbedAt.delete(h.id); }
+      if (!old || connectionKey(old) !== connectionKey(h)) { hostCache.delete(h.id); healthCache.delete(h.id); cpuSamples.delete(h.id); gpuProbedAt.delete(h.id); }
     }
     const retained = Object.fromEntries(Object.entries(store.data.cachedUnits).filter(([hostId]) => {
       const old = store.data.settings.hosts.find((host) => host.id === hostId);
       const next = settings.hosts.find((host) => host.id === hostId);
-      return old && next && next.target === old.target && next.port === old.port;
+      return old && next && connectionKey(next) === connectionKey(old);
     }));
     const result = settings;
     store.update({ settings, cachedUnits: retained });
@@ -306,19 +329,30 @@ function createService({ directory, home }) {
     const provider = input?.provider;
     if (!['codex', 'claude', 'antigravity', 'terminal'].includes(provider)) throw new Error('Invalid provider');
     const isTerminal = provider === 'terminal';
+    if (input.transport !== undefined && !['chat', 'terminal'].includes(input.transport)) throw new Error('Invalid session transport');
+    if (input.launchId !== undefined && !/^[a-f0-9]{32}$/.test(input.launchId)) throw new Error('Invalid launch ID');
     if (isTerminal && (input.presetId || input.conversationId || input.agentId || input.instructions)) throw new Error('Terminal sessions do not accept agent launch options');
     const preset = input.presetId ? store.data.settings.presets.find((p) => p.id === input.presetId && p.provider === provider) : null;
     if ((input.presetId || (requirePreset && !isTerminal)) && !preset) throw new Error('Launch preset is unavailable');
     const host = getHost(input.hostId);
     if (input.agentId && input.roeProfile) throw new Error('An existing background agent keeps its original permission mode');
     const roeProfile = resolveRoeProfile(store.data.settings, host.id, preset, input.roeProfile);
-    validateRoeLaunch(provider, preset, roeProfile);
     const isolated = input.worktree;
+    const customCommand = preset && (preset.command !== (provider === 'antigravity' ? 'agy' : provider) || preset.args.trim());
+    const transport = isTerminal || input.agentId || customCommand ? 'terminal' : input.transport || 'chat';
+    validateRoeLaunch(provider, preset, roeProfile, transport);
+    if (input.transport === 'chat' && transport !== 'chat') throw new Error('This launch requires terminal mode because it uses a custom command or an existing background agent');
+    if (transport === 'chat') {
+      const capability = (await chats.capabilities(host.id, provider)).find((item) => item.provider === provider);
+      if (capability?.status !== 'supported') throw new Error(`${capability?.reason || 'Structured chat is unavailable'}. Select Terminal in the launch dialog to use the existing CLI flow.`);
+    }
     if (input.recoverSitrep !== undefined && input.recoverSitrep !== true) throw new Error('Invalid SitRep recovery flag');
     if (input.recoverSitrep && !isolated) throw new Error('SitRep recovery requires an owned worktree');
     if (isolated && (isTerminal || input.conversationId || input.agentId || !/^[a-f0-9]{32}$/.test(isolated.operationId || '') || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(isolated.slug || '') || typeof isolated.repository !== 'string' || isolated.repository.length > 4096 || typeof isolated.baseRef !== 'string' || isolated.baseRef.length > 200)) throw new Error('Invalid isolated task');
     const created = await runRemote({
-      action: isolated ? 'worktree_launch' : 'create', provider,
+      action: isolated ? 'worktree_launch' : 'create', provider, transport,
+      ...(!isolated && transport === 'chat' ? { managedName: `hq-${crypto.createHash('sha256').update(input.launchId || crypto.randomUUID()).digest('hex').slice(0, 12)}` } : {}),
+      ...(transport === 'chat' ? { sourceDigest: chatDigest, chatFiles, allowUpgrade: true } : {}),
       cwd: String(input.cwd || '').slice(0, 4096), title: String(input.title || '').slice(0, 100),
       conversationId: input.conversationId ? String(input.conversationId) : null,
       agentId: input.agentId ? String(input.agentId) : null,
@@ -331,6 +365,11 @@ function createService({ directory, home }) {
   }
 
   function worktrees(hostId) { return runRemote({ action: 'worktree_list' }, hostId); }
+  function assertManagedOwner(client, name, hostId) {
+    const session = hostCache.get(hostId)?.find((item) => item.id === name);
+    if (session?.transport === 'chat') return chats.assertSessionOwner(client, session.chatSessionId, hostId);
+    return terminals.assertSessionOwner(client, name, hostId);
+  }
   async function flashQueue() {
     if (flashFlight) return flashFlight;
     flashFlight = (async () => {
@@ -353,7 +392,7 @@ function createService({ directory, home }) {
   async function flashDecide(client, input) {
     if (!input || !['allow', 'deny'].includes(input.decision) || !TMUX_NAME.test(input.name || '') || !/^[a-f0-9]{32}$/.test(input.id || '')) throw new Error('Invalid Flash Traffic decision');
     const hostId = getHost(input.hostId).id;
-    terminals.assertSessionOwner(client, input.name, hostId);
+    assertManagedOwner(client, input.name, hostId);
     const terminal = terminals.sessions.get(`${hostId}/${input.name}`);
     if (terminal && (terminal.connection !== 'connected' || terminal.exitCode !== null)) throw new Error('Target terminal is disconnected or exited');
     const current = await runRemote({ action: 'flash_list' }, hostId);
@@ -373,7 +412,7 @@ function createService({ directory, home }) {
     if (action !== 'diff_files' && !/^[a-f0-9]{64}$/.test(input.fileId || '')) throw new Error('Invalid changed file');
     if (action === 'diff_hunk' && (!/^[a-f0-9]{64}$/.test(input.revision || '') || !/^[a-f0-9]{64}$/.test(input.hunkId || '') || !['stage', 'revert'].includes(input.operation))) throw new Error('Invalid hunk action');
     const hostId = getHost(input.hostId).id;
-    if (action === 'diff_hunk') terminals.assertSessionOwner(client, input.name, hostId);
+    if (action === 'diff_hunk') assertManagedOwner(client, input.name, hostId);
     return runRemote({ action, name: input.name, operationId: input.operationId, ...(action === 'diff_files' ? {} : { fileId: input.fileId }), ...(action === 'diff_hunk' ? { revision: input.revision, hunkId: input.hunkId, operation: input.operation } : {}) }, hostId);
   }
 
@@ -381,7 +420,7 @@ function createService({ directory, home }) {
     if (!input || !TMUX_NAME.test(input.name || '') || !/^[a-f0-9]{32}$/.test(input.operationId || '') || typeof input.repository !== 'string' || (input.repository && !input.repository.startsWith('/')) || input.repository.length > 4096 || typeof input.testCommand !== 'string' || input.testCommand.length > 500) throw new Error('Invalid SitRep preview request');
     const sourceHostId = getHost(input.sourceHostId).id;
     const targetHostId = getHost(input.targetHostId).id;
-    if (input.testCommand) terminals.assertSessionOwner(client, input.name, sourceHostId);
+    if (input.testCommand) assertManagedOwner(client, input.name, sourceHostId);
     const source = await runRemote({ action: 'sitrep_source_preview', name: input.name, operationId: input.operationId, testCommand: input.testCommand }, sourceHostId);
     const repository = input.repository || (sourceHostId === targetHostId ? source.source.repository : '');
     if (!repository) throw new Error('Enter the primary Git checkout on the target host');
@@ -395,7 +434,7 @@ function createService({ directory, home }) {
   async function launchSitrep(client, input) {
     const preview = sitrepPreviews.get(input?.id);
     if (!preview || Date.now() - preview.createdAt > 15 * 60_000 || !/^[a-f0-9]{32}$/.test(input?.operationId || '') || (preview.launchOperationId && preview.launchOperationId !== input.operationId)) throw new Error('SitRep preview expired or operation changed; preview again');
-    terminals.assertSessionOwner(client, preview.name, preview.sourceHostId);
+    assertManagedOwner(client, preview.name, preview.sourceHostId);
     const field = (value, max) => { if (typeof value !== 'string' || value.length > max || value.includes('\0')) throw new Error('Invalid SitRep text'); return value.trim(); };
     const objective = field(input.objective, 2000);
     const summary = field(input.summary, 4000);
@@ -424,11 +463,52 @@ function createService({ directory, home }) {
   async function action(client, action, name, hostId) {
     const host = getHost(hostId);
     if (!['interrupt', 'stop'].includes(action) || !TMUX_NAME.test(name)) throw new Error('Invalid session name');
+    const unit = hostCache.get(host.id)?.find((item) => item.id === name);
+    if (unit?.transport === 'chat') {
+      const record = chats.assertSessionOwner(client, unit.chatSessionId, host.id);
+      const handle = [...record.handles].find((id) => chats.handles.get(id)?.client.id === client.id);
+      return chats.submit(client, handle, { protocolVersion: 1, commandId: crypto.randomUUID(), operation: action, sessionId: unit.chatSessionId, payload: {} });
+    }
     terminals.assertSessionOwner(client, name, host.id);
     const pending = action === 'stop' ? await runRemote({ action: 'flash_list' }, host.id).catch(() => []) : [];
     const result = await runRemote({ action, name }, host.id);
     if (action === 'stop') attention.resolveRequests(pending.filter((item) => item.name === name).map((item) => item.id));
     return result;
+  }
+  async function deleteSession(client, key) {
+    if (client.closed || client.id !== 'desktop' || typeof key !== 'string' || !/^[A-Za-z0-9_-]{1,80}\/tmux:hq-[a-f0-9]{12}$/.test(key)) throw new Error('Invalid managed session deletion');
+    if (deletionFlights.has(key)) throw new Error('Session deletion is already in progress');
+    deletionFlights.add(key);
+    let release;
+    try {
+      const snapshot = await inventory();
+      const unit = snapshot.sessions.find((session) => session.key === key);
+      if (!unit || unit.kind !== 'managed' || unit.stale) throw new Error('Reconnect the host and refresh this managed session before deleting it');
+      release = cleanup.beginLaunch(unit.hostId);
+      if (unit.transport === 'chat') {
+        if (unit.canStop) {
+          const record = chats.assertSessionOwner(client, unit.chatSessionId, unit.hostId);
+          const handle = [...record.handles].find((id) => chats.handles.get(id)?.client.id === client.id);
+          let receipt = await action(client, 'stop', unit.id, unit.hostId);
+          const deadline = Date.now() + 15000;
+          while (['accepted', 'dispatching'].includes(receipt.state) && Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            receipt = await chats.receipt(client, handle, receipt.commandId);
+          }
+          if (receipt.state !== 'completed') throw new Error(receipt.error || 'Stop is not confirmed. The session was not deleted; inspect its state before retrying.');
+        } else if (!['stopped', 'failed'].includes(unit.chatState)) {
+          throw new Error('Session state is uncertain. Reconnect or stop it before deleting it.');
+        }
+      } else {
+        await action(client, 'stop', unit.id, unit.hostId);
+      }
+      store.forgetSessions([key]);
+      events.emit('sessions:deleted', [key]);
+      events.emit('state:updated');
+    } finally {
+      release?.();
+      deletionFlights.delete(key);
+    }
   }
   async function interruptFault(client, sessionKey) {
     const fault = loopBreaker.faults().find((item) => item.sessionKey === sessionKey);
@@ -439,15 +519,27 @@ function createService({ directory, home }) {
     faultFlights.add(sessionKey);
     const [, hostId, name] = match;
     try {
-      terminals.assertSessionOwner(client, name, hostId);
+      assertManagedOwner(client, name, hostId);
       const host = getHost(hostId);
       const fresh = await runRemote({ action: 'inventory' }, host.id);
       const unit = fresh.sessions.find((item) => item.key === `tmux:${name}`);
       if (!unit || unit.kind !== 'managed' || unit.provider !== 'claude' || unit.state !== 'live' || !unit.canInterrupt || !unit.presetId || unit.presetId !== (hostCache.get(hostId) || []).find((item) => item.key === sessionKey)?.presetId) throw new Error('Faulted managed unit changed or exited; refresh and review');
-      terminals.assertSessionOwner(client, name, hostId);
-      loopBreaker.record(sessionKey, 'attempted', 'A scoped Ctrl+C was sent; awaiting remote acceptance');
-      await runRemote({ action: 'interrupt', name }, hostId);
-      return loopBreaker.record(sessionKey, 'interrupted', 'Remote tmux accepted one scoped Ctrl+C');
+      assertManagedOwner(client, name, hostId);
+      loopBreaker.record(sessionKey, 'attempted', 'A scoped interrupt was requested; awaiting remote acceptance');
+      const response = await action(client, 'interrupt', name, hostId);
+      if (unit.transport === 'chat') {
+        const record = chats.assertSessionOwner(client, unit.chatSessionId, hostId);
+        const handle = [...record.handles].find((id) => chats.handles.get(id)?.client.id === client.id);
+        let receipt = response;
+        const deadline = Date.now() + 20000;
+        while (['accepted', 'dispatching'].includes(receipt.state) && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          try { receipt = await chats.receipt(client, handle, receipt.commandId); }
+          catch { return loopBreaker.record(sessionKey, 'unknown', 'Interrupt receipt could not be read; no action was resent'); }
+        }
+        if (receipt.state !== 'completed') return loopBreaker.record(sessionKey, receipt.state === 'failed' ? 'failed' : 'unknown', receipt.error || 'Provider interrupt acknowledgement is unresolved; inspect the chat');
+      }
+      return loopBreaker.record(sessionKey, 'interrupted', unit.transport === 'chat' ? 'Managed provider acknowledged one scoped interrupt' : 'Remote tmux accepted one scoped Ctrl+C');
     } catch (error) {
       if (loopBreaker.faults().some((item) => item.sessionKey === sessionKey && item.status !== 'interrupted')) loopBreaker.record(sessionKey, 'failed', error.message);
       throw error;
@@ -472,7 +564,7 @@ function createService({ directory, home }) {
     const { record } = terminals.get(client, id);
     terminals.assertOwner(client, record);
     const host = getHost(record.hostId);
-    const remotePath = await uploadPng({ binary: SSH_BINARY, args: sshArgs(host), target: host.target, png });
+    const remotePath = await uploadPng({ binary: SSH_BINARY, args: sshArgs(host), target: host.target, local: host.kind === 'local', png });
     if (terminals.get(client, id).record !== record) throw new Error('Terminal changed during image upload');
     terminals.assertOwner(client, record);
     return remotePath;
@@ -482,6 +574,12 @@ function createService({ directory, home }) {
     return tunnels.list(sessionKey);
   }
   function openDevUrl(client, id, url) {
+    if (typeof id === 'string' && /^[A-Za-z0-9_-]{1,80}\/tmux:hq-[a-f0-9]{12}$/.test(id)) {
+      const session = cachedSession(id);
+      const record = chats.sessions.get(`${session.hostId}/${session.chatSessionId}`);
+      if (session.transport !== 'chat' || client.closed || !record || record.connection !== 'connected' || ![...record.handles].some((handleId) => chats.handles.get(handleId)?.client.id === client.id)) throw new Error('Open this connected chat before forwarding its development URL');
+      return tunnels.open(getHost(session.hostId), session.key, url);
+    }
     const { record } = terminals.get(client, id);
     const host = getHost(record.hostId);
     return tunnels.open(host, `${record.hostId}/tmux:${record.name}`, url);
@@ -537,7 +635,7 @@ function createService({ directory, home }) {
       results.push(...await Promise.all(sessions.slice(index, index + 4).map(async (session) => {
         if (!session.canAttach) return { key: session.key, text: 'This process has no attachable terminal.', sampledAt: null, error: true };
         try {
-          const mirror = await terminals.preview(session.id, session.hostId);
+          const mirror = session.transport === 'chat' ? (await chatText(session, 100)).text : await terminals.preview(session.id, session.hostId);
           const text = mirror === null ? (await runRemote({ action: 'preview', name: session.id }, session.hostId)).text : mirror;
           return { key: session.key, text, sampledAt: Date.now(), error: false };
         } catch { return { key: session.key, text: 'Snapshot unavailable. Check this theater or refresh inventory.', sampledAt: null, error: true }; }
@@ -545,13 +643,20 @@ function createService({ directory, home }) {
     }
     return results;
   }
+  async function chatText(session, limit = 200) {
+    const first = await chats.read(session.hostId, session.chatSessionId, 0, 1);
+    const after = Math.max(first.retainedFrom - 1, first.latestCursor - limit);
+    const page = await chats.read(session.hostId, session.chatSessionId, after, limit);
+    const text = page.events.map((event) => event.type === 'message.completed' ? `${event.data.role}: ${event.data.text}` : event.type === 'tool.completed' ? `${event.data.name}: ${event.data.output}` : event.type === 'error' ? event.data.message : '').filter(Boolean).join('\n');
+    return { text: text.slice(-100000), truncated: after > 0 || page.hasMore || text.length > 100000 };
+  }
   async function searchHistory(query, keys) {
     if (typeof query !== 'string' || query.length < 3 || query.length > 200 || query.includes('\0') || !Array.isArray(keys) || keys.length > 200) throw new Error('History search needs 3–200 characters and up to 200 unit keys');
     const sessions = [...new Set(keys)].map(cachedSession).filter((session) => session.canAttach);
     const selected = sessions.slice(0, 8), matches = [], errors = [];
     let truncated = sessions.length > selected.length;
     for (let index = 0; index < selected.length; index += 2) {
-      const results = await Promise.allSettled(selected.slice(index, index + 2).map((session) => runRemote({ action: 'history', name: session.id }, session.hostId)));
+      const results = await Promise.allSettled(selected.slice(index, index + 2).map((session) => session.transport === 'chat' ? chatText(session) : runRemote({ action: 'history', name: session.id }, session.hostId)));
       results.forEach((result, offset) => {
         const session = selected[index + offset];
         if (result.status === 'rejected') { errors.push(session.key); return; }
@@ -567,6 +672,7 @@ function createService({ directory, home }) {
     }
     return { matches, searched: selected.length, total: sessions.length, truncated, errors };
   }
-  return { store, events, terminals, chats, tunnels, cleanup, exercises, inventory, health, create, worktrees, flashQueue, flashDecide, archiveWorktree, diffRequest, previewSitrep, launchSitrep, action, interruptFaults, resetFault, renameSession, loopBreaker, uploadClipboardImage, devUrls, openDevUrl, saveSettings, previewOpOrder, enrollOpOrder, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
+  return { store, events, terminals, chats, tunnels, cleanup, exercises, inventory, health, create, worktrees, flashQueue, flashDecide, archiveWorktree, diffRequest, previewSitrep, launchSitrep, action, deleteSession, interruptFaults, resetFault, renameSession, loopBreaker, uploadClipboardImage, devUrls, openDevUrl, saveSettings, previewOpOrder, enrollOpOrder, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
+
 }
 module.exports = { createService };

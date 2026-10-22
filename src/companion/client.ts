@@ -35,7 +35,8 @@ export class CompanionClient {
     socket.onclose = (event) => {
       if (this.socket !== socket) return;
       this.socket = null;
-      for (const request of this.pending.values()) { clearTimeout(request.timer); request.reject(new Error('Disconnected. Action outcome may be unknown; refresh sessions before repeating it.')); }
+      const message = event.code === 4001 ? 'This device was revoked. Pair again from desktop.' : 'Disconnected. Action outcome may be unknown; refresh sessions before repeating it.';
+      for (const request of this.pending.values()) { clearTimeout(request.timer); request.reject(new Error(message)); }
       this.pending.clear();
       this.emit('connection', 'offline');
       if (!this.stopped && event.code !== 4001) this.retry = setTimeout(() => this.connect(), Math.min(1000 * 2 ** this.failures++, 15000));
@@ -52,7 +53,7 @@ export class CompanionClient {
     const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
     const id = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('Request timed out. Action outcome may be unknown; refresh sessions before repeating it.')); }, 60000);
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('Request timed out. Action outcome may be unknown; refresh sessions before repeating it.')); }, method === 'create' ? 360000 : 60000);
       this.pending.set(id, { resolve: (value) => resolve(value as T), reject, timer });
       this.socket!.send(JSON.stringify({ id, method, args }));
     });

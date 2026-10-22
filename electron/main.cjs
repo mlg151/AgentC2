@@ -145,6 +145,8 @@ app.whenReady().then(async () => {
   handle('workspace:save', (input) => service.saveWorkspace(input));
   handle('session:pin', (key, pinned) => service.setSessionPinned(key, pinned));
   handle('session:rename', (key, title) => service.renameSession(key, title));
+  handle('session:delete', (key) => service.deleteSession(desktop, key));
+
   handle('cleanup:preview', (input) => service.cleanup.preview(input));
   handle('cleanup:execute', (token, keys) => service.cleanup.execute(token, keys));
   handle('cleanup:state', () => service.cleanup.state());
@@ -161,6 +163,7 @@ app.whenReady().then(async () => {
   handle('chat:take', (id) => service.chats.take(desktop, id));
   handle('chat:submit', (id, command) => service.chats.submit(desktop, id, command));
   handle('chat:receipt', (id, commandId) => service.chats.receipt(desktop, id, commandId));
+  handle('chat:prune', (id) => service.chats.prune(desktop, id));
   handle('chat:close', (id) => { if (service.chats.handles.has(id)) service.chats.close(desktop, id); });
   handle('worktrees:list', (hostId) => service.worktrees(hostId));
   handle('worktrees:archive', (hostId, operationId) => service.archiveWorktree(hostId, operationId));

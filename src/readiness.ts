@@ -50,6 +50,14 @@ export function fleetReadiness(inventory: Inventory | null, requests: FlashReque
   }
   for (const unit of units) {
     if (unit.stale || unit.missing) { unknown = true; continue; }
+    if (unit.transport === 'chat' && unit.chatState) {
+      if (unit.chatState === 'unknown' || unit.chatState === 'starting') { unknown = true; add('unknown', unit.title, unit.chatState === 'starting' ? 'Provider is starting or importing history' : 'Provider state is uncertain; inspect before resuming'); }
+      else if (unit.chatState === 'failed') add('fault', unit.title, 'Structured provider session failed');
+      else if (unit.chatState === 'waiting') add('approval', unit.title, 'Provider has a pending decision or question', unit.updatedAt || undefined);
+      else if (unit.chatState === 'running') { active++; add('active', unit.title, 'Provider reports an active turn', unit.updatedAt || undefined); }
+      else idle++;
+      continue;
+    }
     if (unit.state !== 'live') { idle++; continue; }
     const latest = unit.events?.at(-1);
     if (latest && ['working', 'tool_ok', 'tool_failed'].includes(latest.kind) && recent(latest.at, now)) {

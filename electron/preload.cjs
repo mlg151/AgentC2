@@ -55,6 +55,7 @@ contextBridge.exposeInMainWorld('agentHQ', {
   takeChat: (id) => ipcRenderer.invoke('chat:take', id),
   submitChat: (id, command) => ipcRenderer.invoke('chat:submit', id, command),
   chatReceipt: (id, commandId) => ipcRenderer.invoke('chat:receipt', id, commandId),
+  pruneChat: (id) => ipcRenderer.invoke('chat:prune', id),
   closeChat: (id) => ipcRenderer.invoke('chat:close', id),
   onChatEvents: (callback) => {
     const listener = (_event, value) => callback(value);
@@ -73,6 +74,7 @@ contextBridge.exposeInMainWorld('agentHQ', {
   diffHunk: (input) => ipcRenderer.invoke('diff:hunk', input),
   interrupt: (name, hostId) => ipcRenderer.invoke('interrupt', name, hostId),
   stop: (name, hostId) => ipcRenderer.invoke('stop', name, hostId),
+  deleteSession: (key) => ipcRenderer.invoke('session:delete', key),
   openTerminal: (name, cols, rows, hostId) => ipcRenderer.invoke('terminal:open', name, cols, rows, hostId),
   terminalHistory: (id) => ipcRenderer.invoke('terminal:history', id),
   readyTerminal: (id) => ipcRenderer.invoke('terminal:ready', id),

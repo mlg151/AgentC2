@@ -45,9 +45,20 @@ workspace = assignCallsigns(workspace, [...sessions].reverse());
 assert.deepEqual(workspace.situation.callsigns, before, 'Refresh order and missing units must not reassign callsigns');
 assert.equal(assignCallsigns(workspace, [{ key: 'default/codex:saved', kind: 'conversation' }]), workspace);
 assert.deepEqual(validateWorkspace(workspace).situation.callsigns, before);
+const filteredWorkspace = assignCallsigns(validateWorkspace({ tabs: [], metadata: {}, situation: { ...workspace.situation, callsigns: { 'default/process:external': '01' } } }), [
+  { key: a, kind: 'managed' }, { key: b, kind: 'managed', stale: true },
+  { key: 'default/process:external', kind: 'unmanaged' },
+  { key: 'default/tmux:external', kind: 'external-tmux' },
+  { key: 'default/codex:background', kind: 'background' },
+  { key: 'default/codex:history', kind: 'conversation' },
+]);
+assert.deepEqual(filteredWorkspace.situation.callsigns, { [a]: '01', [b]: '02' }, 'Only managed sessions get callsigns; old external callsigns must be released');
 assert.equal(unitState({ kind: 'managed', state: 'live' }, []).code, 'LIVE');
 assert.equal(unitState({ kind: 'managed', state: 'live', stale: true, exitCode: 1 }, []).code, 'UNKNOWN');
 assert.equal(unitState({ key: a }, [{ sessionKey: a, kind: 'input', confidence: 'confirmed', acknowledged: false }]).code, 'HALT');
+for (const [chatState, code] of [['starting', 'UNKNOWN'], ['unknown', 'UNKNOWN'], ['idle', 'STBY'], ['running', 'ENG'], ['waiting', 'HALT'], ['stopped', 'STBY'], ['failed', 'FAULT']]) {
+  assert.equal(unitState({ key: a, transport: 'chat', chatState, state: 'live' }, [{ sessionKey: a, kind: 'input', confidence: 'confirmed', acknowledged: false }]).code, code, `Structured ${chatState} must override old attention and generic process hints`);
+}
 assert.equal(normalizeBinding('option+control+j'), 'Ctrl+Alt+J');
 assert.equal(resolvedBinding('Primary+K', true), 'Meta+K');
 assert.equal(resolvedBinding('Primary+K', false), 'Ctrl+K');

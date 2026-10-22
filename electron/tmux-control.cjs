@@ -3,7 +3,7 @@ const { spawn } = require('node:child_process');
 // tmux control mode accepts commands over stdin without involving Windows'
 // console mouse translation. ignore-size keeps this client from resizing chats.
 class TmuxControl {
-  constructor(ssh, sshArgs, host, name) {
+  constructor(ssh, sshArgs, host, name, env = process.env) {
     this.pending = [];
     this.active = null;
     this.output = '';
@@ -16,8 +16,8 @@ class TmuxControl {
     // The owner may only use the control connection on its first scroll.
     this.ready.catch(() => {});
     this.startTimeout = setTimeout(() => this.fail(new Error('tmux control connection timed out')), 15000);
-    this.child = spawn(ssh, [...sshArgs, host, 'tmux', '-C', 'attach-session', '-f', 'no-output,ignore-size', '-t', name], {
-      windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
+    this.child = spawn(ssh, [...sshArgs, ...(host ? [host, 'tmux'] : []), '-C', 'attach-session', '-f', 'no-output,ignore-size', '-t', name], {
+      windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env,
     });
     this.child.stdout.on('data', (chunk) => {
       this.output += chunk.toString();

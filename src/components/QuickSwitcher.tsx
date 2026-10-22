@@ -16,7 +16,7 @@ export function QuickSwitcher({ sessions, callsigns, actions, overrides, onSelec
   const q = query.toLowerCase();
   const entries = [
     { id: 'inbox', title: 'Attention inbox', subtitle: 'Review input requests and results', run: onInbox },
-    { id: 'settings', title: 'Settings', subtitle: 'SSH hosts and launch presets', run: onSettings },
+    { id: 'settings', title: 'Settings', subtitle: 'Local/Hosts and launch presets', run: onSettings },
     ...commandDefinitions.filter((command) => actions[command.id] && actions[command.id]?.available !== false && command.id !== 'search').map((command) => ({ id: `command:${command.id}`, title: command.label, subtitle: `Command · ${commandBinding(command.id, overrides) || `command mode → ${command.chord.toUpperCase()}`}`, run: () => actions[command.id]?.run() })),
     ...sessions.map((s) => ({ id: s.key, title: `${callsigns[s.key] ? callsigns[s.key] + ' / ' : ''}${s.title}`, subtitle: `${s.hostName} · ${s.provider} · ${s.branch || ''} ${s.cwd} ${s.repository || ''}`, run: () => onSelect(s) })),
   ].filter((e) => q.split(/\s+/).every((token) => `${e.title} ${e.subtitle}`.toLowerCase().includes(token)))

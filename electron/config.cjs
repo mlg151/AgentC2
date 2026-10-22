@@ -28,6 +28,11 @@ function validateSettings(input) {
   const hosts = input.hosts.map((h) => {
     if (!ID.test(h.id) || ids.has(h.id)) throw new Error('Host IDs must be unique');
     ids.add(h.id);
+    if (h.kind !== undefined && !['ssh', 'local'].includes(h.kind)) throw new Error('Invalid host connection type');
+    if (h.kind === 'local') {
+      if (input.hosts.some((other) => other !== h && other.kind === 'local')) throw new Error('Configure only one local host');
+      return { id: h.id, kind: 'local', name: text(h.name, 100).trim() || 'This computer', target: 'localhost', port: 22, enabled: Boolean(h.enabled), autoForward: Boolean(h.autoForward) };
+    }
     const target = text(h.target, 255).trim();
     if (!/^[a-zA-Z0-9_][a-zA-Z0-9_.@:\[\]-]*$/.test(target)) throw new Error('Use an SSH config alias or user@hostname for the host target');
     const port = Number(h.port);
@@ -44,7 +49,6 @@ function validateSettings(input) {
     if (p.hostId && !hosts.some((h) => h.id === p.hostId)) throw new Error('Preset host does not exist');
     const roeProfile = p.roeProfile === undefined ? '' : p.roeProfile;
     if (!ROE_PROFILES.includes(roeProfile)) throw new Error('Invalid preset Rules of Engagement profile');
-    if (roeProfile === 'gated' && p.provider === 'antigravity') throw new Error('Antigravity has no verified session-scoped gated mode');
     const loop = p.loopBreaker || {};
     if (loop.enabled !== undefined && typeof loop.enabled !== 'boolean' || loop.autoInterrupt !== undefined && typeof loop.autoInterrupt !== 'boolean' || loop.threshold !== undefined && (!Number.isInteger(loop.threshold) || loop.threshold < 2 || loop.threshold > 20) || loop.windowMinutes !== undefined && (!Number.isInteger(loop.windowMinutes) || loop.windowMinutes < 1 || loop.windowMinutes > 120) || loop.cooldownMinutes !== undefined && (!Number.isInteger(loop.cooldownMinutes) || loop.cooldownMinutes < 1 || loop.cooldownMinutes > 1440)) throw new Error('Invalid repeated-failure policy');
     if (loop.enabled && (p.provider !== 'claude' || !p.attentionHooks)) throw new Error('Repeated-failure detection requires Claude provider hooks');
@@ -113,10 +117,10 @@ function resolveRoeProfile(settings, hostId, preset, override) {
   if (override !== undefined && !ROE_PROFILES.slice(1).includes(override)) throw new Error('Invalid Rules of Engagement override');
   return override || preset?.roeProfile || settings.roe?.hostDefaults?.[hostId] || (preset?.fullPermissions === false ? 'provider-default' : 'full');
 }
-function validateRoeLaunch(provider, preset, profile) {
+function validateRoeLaunch(provider, preset, profile, transport = 'terminal') {
   if (profile !== 'gated') return;
-  if (!['codex', 'claude'].includes(provider)) throw new Error('Provider has no verified session-scoped gated mode');
-  if (preset && (preset.command !== provider || /--(?:dangerously|sandbox|ask-for-approval|permission-mode|settings|allowedTools|allowed-tools|config|profile)|(?:^|\s)-c(?:\s|=)/.test(preset.args))) throw new Error('Gated mode requires the standard provider command without conflicting permission arguments');
+  if (!['codex', 'claude'].includes(provider) && !(provider === 'antigravity' && transport === 'chat')) throw new Error('Provider has no verified session-scoped gated mode');
+  if (preset && (preset.command !== (provider === 'antigravity' ? 'agy' : provider) || /--(?:dangerously|sandbox|ask-for-approval|permission-mode|settings|allowedTools|allowed-tools|config|profile)|(?:^|\s)-c(?:\s|=)/.test(preset.args))) throw new Error('Gated mode requires the standard provider command without conflicting permission arguments');
 }
 function validateWorkspace(w) {
   if (!w || !Array.isArray(w.tabs) || w.tabs.length > 40 || !w.metadata || typeof w.metadata !== 'object') throw new Error('Invalid workspace');
@@ -183,7 +187,7 @@ function validateCachedUnits(value) {
       const id = text(unit.id, 200);
       if (!unit.key.endsWith(`:${id}`)) throw new Error('Cached unit identity changed');
       const updatedAt = unit.updatedAt && Number.isFinite(Date.parse(unit.updatedAt)) ? text(unit.updatedAt, 80) : null;
-      return { key: unit.key, id, provider: unit.provider, kind: unit.kind, title: text(unit.title || '', 150), cwd: text(unit.cwd || '', 500), updatedAt, state: text(unit.state || '', 40), managed: Boolean(unit.managed), canAttach: Boolean(unit.canAttach), canResume: Boolean(unit.canResume), canInterrupt: Boolean(unit.canInterrupt), canStop: Boolean(unit.canStop), exitCode: Number.isInteger(unit.exitCode) ? unit.exitCode : null, presetName: text(unit.presetName || '', 100), presetId: text(unit.presetId || '', 80), roeProfile: ['full', 'gated', 'provider-default'].includes(unit.roeProfile) ? unit.roeProfile : 'unknown', branch: text(unit.branch || '', 200), repository: text(unit.repository || '', 500), worktreeOperation: text(unit.worktreeOperation || '', 32) };
+      return { chatState: ['starting', 'idle', 'running', 'waiting', 'stopped', 'failed', 'unknown'].includes(unit.chatState) ? unit.chatState : undefined, transport: unit.transport === 'chat' && /^chat-[a-f0-9]{32}$/.test(unit.chatSessionId || '') ? 'chat' : 'terminal', chatSessionId: /^chat-[a-f0-9]{32}$/.test(unit.chatSessionId || '') ? unit.chatSessionId : undefined, providerSessionId: typeof unit.providerSessionId === 'string' ? text(unit.providerSessionId, 200) : undefined, key: unit.key, id, provider: unit.provider, kind: unit.kind, title: text(unit.title || '', 150), cwd: text(unit.cwd || '', 500), updatedAt, state: text(unit.state || '', 40), managed: Boolean(unit.managed), canAttach: Boolean(unit.canAttach), canResume: Boolean(unit.canResume), canInterrupt: Boolean(unit.canInterrupt), canStop: Boolean(unit.canStop), exitCode: Number.isInteger(unit.exitCode) ? unit.exitCode : null, presetName: text(unit.presetName || '', 100), presetId: text(unit.presetId || '', 80), roeProfile: ['full', 'gated', 'provider-default'].includes(unit.roeProfile) ? unit.roeProfile : 'unknown', branch: text(unit.branch || '', 200), repository: text(unit.repository || '', 500), worktreeOperation: text(unit.worktreeOperation || '', 32) };
     });
   }
   return cached;
@@ -246,12 +250,12 @@ class Store {
     // Persist only a bounded summary. Terminal output, event details, and
     // transcripts must never enter workspace.json through inventory caching.
     const summary = sessions.filter((unit) => !this.data.deletedSessions.includes(unit.key)).slice(0, 200).map((unit) => ({
-      key: unit.key, id: unit.id, provider: unit.provider, kind: unit.kind,
+      chatState: unit.chatState, transport: unit.transport, chatSessionId: unit.chatSessionId, providerSessionId: unit.providerSessionId, key: unit.key, id: unit.id, provider: unit.provider, kind: unit.kind,
       title: String(unit.title || '').slice(0, 150), cwd: String(unit.cwd || '').slice(0, 500),
       updatedAt: unit.updatedAt, state: String(unit.state || '').slice(0, 40),
       managed: unit.managed, canAttach: unit.canAttach, canResume: unit.canResume,
       canInterrupt: unit.canInterrupt, canStop: unit.canStop, exitCode: unit.exitCode,
-      presetName: String(unit.presetName || '').slice(0, 100), roeProfile: unit.roeProfile || 'unknown',
+      presetName: String(unit.presetName || '').slice(0, 100), presetId: String(unit.presetId || '').slice(0, 80), roeProfile: unit.roeProfile || 'unknown',
       branch: String(unit.branch || '').slice(0, 200), repository: String(unit.repository || '').slice(0, 500), worktreeOperation: String(unit.worktreeOperation || '').slice(0, 32),
     }));
     const next = validateCachedUnits({ ...this.data.cachedUnits, [hostId]: summary });

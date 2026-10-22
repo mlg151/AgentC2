@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import type { AttentionItem, Session, SituationWorkspace, UnitPreview } from '../types';
-import { unitState } from '../workspace';
+import { isManagedSession, unitState } from '../workspace';
 import { Modal } from './Modal';
 
 const hints = ['A', 'S', 'D', 'F', 'J', 'K', 'L', 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O'];
@@ -14,7 +14,7 @@ export function Overwatch({ sessions, situation, attention, onSelect, onClose }:
   const selected = useRef(onSelect); selected.current = onSelect;
   const restoreFocus = useRef(true);
   function inspect(session: Session) { restoreFocus.current = false; selected.current(session); }
-  const units = useMemo(() => sessions.filter((session) => session.kind !== 'conversation').sort((a, b) => Number(situation.callsigns[a.key] || 100) - Number(situation.callsigns[b.key] || 100) || a.key.localeCompare(b.key)), [sessions, situation.callsigns]);
+  const units = useMemo(() => sessions.filter(isManagedSession).sort((a, b) => Number(situation.callsigns[a.key] || 100) - Number(situation.callsigns[b.key] || 100) || a.key.localeCompare(b.key)), [sessions, situation.callsigns]);
   const pages = Math.max(1, Math.ceil(units.length / size));
   const currentPage = Math.min(page, pages - 1);
   const visible = useMemo(() => units.slice(currentPage * size, (currentPage + 1) * size), [units, currentPage, size]);
@@ -46,7 +46,7 @@ export function Overwatch({ sessions, situation, attention, onSelect, onClose }:
     return () => document.removeEventListener('keydown', key, true);
   }, [visible, pages]);
   const close = useCallback(onClose, [onClose]);
-  return <div className="overwatch-overlay"><Modal title="Overwatch" onClose={close} wide restoreFocus={restoreFocus}><header className="overwatch-header"><div><strong>AGENTC2 <span>/ OVERWATCH</span></strong><small>{units.length} runtime units · read-only terminal snapshots</small></div><div className="overwatch-controls"><label>Grid<select aria-label="Overwatch grid size" value={size} onChange={(event) => { setSize(Number(event.target.value)); setPage(0); }}><option value={12}>4 × 3</option><option value={16}>4 × 4</option></select></label><button className="button-secondary" onClick={onClose}><X size={14} />Close Overwatch <kbd>Esc</kbd></button></div></header><div className={`overwatch-grid${size === 16 ? ' grid-sixteen' : ''}`}>{visible.map((session, index) => {
+  return <div className="overwatch-overlay"><Modal title="Overwatch" onClose={close} wide restoreFocus={restoreFocus}><header className="overwatch-header"><div><strong>AGENTC2 <span>/ OVERWATCH</span></strong><small>{units.length} runtime units · read-only session snapshots</small></div><div className="overwatch-controls"><label>Grid<select aria-label="Overwatch grid size" value={size} onChange={(event) => { setSize(Number(event.target.value)); setPage(0); }}><option value={12}>4 × 3</option><option value={16}>4 × 4</option></select></label><button className="button-secondary" onClick={onClose}><X size={14} />Close Overwatch <kbd>Esc</kbd></button></div></header><div className={`overwatch-grid${size === 16 ? ' grid-sixteen' : ''}`}>{visible.map((session, index) => {
     const state = unitState(session, attention), preview = previews[session.key];
     const stale = !preview?.sampledAt || session.stale || clock - preview.sampledAt > 15000;
     return <button key={session.key} data-session-key={session.key} className={`overwatch-unit unit-${state.tone}`} aria-label={`Inspect unit ${situation.callsigns[session.key] || session.title}`} onClick={() => inspect(session)}><div className="overwatch-unit-heading"><kbd>{hints[index]}</kbd><strong>{situation.callsigns[session.key] || '—'} {session.provider.toUpperCase()}</strong><em>[{state.code}]</em></div><small title={session.cwd}>{session.hostName} · {session.branch ? `${session.branch} · ` : ''}{session.title}</small><pre>{preview?.text || 'Capturing read-only snapshot…'}</pre><span className="preview-time">{stale ? preview?.sampledAt ? 'Stale snapshot' : preview?.error ? 'Unavailable' : 'Waiting for snapshot' : `${Math.max(0, Math.round((clock - preview!.sampledAt!) / 1000))}s ago · snapshot`}</span></button>;

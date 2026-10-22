@@ -1,6 +1,9 @@
 import type { AttentionItem, Session, SessionMetadata, SituationWorkspace, Workspace } from './types';
 
 export const emptyMetadata: SessionMetadata = { pinned: false, project: '', notes: '' };
+export function isManagedSession(session: Session): boolean {
+  return session.kind === 'managed' || session.managed === true;
+}
 export function projectFor(session: Session, metadata: Record<string, SessionMetadata>) {
   return metadata[session.key]?.project || session.cwd || 'Ungrouped';
 }
@@ -20,15 +23,16 @@ export function updateSituation(workspace: Workspace, patch: Partial<SituationWo
 
 export function assignCallsigns(workspace: Workspace, sessions: Session[]): Workspace {
   const current = situationFor(workspace).callsigns;
-  const used = new Set(Object.values(current));
-  const callsigns = { ...current };
-  for (const session of sessions.filter((item) => item.kind !== 'conversation').sort((a, b) => a.key.localeCompare(b.key))) {
+  const excluded = new Set(sessions.filter((session) => !isManagedSession(session)).map((session) => session.key));
+  const callsigns = Object.fromEntries(Object.entries(current).filter(([key]) => !excluded.has(key)));
+  const used = new Set(Object.values(callsigns));
+  for (const session of sessions.filter(isManagedSession).sort((a, b) => a.key.localeCompare(b.key))) {
     if (callsigns[session.key]) continue;
     const available = Array.from({ length: 99 }, (_, index) => String(index + 1).padStart(2, '0')).find((value) => !used.has(value));
     if (!available) break;
     callsigns[session.key] = available; used.add(available);
   }
-  return Object.keys(callsigns).length === Object.keys(current).length ? workspace : updateSituation(workspace, { callsigns });
+  return Object.keys(callsigns).length === Object.keys(current).length && Object.entries(callsigns).every(([key, value]) => current[key] === value) ? workspace : updateSituation(workspace, { callsigns });
 }
 
 export function openInPane(workspace: Workspace, key: string, pane: 'anchor' | 'target' = 'target'): Workspace {
@@ -51,6 +55,13 @@ export function closeWorkspaceTab(workspace: Workspace, key: string): Workspace 
 
 export function unitState(session: Session, attention: AttentionItem[]) {
   if (session.stale || session.missing) return { code: 'UNKNOWN', label: 'Last known state; host unavailable', tone: 'unknown', priority: 3 };
+  if (session.transport === 'chat' && session.chatState) {
+    if (session.chatState === 'unknown' || session.chatState === 'starting') return { code: 'UNKNOWN', label: session.chatState === 'starting' ? 'Provider is starting or importing history' : 'Worker cannot confirm the provider state; inspect before resuming', tone: 'unknown', priority: 3 };
+    if (session.chatState === 'failed') return { code: 'FAULT', label: 'Provider session failed', tone: 'fault', priority: 0 };
+    if (session.chatState === 'waiting') return { code: 'HALT', label: 'Provider is waiting for a correlated decision or answer', tone: 'halt', priority: 1 };
+    if (session.chatState === 'running') return { code: 'ENG', label: 'Provider reports an active turn', tone: 'nominal', priority: 2 };
+    return { code: 'STBY', label: session.chatState === 'stopped' ? 'Managed provider stopped; transcript available' : 'Provider reports idle', tone: 'standby', priority: 4 };
+  }
   if (session.activity === 'fault' || session.exitCode != null && session.exitCode !== 0) return { code: 'FAULT', label: 'Confirmed process or provider failure', tone: 'fault', priority: 0 };
   if (session.activity === 'halted' || session.state === 'blocked' || attention.some((item) => item.sessionKey === session.key && item.kind === 'input' && item.confidence === 'confirmed' && !item.acknowledged)) return { code: 'HALT', label: 'Confirmed request for input', tone: 'halt', priority: 1 };
   if (session.activity === 'engaged') return { code: 'ENG', label: 'Confirmed agent execution', tone: 'nominal', priority: 2 };

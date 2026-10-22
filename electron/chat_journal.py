@@ -80,6 +80,8 @@ class Journal:
             );
         """)
         self.db.execute("PRAGMA user_version=" + str(CONTRACT["version"]))
+        if "managed_name" not in {row[1] for row in self.db.execute("PRAGMA table_info(sessions)")}:
+            self.db.execute("ALTER TABLE sessions ADD COLUMN managed_name TEXT")
 
     @contextmanager
     def transaction(self):
@@ -100,7 +102,7 @@ class Journal:
 
     @staticmethod
     def _view(row):
-        return dict(id=row["id"], provider=row["provider"], providerSessionId=row["provider_session_id"], title=row["title"], cwd=row["cwd"], roeProfile=row["roe_profile"], state=row["state"], activeTurnId=row["active_turn_id"], capabilities=json.loads(row["capabilities"]), createdAt=row["created_at"], updatedAt=row["updated_at"])
+        return dict(id=row["id"], managedName=row["managed_name"], provider=row["provider"], providerSessionId=row["provider_session_id"], title=row["title"], cwd=row["cwd"], roeProfile=row["roe_profile"], state=row["state"], activeTurnId=row["active_turn_id"], capabilities=json.loads(row["capabilities"]), createdAt=row["created_at"], updatedAt=row["updated_at"])
 
     @staticmethod
     def _receipt(row):
@@ -132,6 +134,7 @@ class Journal:
                 identifier = "chat-" + command["commandId"].replace("-", "")
                 at = now()
                 self.db.execute("INSERT INTO sessions(id,provider,provider_session_id,title,cwd,roe_profile,state,capabilities,created_at,updated_at) VALUES(?,?,?,?,?,?,'starting',?,?,?)", (identifier, payload["provider"], payload.get("providerSessionId"), payload["title"], payload["cwd"], payload["roeProfile"], encoded(capabilities), at, at))
+                self.db.execute("UPDATE sessions SET managed_name=? WHERE id=?", (payload.get("managedName"), identifier))
                 self._append(identifier, "session.updated", dict(state="starting", detail="Starting remote provider"))
             else:
                 identifier = command["sessionId"]
@@ -251,7 +254,8 @@ class Journal:
                     break
                 events.append(json.loads(row["body"]))
                 size += length
-            return dict(session=self._view(session), events=events, cursor=events[-1]["sequence"] if events else max(after, session["retained_from"] - 1), hasMore=len(rows) > len(events), retainedFrom=session["retained_from"], truncated=after < session["retained_from"] - 1)
+            pending = [self._receipt(row) for row in self.db.execute("SELECT * FROM commands WHERE session_id=? AND state IN ('accepted','dispatching','unknown') ORDER BY created_at", (identifier,))]
+            return dict(session=self._view(session), events=events, cursor=events[-1]["sequence"] if events else max(after, session["retained_from"] - 1), latestCursor=session["last_sequence"], hasMore=len(rows) > len(events), retainedFrom=session["retained_from"], truncated=after < session["retained_from"] - 1, pendingCommands=pending)
 
     def pending_requests(self, identifier):
         with self.lock:
@@ -273,6 +277,8 @@ class Journal:
             row = self._session(identifier)
             if row["state"] not in ("stopped", "failed"):
                 raise ValueError("Only confirmed stopped or failed sessions can be pruned")
+            if self.db.execute("SELECT 1 FROM commands WHERE session_id=? AND state IN ('accepted','dispatching') LIMIT 1", (identifier,)).fetchone():
+                raise ValueError("Wait for pending commands to settle before removing transcript content")
             self.db.execute("DELETE FROM events WHERE session_id=?", (identifier,))
             self.db.execute("DELETE FROM requests WHERE session_id=?", (identifier,))
             self.db.execute("UPDATE sessions SET retained_from=last_sequence+1 WHERE id=?", (identifier,))

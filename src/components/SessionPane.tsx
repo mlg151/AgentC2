@@ -1,9 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { Anchor, ChevronLeft, ChevronRight, ExternalLink, Link2Off, Play, Square, TerminalSquare, Trash2, Zap } from 'lucide-react';
 import { TerminalView } from './TerminalView';
 import { DiffDrawer } from './DiffDrawer';
 import type { DevUrl, Session } from '../types';
 import { elapsedClock } from '../readiness';
+import { desktopChatApi } from '../chatClient';
+import { isManagedSession } from '../workspace';
+
+const ChatView = lazy(() => import('./ChatView').then((module) => ({ default: module.ChatView })));
 
 function ElapsedBadge({ startedAt }: { startedAt?: string | null }) {
   const [now, setNow] = useState(Date.now());
@@ -11,7 +15,8 @@ function ElapsedBadge({ startedAt }: { startedAt?: string | null }) {
   return <span title={startedAt ? `Managed tmux session started ${new Date(startedAt).toLocaleString()}` : 'Start time unavailable'}>Unit elapsed {elapsedClock(startedAt, now)}</span>;
 }
 
-export function SessionPane({ session, visible, primary, focused, slot, callsign, diffOpen, onToggleDiff, onFocus, onAnchor, onCycle, onResume, onRefresh, onDeleteHistory }: { session: Session; visible: boolean; primary: boolean; focused: boolean; slot: 'anchor' | 'target'; callsign?: string; diffOpen: boolean; onToggleDiff: () => void; onFocus: () => void; onAnchor: () => void; onCycle: (direction: number) => void; onResume: (s: Session) => void; onRefresh: () => void; onDeleteHistory: (session: Session) => void }) {
+export function SessionPane({ session, visible, primary, focused, slot, callsign, diffOpen, onToggleDiff, onFocus, onAnchor, onCycle, onResume, onRefresh, onDeleteHistory, onDeleteSession }: { session: Session; visible: boolean; primary: boolean; focused: boolean; slot: 'anchor' | 'target'; callsign?: string; diffOpen: boolean; onToggleDiff: () => void; onFocus: () => void; onAnchor: () => void; onCycle: (direction: number) => void; onResume: (s: Session) => void; onRefresh: () => void; onDeleteHistory: (session: Session) => void; onDeleteSession: (session: Session) => void }) {
+  const isChat = session.transport === 'chat';
   const [terminalId, setTerminalId] = useState<string | null>(null);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameInput, setRenameInput] = useState(session.title);
@@ -23,7 +28,7 @@ export function SessionPane({ session, visible, primary, focused, slot, callsign
   const [devUrls, setDevUrls] = useState<DevUrl[]>([]);
   const idRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!wanted || !session.canAttach || !window.agentHQ) return;
+    if (isChat || !wanted || !session.canAttach || !window.agentHQ) return;
     let cancelled = false;
     let connection: string | null = null;
     setConnecting(true); setError('');
@@ -37,7 +42,7 @@ export function SessionPane({ session, visible, primary, focused, slot, callsign
       if (connection) void window.agentHQ?.closeTerminal(connection);
       idRef.current = null; setTerminalId(null);
     };
-  }, [wanted, attempt, session.id, session.hostId, session.canAttach]);
+  }, [isChat, wanted, attempt, session.id, session.hostId, session.canAttach]);
   useEffect(() => {
     // An initial attach can fail while a cached host is offline. Retry only
     // when fresh inventory confirms that the host is reachable again.
@@ -73,21 +78,24 @@ export function SessionPane({ session, visible, primary, focused, slot, callsign
     <div className="viewport-heading"><span className="viewport-letter">{primary ? 'A' : 'B'}</span><strong>{primary ? 'PINNED ANCHOR' : 'CYCLING TARGET'}</strong><span className="viewport-callsign">{callsign || '—'}</span><div className="viewport-actions">{!primary ? <><button aria-label="Previous target unit" title="Previous target unit" onClick={() => onCycle(-1)}><ChevronLeft size={14} /></button><button aria-label="Next target unit" title="Next target unit" onClick={() => onCycle(1)}><ChevronRight size={14} /></button></> : null}<button onClick={onAnchor} title={primary ? 'Release the pinned anchor' : 'Swap this target into Pane A'}><Anchor size={13} />{primary ? 'Unpin anchor' : 'Pin to A'}</button></div></div>
     <div className="pane-heading"><div><strong title={session.title}>{session.title}</strong><small>{session.hostName} · {session.provider} · {session.cwd || 'Working directory unavailable'}</small></div><span className={session.stale ? 'danger-text' : ''}>{session.missing ? 'Session unavailable' : session.stale ? 'Host unavailable' : session.state === 'exited' ? `Exited (${session.exitCode ?? '?'})` : terminalId ? 'Attached' : session.kind}</span></div>
     <div className="toolbar">
-      {session.canAttach ? <button className="button-primary" disabled={busy || Boolean(terminalId) || connecting || session.stale} onClick={() => { setWanted(true); setAttempt((a) => a + 1); }}><TerminalSquare size={15} />{connecting ? 'Attaching…' : 'Attach'}</button> : null}
+      {session.canAttach && !isChat ? <button className="button-primary" disabled={busy || Boolean(terminalId) || connecting || session.stale} onClick={() => { setWanted(true); setAttempt((a) => a + 1); }}><TerminalSquare size={15} />{connecting ? 'Attaching…' : 'Attach'}</button> : null}
       {session.canResume ? <button className="button-primary" disabled={session.stale || busy} onClick={() => onResume(session)}><Play size={15} />Resume</button> : null}
       {session.kind === 'conversation' ? <button className="toolbar-button danger" disabled={session.stale || busy} onClick={() => onDeleteHistory(session)}><Trash2 size={14} />Delete history</button> : null}
       {session.managed === true ? <button className="toolbar-button" disabled={session.stale || session.missing || busy} aria-expanded={renameOpen} onClick={() => { setRenameInput(session.title); setRenameOpen((value) => !value); }}>{renameOpen ? 'Cancel rename' : 'Rename'}</button> : null}
-      {session.canInterrupt ? <button className="toolbar-button" disabled={session.stale || busy} onClick={() => void window.agentHQ?.interrupt(session.id, session.hostId).catch(showError)}><Zap size={15} />Interrupt</button> : null}
-      {session.canAttach ? <button className="toolbar-button" disabled={!terminalId || busy} onClick={() => setWanted(false)}><Link2Off size={15} />Detach</button> : null}
-      {session.canStop ? <button className="toolbar-button danger" disabled={session.stale || busy} onClick={() => void stop()}><Square size={14} />Stop</button> : null}
+      {session.canInterrupt && !isChat ? <button className="toolbar-button" disabled={session.stale || busy} onClick={() => void window.agentHQ?.interrupt(session.id, session.hostId).catch(showError)}><Zap size={15} />Interrupt</button> : null}
+      {session.canAttach && !isChat ? <button className="toolbar-button" disabled={!terminalId || busy} onClick={() => setWanted(false)}><Link2Off size={15} />Detach</button> : null}
+      {session.canStop && !isChat ? <button className="toolbar-button danger" disabled={session.stale || busy} onClick={() => void stop()}><Square size={14} />Stop</button> : null}
+      {isManagedSession(session) ? <button className="toolbar-button danger" disabled={session.stale || session.missing || busy} onClick={() => onDeleteSession(session)}><Trash2 size={14} />Delete session</button> : null}
+
       {session.worktreeOperation ? <button className="toolbar-button" aria-pressed={diffOpen} onClick={onToggleDiff}>{diffOpen ? 'Hide diff' : 'Diff'}</button> : null}
-      {devUrls.map((item) => <button key={item.url} className="toolbar-button" title={`${item.url}${item.error ? ` — ${item.error}` : ''}`} disabled={!terminalId || session.stale || item.status === 'opening'} onClick={() => void window.agentHQ?.openDevUrl(terminalId!, item.url).catch(showError)}><ExternalLink size={13} />{item.status === 'ready' ? 'Open' : item.status === 'opening' ? 'Opening' : item.status === 'failed' ? 'Retry' : 'Tunnel'} :{item.port}</button>)}
+      {devUrls.map((item) => <button key={item.url} className="toolbar-button" title={`${item.url}${item.error ? ` — ${item.error}` : ''}`} disabled={(!isChat && !terminalId) || session.stale || item.status === 'opening'} onClick={() => void window.agentHQ?.openDevUrl(isChat ? session.key : terminalId!, item.url).catch(showError)}><ExternalLink size={13} />{item.status === 'ready' ? 'Open' : item.status === 'opening' ? 'Opening' : item.status === 'failed' ? 'Retry' : 'Tunnel'} :{item.port}</button>)}
     </div>
     {renameOpen ? <form className="rename-form" onSubmit={(event) => void rename(event)} onKeyDown={(event) => { if (event.key === 'Escape' && !busy) { event.stopPropagation(); setRenameOpen(false); } }}>
       <label className="rename-form-label">New name<input autoFocus className="rename-input" value={renameInput} maxLength={100} disabled={busy} onChange={(event) => setRenameInput(event.target.value)} aria-label="Session name" /></label>
       <div className="inline-actions"><button type="submit" className="text-button" disabled={busy || session.stale || session.missing || !renameInput.trim() || /[\x00-\x1f\x7f-\x9f]/.test(renameInput)}>{busy ? 'Saving…' : 'Save'}</button><button type="button" className="text-button" disabled={busy} onClick={() => setRenameOpen(false)}>Cancel</button></div>
     </form> : null}
-    {session.provider !== 'terminal' ? <div className="telemetry-strip" aria-label="Provider telemetry and permissions">
+    {session.provider !== 'terminal' && !isChat ? <div className="telemetry-strip" aria-label="Provider telemetry and permissions">
+
       <span title="Launch-time provider permission profile; already-running agents may have changed modes">Launch ROE {session.roeProfile === 'gated' ? 'gated' : session.roeProfile === 'full' ? 'full' : session.roeProfile === 'provider-default' ? 'provider defaults' : 'unknown'}</span>
       <span className={session.telemetry?.status === 'reported' && session.telemetry.context?.percent && session.telemetry.context.percent >= 90 ? 'danger-text' : session.telemetry?.status === 'reported' && session.telemetry.context?.percent && session.telemetry.context.percent >= 75 ? 'warning-text' : ''}>Context {session.telemetry?.status === 'reported' && session.telemetry.context ? `${session.telemetry.context.percent}%${session.telemetry.context.percent >= 90 ? ' critical' : session.telemetry.context.percent >= 75 ? ' warning' : ''}` : session.telemetry?.status || 'unknown'}</span>
       <span>Tokens {session.telemetry?.status === 'reported' && session.telemetry.tokensPerMinute != null ? `${session.telemetry.tokensPerMinute}/min` : session.telemetry?.status === 'stale' ? 'stale' : session.telemetry?.status === 'unsupported' ? 'unsupported' : 'unknown'}</span>
@@ -95,10 +103,10 @@ export function SessionPane({ session, visible, primary, focused, slot, callsign
       <small title={session.telemetry?.sampledAt || ''}>{session.telemetry?.source || 'No provider measurement'}{session.telemetry?.status === 'stale' ? ' · last sample is stale' : ''}</small>
     </div> : null}
     {error ? <p role="alert" className="pane-error">{error}</p> : null}
-    <div className={`terminal-panel${terminalId ? ' is-attached' : ''}`}>
+    {isChat ? <Suspense fallback={<div className="chat-empty" role="status">Loading chat…</div>}><ChatView key={`${session.hostId}/${session.chatSessionId || session.id}`} api={desktopChatApi} sessionId={session.chatSessionId || session.id} hostId={session.hostId} enabled={visible} connected={!session.stale} onRefresh={onRefresh} /></Suspense> : <div className={`terminal-panel${terminalId ? ' is-attached' : ''}`}>
       <TerminalView terminalId={terminalId} visible={visible && Boolean(terminalId)} focused={focused} />
       {!terminalId ? <div className="terminal-empty"><TerminalSquare size={30} /><h2>{connecting ? session.provider === 'terminal' ? 'Attaching to terminal…' : 'Attaching to chat…' : session.missing ? 'Session unavailable' : session.stale ? 'Host unavailable' : session.kind === 'unmanaged' ? 'Unmanaged process' : session.canResume ? 'Conversation saved' : 'Session ready'}</h2><p>{session.missing ? 'This session is no longer in the host’s inventory. Its notes remain saved; close the tab or refresh to check again.' : session.stale ? 'The last known session state is shown. Reconnect the host to continue.' : session.kind === 'unmanaged' ? 'This process was started outside tmux. Find its saved conversation and resume a managed copy.' : session.canResume ? 'Resume this conversation with a launch preset.' : 'Attach to continue. Remote sessions stay available after disconnecting.'}</p></div> : null}
-    </div>
+    </div>}
     {diffOpen && session.worktreeOperation ? <DiffDrawer session={session} visible={visible} onClose={onToggleDiff} /> : null}
     <div className="detail-footer"><span>ID <code>{session.id}</code></span><ElapsedBadge startedAt={session.startedAt} /><span>{session.presetName || session.provider}</span></div>
   </section>;

@@ -60,7 +60,7 @@ class Tunnels {
   list(sessionKey) {
     return [...(this.hints.get(sessionKey)?.values() || [])].map((hint) => {
       const record = this.records.get(hint.key);
-      return { url: hint.url, hostId: hint.hostId, port: hint.port, status: record?.status || 'available', localUrl: record?.status === 'ready' ? this.localUrl(record, hint.url) : null, error: record?.status === 'failed' ? record.error : null };
+      return { url: hint.url, hostId: hint.hostId, port: hint.port, status: record?.status || (hint.local ? 'ready' : 'available'), localUrl: record?.status === 'ready' ? this.localUrl(record, hint.url) : hint.local ? hint.url : null, error: record?.status === 'failed' ? record.error : null };
     });
   }
 
@@ -76,7 +76,7 @@ class Tunnels {
       const key = this.key(host.id, remote);
       if (hints.has(remote.href)) continue;
       if (hints.size >= 8) break;
-      hints.set(remote.href, { key, url: remote.href, hostId: host.id, port: remote.port });
+      hints.set(remote.href, { key, url: remote.href, hostId: host.id, port: remote.port, local: host.kind === 'local' });
       this.hints.set(sessionKey, hints);
       this.notify(sessionKey);
       if (host.autoForward) void this.open(host, sessionKey, remote.href).catch(() => {});
@@ -84,12 +84,12 @@ class Tunnels {
   }
 
   async open(host, sessionKey, url) {
-    if (this.closed || !host?.enabled) throw new Error('SSH host is unavailable');
+    if (this.closed || !host?.enabled) throw new Error('Host is unavailable');
     const remote = parseDevUrl(url);
     const key = this.key(host.id, remote);
     const hints = this.hints.get(sessionKey) || new Map();
     if (!hints.has(remote.href) && hints.size < 8) {
-      hints.set(remote.href, { key, url: remote.href, hostId: host.id, port: remote.port });
+      hints.set(remote.href, { key, url: remote.href, hostId: host.id, port: remote.port, local: host.kind === 'local' });
       this.hints.set(sessionKey, hints);
     }
     let record = this.records.get(key);
@@ -108,6 +108,7 @@ class Tunnels {
   }
 
   localUrl(record, source) {
+    if (record.host.kind === 'local') return source;
     const url = new URL(source);
     url.hostname = '127.0.0.1';
     url.port = String(record.port);
@@ -130,6 +131,10 @@ class Tunnels {
 
   async launch(record) {
     record.status = 'opening'; record.error = null; this.updateRecord(record);
+    if (record.host.kind === 'local') {
+      record.port = record.remote.port;
+      record.status = 'ready'; this.updateRecord(record); return;
+    }
     try {
       for (let attempt = 0; attempt < 3; attempt++) {
         const port = await allocatePort();

@@ -1,4 +1,4 @@
-"""Ephemeral SSH helper. Sent over stdin; nothing is installed on the host."""
+"""Ephemeral SSH entrypoint; structured chat deploys a private persistent worker."""
 
 import base64
 import getpass
@@ -319,7 +319,7 @@ def tmux_sessions():
     return result
 
 
-def unmanaged_processes():
+def unmanaged_processes(worker_pid=None):
     listed = run(["ps", "-eo", "pid=,ppid=,comm=,tty="], timeout=5)
     if listed.returncode != 0:
         return []
@@ -337,7 +337,7 @@ def unmanaged_processes():
         while pid in processes and pid not in seen:
             seen.add(pid)
             parent, command, _ = processes[pid]
-            if command.startswith("tmux"):
+            if command.startswith("tmux") or pid == worker_pid:
                 return True
             pid = parent
         return False
@@ -357,11 +357,61 @@ def unmanaged_processes():
     return result
 
 
-def inventory():
+
+def chat_inventory_events(journal_events, chat):
+    """Translate confirmed chat lifecycle evidence for existing fleet policies."""
+    events, tool_inputs = [], {}
+    for event in journal_events:
+        kind, data = None, event["data"]
+        if event["type"] in ("approval.requested", "question.requested"):
+            kind = "input"
+        elif event["type"] == "turn.completed":
+            kind = "completed" if data["outcome"] in ("completed", "interrupted") else "failed"
+        elif event["type"] == "session.updated" and data["state"] == "running":
+            kind = "working"
+        elif event["type"] == "tool.completed":
+            kind = "tool_failed" if data["isError"] else "tool_ok"
+        if event["type"] == "tool.started":
+            tool_inputs[event["itemId"]] = (data["name"], data["input"])
+        if kind:
+            normalized = {"id": hashlib.sha256((chat["id"] + ":" + str(event["sequence"])).encode()).hexdigest()[:32], "at": event["timestamp"], "kind": kind, "source": chat["provider"], "requestId": data.get("requestId"), "session": chat["providerSessionId"]}
+            if kind == "tool_failed" and event["itemId"] in tool_inputs:
+                normalized.update(failureSignature=hashlib.sha256(json.dumps(tool_inputs[event["itemId"]]).encode()).hexdigest()[:32], failureLabel=data["name"][:80] + " tool failed")
+            events.append(normalized)
+    return events
+
+
+def inventory(payload=None):
     sessions = (
-        tmux_sessions() + unmanaged_processes() + codex_sessions()
+        tmux_sessions() + codex_sessions()
         + claude_sessions() + antigravity_sessions()
     )
+    worker_pid = None
+    if payload and (HOME / ".cache" / "agentc2" / "chat-v1" / "worker.sock").exists():
+        worker_pid = chat_remote({**payload, "request": {"protocolVersion": 1, "action": "health"}})["pid"]
+        chats = chat_remote({**payload, "request": {"protocolVersion": 1, "action": "list"}})
+        by_name = {session["id"]: session for session in sessions if session.get("kind") == "managed"}
+        for chat in chats:
+            name = chat.get("managedName")
+            if not name or not TMUX_RE.fullmatch(name):
+                continue
+            session = by_name.get(name)
+            if session is None:
+                session = {"key": "tmux:" + name, "id": name, "kind": "managed", "managed": True}
+                sessions.append(session)
+            page = chat_remote({**payload, "request": {"protocolVersion": 1, "action": "history", "sessionId": chat["id"], "after": 0, "limit": 1}})
+            latest = page["latestCursor"]
+            page = chat_remote({**payload, "request": {"protocolVersion": 1, "action": "history", "sessionId": chat["id"], "after": max(0, latest - 60), "limit": 100}})
+            events = chat_inventory_events(page["events"], chat)
+            session.update({"transport": "chat", "chatSessionId": chat["id"], "providerSessionId": chat["providerSessionId"], "provider": chat["provider"], "cwd": chat["cwd"], "title": chat["title"], "roeProfile": chat["roeProfile"], "state": "waiting_for_input" if chat["state"] == "waiting" else "exited" if chat["state"] in ("stopped", "failed") else "live", "chatState": chat["state"], "updatedAt": chat["updatedAt"], "startedAt": chat["createdAt"], "canAttach": True, "canStop": chat["canStop"] and chat["state"] != "stopped", "canInterrupt": chat["canStop"] and chat["state"] in ("running", "waiting") and chat["capabilities"]["interrupt"], "canResume": chat["state"] in ("stopped", "failed", "unknown") and bool(chat["providerSessionId"]) and chat["capabilities"]["resume"], "events": events, "outputTail": "", "exitCode": None})
+            usage = next((event for event in reversed(page["events"]) if event["type"] == "usage.updated"), None)
+            values = usage["data"] if usage else {}
+            used, capacity = values.get("contextUsedTokens"), values.get("contextCapacityTokens")
+            session["telemetry"] = {"status": "reported" if usage else "unknown", "sampledAt": usage["timestamp"] if usage else None, "source": "structured-chat", "context": {"usedTokens": used, "capacityTokens": capacity, "percent": min(100, used * 100 / capacity)} if used is not None and capacity else None, "totalTokens": values.get("totalTokens"), "tokensPerMinute": None, "costUsd": values.get("costUsd"), "costBasis": "provider estimate" if values.get("costUsd") is not None else None}
+            session["resolvedRequestIds"] = [event["data"]["requestId"] for event in page["events"] if event["type"] == "request.resolved"]
+            if chat["state"] in ("starting", "unknown"):
+                session["state"] = chat["state"]
+    sessions += unmanaged_processes(worker_pid)
     sessions.sort(key=lambda s: str(s.get("updatedAt") or ""), reverse=True)
     repositories = {}
     for session in sessions:
@@ -383,6 +433,15 @@ def inventory():
 def health(payload=None):
     # Return counters; the desktop computes CPU utilization between samples.
     # Guest ticks are already included in user/nice, so exclude them from total.
+    if sys.platform == "darwin":
+        # macOS has no /proc CPU counters. Leave utilization unknown rather
+        # than reporting load averages as a CPU percentage.
+        total = int(checked(["sysctl", "-n", "hw.memsize"]))
+        pages = run(["vm_stat"]).stdout
+        page_size = int(re.search(r"page size of (\d+) bytes", pages).group(1))
+        free_pages = sum(int(value) for value in re.findall(r"Pages (?:free|inactive|speculative):\s+(\d+)", pages))
+        usage = shutil.disk_usage(HOME)
+        return {"cpuTotal": 0, "cpuIdle": 0, "memoryTotal": total, "memoryUsed": max(0, total - free_pages * page_size), "disks": [{"path": str(HOME), "total": usage.total, "used": usage.used, "free": usage.free}], "sampledAt": time.time() * 1000, "gpu": {"status": "unsupported", "sampledAt": None, "devices": []}}
     cpu = [int(value) for value in Path("/proc/stat").read_text().splitlines()[0].split()[1:9]]
     memory = {}
     for line in Path("/proc/meminfo").read_text().splitlines():
@@ -470,7 +529,7 @@ def create(payload):
     roe_profile = payload.get("roeProfile")
     if not is_terminal and roe_profile not in (None, "full", "gated", "provider-default"):
         raise ValueError("Invalid Rules of Engagement profile")
-    if roe_profile == "gated" and (provider == "antigravity" or (preset and (preset.get("command") != provider or any(flag in preset.get("args", "") for flag in ("--dangerously", "--sandbox", "--ask-for-approval", "--permission-mode", "--settings", "--allowedTools", "--allowed-tools", "--config", "--profile")) or re.search(r"(^|\s)-c(\s|=)", preset.get("args", ""))))):
+    if roe_profile == "gated" and ((provider == "antigravity" and payload.get("transport") != "chat") or (preset and (preset.get("command") != {"antigravity": "agy"}.get(provider, provider) or any(flag in preset.get("args", "") for flag in ("--dangerously", "--sandbox", "--ask-for-approval", "--permission-mode", "--settings", "--allowedTools", "--allowed-tools", "--config", "--profile")) or re.search(r"(^|\s)-c(\s|=)", preset.get("args", ""))))):
         raise ValueError("Gated mode requires a supported, unmodified provider command")
     title = " ".join(str(payload.get("title") or "").split())[:100]
     if not title:
@@ -478,6 +537,23 @@ def create(payload):
     name = payload.get("managedName") or "hq-" + uuid.uuid4().hex[:12]
     if not TMUX_RE.fullmatch(name):
         raise ValueError("Invalid managed session name")
+    if payload.get("transport") == "chat":
+        if is_terminal or agent_id or (preset and (preset.get("command") != {"antigravity": "agy"}.get(provider, provider) or preset.get("args", "").strip())):
+            raise ValueError("Structured chat requires the standard provider command without custom arguments")
+        command_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "agentc2-managed:" + name))
+        identifier = "chat-" + uuid.UUID(command_id).hex
+        existing = tmux_option(name, "@hq_chat_session_id")
+        if existing and existing != identifier:
+            raise ValueError("Managed session identity changed")
+        if not existing:
+            checked(["tmux", "new-session", "-d", "-s", name, "-c", str(cwd), "printf 'AgentC2 structured chat session. Open Chat to interact.\\n'; while :; do sleep 86400; done"])
+            for key, value in (("provider", provider), ("title", title), ("cwd", str(cwd)), ("preset", preset.get("name", "") if preset else ""), ("preset_id", preset.get("id", "") if preset else ""), ("worktree", payload.get("worktreeOperation") or ""), ("roe", roe_profile or "full"), ("chat_session_id", identifier)):
+                checked(["tmux", "set-option", "-t", name, "@hq_" + key, value])
+        command = {"protocolVersion": 1, "commandId": command_id, "operation": "create", "payload": {"provider": provider, "cwd": str(cwd), "title": title, "roeProfile": roe_profile or "full", "managedName": name, "instructions": payload.get("instructions") or "", **({"providerSessionId": conversation_id} if conversation_id else {})}}
+        # Do not remove the reservation when acknowledgement is lost: retrying
+        # this exact command checks its durable receipt without relaunching.
+        receipt = chat_remote({**payload, "request": {"protocolVersion": 1, "action": "command", "command": command}})
+        return {"name": name, "chatSessionId": identifier, "receipt": receipt}
     if is_terminal:
         shell = pwd.getpwuid(os.getuid()).pw_shell or "/bin/bash"
         launch = shlex.join([shell, "-l", "-i"])
@@ -591,6 +667,8 @@ def managed_action(payload, action):
     name = payload.get("name", "")
     if not TMUX_RE.fullmatch(name) or tmux_option(name, "@hq_provider") not in SESSION_PROVIDERS:
         raise ValueError("This action is only available for AgentC2 sessions")
+    if tmux_option(name, "@hq_chat_session_id"):
+        raise ValueError("Use the chat control for this structured session")
     args = ["tmux", "send-keys", "-t", name, "C-c"] if action == "interrupt" else [
         "tmux", "kill-session", "-t", name
     ]
@@ -609,7 +687,7 @@ def main():
     payload = json.loads(base64.b64decode(encoded).decode("utf-8"))
     action = payload.get("action")
     if action == "inventory":
-        result = inventory()
+        result = inventory(payload)
     elif action == "chat":
         result = chat_remote(payload)
     elif action == "health":

@@ -21,6 +21,9 @@ assert.equal(evaluate({ hosts: [{ id: 'default', name: 'Primary', connected: fal
 const request = { id: 'request', hostName: 'Primary', name: 'hq-aaaaaaaaaaaa', tool: 'Bash', createdAt: now / 1000, state: 'pending', connected: true };
 assert.equal(evaluate({}, [request]).level, 3);
 assert.equal(evaluate({ sessions: [{ ...unit, events: [{ id: '2', kind: 'completed', at: '2026-10-21T17:59:30Z' }] }] }, [{ ...request, connected: false }]).level, null);
+for (const [chatState, level] of [['starting', null], ['unknown', null], ['idle', 5], ['running', 4], ['waiting', 3], ['stopped', 5], ['failed', 2]]) {
+  assert.equal(evaluate({ sessions: [{ ...unit, transport: 'chat', chatState, state: 'live', events: [] }] }).level, level, `Fleet readiness must consume structured ${chatState}`);
+}
 assert.equal(evaluate().level, 4);
 assert.equal(evaluate({ sessions: [{ ...unit, events: [{ id: '2', kind: 'completed', at: '2026-10-21T17:59:30Z' }] }] }).level, 5);
 assert.equal(evaluate({ sessions: [{ ...unit, events: [] }] }).level, null, 'A live process is not confirmed execution');

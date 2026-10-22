@@ -355,7 +355,7 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
     await page.getByRole('button', { name: 'New unit', exact: true }).click();
     await page.getByRole('combobox', { name: 'Launch preset' }).selectOption('fixture');
     await page.getByRole('textbox', { name: 'Session name', exact: true }).fill(`${marker} failed preset`);
-    assert.equal(await page.getByRole('combobox', { name: 'SSH host', exact: true }).inputValue(), mirror.id);
+    assert.equal(await page.getByRole('combobox', { name: 'Host', exact: true }).inputValue(), mirror.id);
     await page.getByRole('button', { name: 'Start session', exact: true }).click();
     await page.getByRole('dialog', { name: 'New session', exact: true }).waitFor({ state: 'hidden', timeout: 60000 });
     let latest = await page.evaluate(() => window.agentHQ.inventory());
