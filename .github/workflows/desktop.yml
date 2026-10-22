@@ -63,6 +63,9 @@ jobs:
       - name: Desktop regression checks (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run -a npm run test:desktop
+      - name: Windows local path startup regressions (requires WSL)
+        if: runner.os == 'Windows'
+        run: node tests/windows-local.e2e.cjs
       - name: Package native application
         shell: bash
         env:

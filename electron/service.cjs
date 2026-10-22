@@ -3,7 +3,7 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { sshBinary } = require('./platform.cjs');
-const { localCommand, connectionKey } = require('./local.cjs');
+const { localCommand, connectionKey, localPayload } = require('./local.cjs');
 const { EventEmitter } = require('node:events');
 const pty = require('node-pty');
 const { Store, validateSettings, resolveRoeProfile, validateRoeLaunch, validateSessionPin } = require('./config.cjs');
@@ -144,9 +144,10 @@ function createService({ directory, home }) {
     }
   }
 
-  function runRemote(payload, hostId) {
+  async function runRemote(payload, hostId) {
     if (payload.action === 'inventory' && !payload.sourceDigest) payload = { ...payload, sourceDigest: chatDigest, chatFiles, allowUpgrade: true };
     const host = getHost(hostId);
+    if (host.kind === 'local') payload = await localPayload(payload);
     return new Promise((resolve, reject) => {
       const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
       const embedded = encoded.length > 60000;
