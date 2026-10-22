@@ -179,6 +179,7 @@ class Gateway {
     record.client.closed = true;
     this.sockets.delete(record.client.id);
     this.service.terminals.disconnect(record.client.id);
+    this.service.chats?.disconnect(record.client.id);
     record.ws.close(code, reason);
     const timeout = setTimeout(() => record.ws.terminate(), 1000);
     timeout.unref();
@@ -190,7 +191,7 @@ class Gateway {
     this.sockets.set(client.id, record);
     ws.on('error', () => {});
     ws.on('pong', () => { record.alive = true; });
-    ws.on('close', () => { client.closed = true; this.sockets.delete(client.id); this.service.terminals.disconnect(client.id); });
+    ws.on('close', () => { client.closed = true; this.sockets.delete(client.id); this.service.terminals.disconnect(client.id); this.service.chats?.disconnect(client.id); });
     this.send(ws, { event: 'connected', value: { clientId: client.id, ...this.bootstrap() } });
     ws.on('message', async (buffer) => {
       let request;
@@ -246,6 +247,19 @@ class Gateway {
       case 'acknowledge': return service.acknowledge(args[0]);
       case 'session:pin': return service.setSessionPinned(args[0], args[1]);
       case 'create': return this.once(device, request, () => service.create(args[0], true));
+      case 'chat:capabilities': return service.chats.capabilities(args[0]);
+      case 'chat:open': {
+        if (record.opening + [...service.chats.handles.values()].filter((handle) => handle.client.id === client.id).length >= 4) throw new Error('Close a chat view before opening another');
+        record.opening++;
+        return service.chats.open(client, args[0], args[1]).finally(() => record.opening--);
+      }
+      case 'chat:ready': return service.chats.ready(client, args[0], args[1]);
+      case 'chat:history': return service.chats.history(client, args[0], args[1], args[2]);
+      case 'chat:take': return service.chats.take(client, args[0]);
+      case 'chat:submit': return service.chats.submit(client, args[0], args[1]);
+      case 'chat:receipt': return service.chats.receipt(client, args[0], args[1]);
+      case 'chat:prune': return service.chats.prune(client, args[0]);
+      case 'chat:close': return service.chats.close(client, args[0]);
       case 'interrupt': case 'stop': return this.once(device, request, () => service.action(client, request.method, args[0], args[1]));
       case 'terminal:open': {
         if (record.opening + [...terminals.handles.values()].filter((h) => h.client.id === client.id).length >= 4) throw new Error('Close a terminal before opening another');

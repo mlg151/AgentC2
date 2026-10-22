@@ -1,3 +1,5 @@
+import type { ChatCapabilities, ChatSessionState, ChatClientState, ChatCommand, ChatPage, ChatReceipt, ChatSnapshot, ChatUpdate } from './chatTypes';
+export type { ChatProvider, ChatSessionState, ChatCommandState, ChatCapabilities, ChatUsage, ChatQuestion, ChatAnswer, ChatEvent, ChatCommand, ChatReceipt, ChatSession, ChatPage, ChatPendingRequest, ChatClientState, ChatSnapshot, ChatUpdate, ChatApi } from './chatTypes';
 export type Provider = 'codex' | 'claude' | 'antigravity' | 'terminal';
 export interface ProviderTelemetry { status: 'reported' | 'stale' | 'unknown' | 'unsupported'; sampledAt: string | null; source: string | null; context: { usedTokens: number; capacityTokens: number; percent: number } | null; totalTokens: number | null; tokensPerMinute: number | null; costUsd: number | null; costBasis: string | null }
 
@@ -5,6 +7,9 @@ export interface Session {
   key: string;
   provider: Provider;
   id: string;
+  transport?: 'terminal' | 'chat';
+  chatSessionId?: string;
+  chatState?: ChatSessionState;
   title: string;
   cwd: string;
   updatedAt: string | null;
@@ -49,7 +54,7 @@ export interface Inventory {
 }
 export interface FaultRecord { sessionKey: string; id: string; at: string; label: string; count: number; status: 'pending' | 'review' | 'attempted' | 'interrupted' | 'failed' | 'unknown'; detail: string; autoInterrupt: boolean; result?: string }
 
-export interface HostConfig { id: string; name: string; target: string; port: number; enabled: boolean; autoForward?: boolean }
+export interface HostConfig { id: string; kind?: 'ssh' | 'local'; name: string; target: string; port: number; enabled: boolean; autoForward?: boolean }
 export type RoeProfile = 'full' | 'gated' | 'provider-default';
 export interface DevUrl { url: string; hostId: string; port: number; status: 'available' | 'opening' | 'ready' | 'failed'; localUrl: string | null; error: string | null }
 export interface HostHealth { hostId: string; name: string; connected: boolean; cpuPercent?: number | null; memoryTotal?: number; memoryUsed?: number; disks?: { path: string; total: number; used: number; free: number }[]; sampledAt?: number; sshRoundTripMs?: number; activeChannels?: number; gpu?: { status: 'reported' | 'unknown' | 'unsupported'; sampledAt: number | null; devices: { name: string; memoryTotal: number; memoryUsed: number }[] }; error?: string }
@@ -90,6 +95,8 @@ export interface RemoteStatus extends RemoteConfig { running: boolean; error: st
 export interface CompanionState { settings: Settings; metadata: Record<string, SessionMetadata>; attention: AttentionItem[] }
 
 export interface CreateInput {
+  launchId?: string;
+  transport?: 'chat' | 'terminal';
   provider: Provider;
   cwd: string;
   title: string;
@@ -103,7 +110,7 @@ export interface CreateInput {
   worktree?: { operationId: string; repository: string; baseRef: string; slug: string };
 }
 
-export interface WorktreeRecord { operationId: string; repository?: string; baseRef?: string; baseCommit?: string; branch?: string; path?: string; name?: string; provider?: Provider; slug?: string; title?: string; presetName?: string; hasInstructions?: boolean; sitrepSource?: { version: 1; hostId: string; operationId: string; name: string; repository: string; revision: string }; state: string; status: { exists?: boolean; active?: boolean; owned: boolean; dirty?: boolean | null; merged?: boolean | null } }
+export interface WorktreeRecord { transport?: 'chat' | 'terminal'; operationId: string; repository?: string; baseRef?: string; baseCommit?: string; branch?: string; path?: string; name?: string; provider?: Provider; slug?: string; title?: string; presetName?: string; hasInstructions?: boolean; sitrepSource?: { version: 1; hostId: string; operationId: string; name: string; repository: string; revision: string }; state: string; status: { exists?: boolean; active?: boolean; owned: boolean; dirty?: boolean | null; merged?: boolean | null } }
 export interface DiffScope { hostId: string; name: string; operationId: string }
 export interface DiffFile { id: string; path: string; staged: boolean; unstaged: boolean; untracked: boolean }
 export interface DiffHunk { id: string; text: string; actionable: boolean }
@@ -144,6 +151,17 @@ export interface AgentHQApi {
   health(): Promise<HostHealth[]>;
   onHealth(callback: (readings: HostHealth[]) => void): () => void;
   create(input: CreateInput): Promise<{ name: string }>;
+  chatCapabilities(hostId: string): Promise<ChatCapabilities[]>;
+  openChat(id: string, hostId: string): Promise<string>;
+  readyChat(id: string, after?: number): Promise<ChatSnapshot>;
+  chatHistory(id: string, after?: number, limit?: number): Promise<ChatPage>;
+  takeChat(id: string): Promise<ChatClientState>;
+  submitChat(id: string, command: ChatCommand): Promise<ChatReceipt>;
+  chatReceipt(id: string, commandId: string): Promise<ChatReceipt>;
+  closeChat(id: string): Promise<void>;
+  pruneChat(id: string): Promise<ChatPage>;
+  onChatEvents(callback: (update: ChatUpdate) => void): () => void;
+  onChatState(callback: (state: ChatClientState) => void): () => void;
   listWorktrees(hostId: string): Promise<WorktreeRecord[]>;
   archiveWorktree(hostId: string, operationId: string): Promise<WorktreeRecord>;
   diffFiles(input: DiffScope): Promise<DiffFile[]>;

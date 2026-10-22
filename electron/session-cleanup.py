@@ -178,6 +178,15 @@ def cleanup_plan(provider, session_id, ignore_pid=None):
     try:
         if provider not in PROVIDERS or not isinstance(session_id, str) or not ID_RE.fullmatch(session_id):
             raise ValueError("Invalid conversation ID or provider")
+        journal = HOME / ".cache" / "agentc2" / "chat-v1" / "journal.sqlite3"
+        if journal.is_file():
+            connection = sqlite3.connect(f"file:{journal}?mode=ro", uri=True, timeout=1)
+            try:
+                active = connection.execute("SELECT 1 FROM sessions WHERE provider=? AND provider_session_id=? AND state NOT IN ('stopped','failed') LIMIT 1", (provider, session_id)).fetchone()
+            finally:
+                connection.close()
+            if active:
+                raise ValueError("History belongs to an active or uncertain managed chat; inspect and stop it before cleanup")
         reason = cleanup_activity(provider, ignore_pid)
         if reason:
             raise ValueError(reason)

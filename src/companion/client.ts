@@ -35,7 +35,8 @@ export class CompanionClient {
     socket.onclose = (event) => {
       if (this.socket !== socket) return;
       this.socket = null;
-      for (const request of this.pending.values()) { clearTimeout(request.timer); request.reject(new Error('Disconnected. Action outcome may be unknown; refresh sessions before repeating it.')); }
+      const message = event.code === 4001 ? 'This device was revoked. Pair again from desktop.' : 'Disconnected. Action outcome may be unknown; refresh sessions before repeating it.';
+      for (const request of this.pending.values()) { clearTimeout(request.timer); request.reject(new Error(message)); }
       this.pending.clear();
       this.emit('connection', 'offline');
       if (!this.stopped && event.code !== 4001) this.retry = setTimeout(() => this.connect(), Math.min(1000 * 2 ** this.failures++, 15000));

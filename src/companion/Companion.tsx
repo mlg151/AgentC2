@@ -6,6 +6,9 @@ import { projectFor } from '../workspace';
 import type { AttentionItem, CompanionState, CreateInput, HostHealth, Inventory, Session } from '../types';
 import { CompanionClient } from './client';
 import { PhoneTerminal } from './PhoneTerminal';
+import { PhoneChat } from './PhoneChat';
+
+function isManaged(session: Session) { return session.managed === true || session.kind === 'managed'; }
 
 export default function Companion() {
   const [client] = useState(() => new CompanionClient());
@@ -32,12 +35,14 @@ export default function Companion() {
   const [provider, setProvider] = useState('');
   const [project, setProject] = useState('');
   const [pinned, setPinned] = useState(false);
+  const [managedOnly, setManagedOnly] = useState(true);
   const [pinning, setPinning] = useState<Set<string>>(() => new Set());
   const [dialog, setDialog] = useState<Session | null | undefined>(undefined);
   const [clock, setClock] = useState(Date.now());
   const [alert, setAlert] = useState<AttentionItem | null>(null);
   const seenAttention = useRef<Set<string> | null>(null);
   const connected = connection === 'connected';
+  const managedKeys = useMemo(() => new Set((inventory?.sessions || []).filter(isManaged).map((session) => session.key)), [inventory]);
   const refresh = useCallback(() => { void client.request<Inventory>('inventory').then(setInventory).catch((cause) => setError(String(cause))); }, [client]);
   useEffect(() => {
     const off = [
@@ -71,11 +76,11 @@ export default function Companion() {
     if (!state) return;
     const next = new Set(state.attention.map((item) => item.id));
     if (seenAttention.current) {
-      const fresh = state.attention.filter((item) => !item.acknowledged && !seenAttention.current!.has(item.id));
+      const fresh = state.attention.filter((item) => managedKeys.has(item.sessionKey) && !item.acknowledged && !seenAttention.current!.has(item.id));
       if (fresh.length) setAlert(fresh[fresh.length - 1]);
     }
     seenAttention.current = next;
-  }, [state?.attention]);
+  }, [state?.attention, managedKeys]);
   useEffect(() => { if (!alert) return; const timer = setTimeout(() => setAlert(null), 15000); return () => clearTimeout(timer); }, [alert]);
   async function pair(event: React.FormEvent) {
     event.preventDefault(); setBusy(true); setError('');
@@ -111,11 +116,21 @@ export default function Companion() {
   }
   const closeDialog = useCallback(() => { if (!busy) setDialog(undefined); }, [busy]);
   const sessions = inventory?.sessions || [];
-  const projects = useMemo(() => [...new Set(sessions.map((session) => projectFor(session, state?.metadata || {})))].sort(), [sessions, state?.metadata]);
-  const filtered = sessions.filter((session) => (!host || session.hostId === host) && (!provider || session.provider === provider) && (!project || projectFor(session, state?.metadata || {}) === project) && (!pinned || state?.metadata[session.key]?.pinned) && [session.title, session.cwd, session.id, session.hostName, session.provider, projectFor(session, state?.metadata || {})].join(' ').toLowerCase().includes(query.toLowerCase()));
+  const projects = useMemo(() => [...new Set(sessions.filter((session) => !managedOnly || isManaged(session)).map((session) => projectFor(session, state?.metadata || {})))].sort(), [sessions, state?.metadata, managedOnly]);
+  const filtered = sessions.filter((session) => {
+    const usable = (!host || session.hostId === host)
+      && (!provider || session.provider === provider)
+      && (!project || projectFor(session, state?.metadata || {}) === project)
+      && (!pinned || state?.metadata[session.key]?.pinned)
+      && [session.title, session.cwd, session.id, session.hostName, session.provider, projectFor(session, state?.metadata || {})].join(' ').toLowerCase().includes(query.toLowerCase());
+    if (!usable) return false;
+    if (!managedOnly) return true;
+    return isManaged(session);
+  });
   const selected = selectedKey ? known[selectedKey] : null;
-  const unread = state?.attention.filter((item) => !item.acknowledged) || [];
-  const attention = showAcknowledged ? state?.attention || [] : unread;
+  const managedAttention = (state?.attention || []).filter((item) => managedKeys.has(item.sessionKey));
+  const unread = managedAttention.filter((item) => !item.acknowledged);
+  const attention = showAcknowledged ? managedAttention : unread;
   if (!paired) return <main className="phone-pair"><div className="phone-brand"><TerminalSquare size={27} />AgentC2</div><h1>Your agents, within reach.</h1><p>Connect this phone to AgentC2 on your computer.</p>{pairToken ? <form onSubmit={(event) => void pair(event)}><label>Device name<input value={deviceName} onChange={(e) => setDeviceName(e.target.value)} maxLength={80} required /></label><button className="button-primary" disabled={busy} type="submit">{busy ? 'Pairing…' : 'Pair this device'}</button></form> : <div className="phone-empty">Open Settings → Remote access on desktop, choose Pair a device, and scan the QR code. Connect both devices to Tailscale first.</div>}{error ? <p className="phone-error" role="alert">{error}</p> : null}</main>;
   return <div className="phone-app">
     <header className="phone-header"><div className="phone-brand"><TerminalSquare size={23} />AgentC2</div><span className={`phone-connection ${connected ? '' : 'offline'}`} role="status">{connected ? 'Connected' : connection === 'connecting' ? 'Connecting…' : 'Desktop offline'}</span></header>
@@ -124,10 +139,10 @@ export default function Companion() {
     {error ? <p role="alert" className="phone-error">{error}<button aria-label="Dismiss error" onClick={() => setError('')}>×</button></p> : null}
     <nav className="phone-nav" aria-label="Companion navigation"><button className={!inbox ? 'active' : ''} onClick={() => { setInbox(false); setSelectedKey(null); }}><TerminalSquare size={17} />Sessions</button><button className={inbox ? 'active' : ''} onClick={() => setInbox(true)}><Bell size={17} />Attention <b>{unread.length}</b></button><button disabled={!connected} onClick={() => setDialog(null)}><Plus size={17} />New</button></nav>
     <main className="phone-main">
-      {inbox ? <section><div className="phone-section-heading"><h1>Attention inbox</h1><button disabled={!connected} onClick={() => void client.request('acknowledge', 'all').catch((cause) => setError(String(cause)))}>Acknowledge all</button></div><p className="phone-muted">Review completion, failures, and input requests.</p><label className="checkbox-label"><input type="checkbox" checked={showAcknowledged} onChange={(e) => setShowAcknowledged(e.target.checked)} /> Show acknowledged</label>{attention.length ? attention.slice().reverse().map((item) => <article className="phone-attention" key={item.id}><div className="phone-section-heading"><strong>{item.title}</strong><span className={item.confidence === 'inferred' ? 'phone-inferred' : ''}>{item.confidence}</span></div><p>{item.detail}</p><small>{item.provider} · {item.kind} · {new Date(item.createdAt).toLocaleString()}</small><div className="phone-actions"><button onClick={() => { setSelectedKey(item.sessionKey); setInbox(false); }}>Open session</button><button disabled={!connected || item.acknowledged} onClick={() => void client.request('acknowledge', item.id).catch((cause) => setError(String(cause)))}>{item.acknowledged ? 'Acknowledged' : 'Acknowledge'}</button></div></article>) : <div className="phone-empty">No attention items.</div>}</section> : selected ? <><div className="phone-detail-actions"><button className="phone-back" onClick={() => setSelectedKey(null)}><ArrowLeft size={16} />All sessions</button>{pinButton(selected)}</div><PhoneTerminal key={`${selected.key}/${generation}`} client={client} session={selected} connected={connected} onResume={() => setDialog(selected)} onRefresh={refresh} />{state?.metadata[selected.key]?.notes ? <section className="phone-notes"><h2>Notes & handoff</h2><pre>{state.metadata[selected.key].notes}</pre></section> : null}</> : selectedKey ? <div className="phone-empty">Session unavailable. Refresh the session list.<button onClick={() => { setSelectedKey(null); refresh(); }}>Back to sessions</button></div> : <section>
+      {inbox ? <section><div className="phone-section-heading"><h1>Attention inbox</h1><button disabled={!connected} onClick={() => void client.request('acknowledge', 'all').catch((cause) => setError(String(cause)))}>Acknowledge all</button></div><p className="phone-muted">Review completion, failures, and input requests.</p><label className="checkbox-label"><input type="checkbox" checked={showAcknowledged} onChange={(e) => setShowAcknowledged(e.target.checked)} /> Show acknowledged</label>{attention.length ? attention.slice().reverse().map((item) => <article className="phone-attention" key={item.id}><div className="phone-section-heading"><strong>{item.title}</strong><span className={item.confidence === 'inferred' ? 'phone-inferred' : ''}>{item.confidence}</span></div><p>{item.detail}</p><small>{item.provider} · {item.kind} · {new Date(item.createdAt).toLocaleString()}</small><div className="phone-actions"><button onClick={() => { setSelectedKey(item.sessionKey); setInbox(false); }}>Open session</button><button disabled={!connected || item.acknowledged} onClick={() => void client.request('acknowledge', item.id).catch((cause) => setError(String(cause)))}>{item.acknowledged ? 'Acknowledged' : 'Acknowledge'}</button></div></article>) : <div className="phone-empty">No attention items.</div>}</section> : selected ? <><div className="phone-detail-actions"><button className="phone-back" onClick={() => setSelectedKey(null)}><ArrowLeft size={16} />All sessions</button>{pinButton(selected)}</div>{selected.transport === 'chat' ? <PhoneChat key={`${selected.key}/${generation}`} client={client} session={selected} connected={connected} onResume={() => setDialog(selected)} onRefresh={refresh} /> : <PhoneTerminal key={`${selected.key}/${generation}`} client={client} session={selected} connected={connected} onResume={() => setDialog(selected)} onRefresh={refresh} />}{state?.metadata[selected.key]?.notes ? <section className="phone-notes"><h2>Notes & handoff</h2><pre>{state.metadata[selected.key].notes}</pre></section> : null}</> : selectedKey ? <div className="phone-empty">Session unavailable. Refresh the session list.<button onClick={() => { setSelectedKey(null); refresh(); }}>Back to sessions</button></div> : <section>
         <div className="phone-section-heading"><h1>Sessions</h1><button aria-label="Refresh sessions" disabled={!connected} onClick={refresh}><RefreshCw size={17} /></button></div>
         <input className="phone-search" aria-label="Search sessions" placeholder="Search sessions, projects, hosts…" value={query} onChange={(e) => setQuery(e.target.value)} />
-        <div className="phone-filters"><select aria-label="Filter SSH host" value={host} onChange={(e) => setHost(e.target.value)}><option value="">All hosts</option>{state?.settings.hosts.filter((item) => item.enabled).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><select aria-label="Filter provider" value={provider} onChange={(e) => setProvider(e.target.value)}><option value="">All providers</option><option value="codex">Codex</option><option value="claude">Claude</option><option value="antigravity">Antigravity</option><option value="terminal">Terminals</option></select><select aria-label="Filter project" value={project} onChange={(e) => setProject(e.target.value)}><option value="">All projects</option>{projects.map((name) => <option key={name}>{name}</option>)}</select><button aria-pressed={pinned} className={pinned ? 'active' : ''} onClick={() => setPinned(!pinned)}>Pinned</button></div>
+        <div className="phone-filters"><select aria-label="Filter SSH host" value={host} onChange={(e) => setHost(e.target.value)}><option value="">All hosts</option>{state?.settings.hosts.filter((item) => item.enabled).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><select aria-label="Filter provider" value={provider} onChange={(e) => setProvider(e.target.value)}><option value="">All providers</option><option value="codex">Codex</option><option value="claude">Claude</option><option value="antigravity">Antigravity</option><option value="terminal">Terminals</option></select><select aria-label="Filter project" value={project} onChange={(e) => setProject(e.target.value)}><option value="">All projects</option>{projects.map((name) => <option key={name}>{name}</option>)}</select><button aria-pressed={pinned} className={pinned ? 'active' : ''} onClick={() => setPinned(!pinned)}>Pinned</button><button aria-pressed={managedOnly} className={managedOnly ? 'active' : ''} onClick={() => setManagedOnly(!managedOnly)}>Managed only</button></div>
         <div className="phone-session-list">{filtered.length ? filtered.map((session) => <div className="phone-session-entry" key={session.key}><button className="phone-session-row" onClick={() => setSelectedKey(session.key)}><ProviderMark provider={session.provider} small /><div><strong>{session.title}</strong><small>{session.hostName} · {projectFor(session, state?.metadata || {})}</small><span>{session.stale || !connected ? 'Stale' : session.state} · {session.kind}{state?.metadata[session.key]?.pinned ? ' · pinned' : ''}</span></div><span aria-hidden="true">›</span></button>{pinButton(session, true)}</div>) : <div className="phone-empty">{inventory ? 'No sessions match your filters.' : 'Loading sessions…'}</div>}</div>
       </section>}
     </main>

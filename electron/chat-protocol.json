@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "providers": ["codex", "claude", "antigravity"],
+  "operations": ["create", "send", "steer", "respond", "interrupt", "stop"],
+  "eventTypes": ["session.updated", "message.delta", "message.completed", "tool.started", "tool.completed", "approval.requested", "question.requested", "request.resolved", "usage.updated", "turn.completed", "error", "provider.event"],
+  "capabilities": ["streaming", "history", "resume", "interrupt", "approvals", "questions", "steering", "forks", "attachments"],
+  "sessionStates": ["starting", "idle", "running", "waiting", "stopped", "failed", "unknown"],
+  "commandStates": ["accepted", "dispatching", "completed", "failed", "unknown"],
+  "limits": { "text": 200000, "title": 100, "path": 4096, "id": 200, "page": 500, "wireBytes": 1048576 },
+  "candidateVersions": { "codex": ["0.163.0"], "claude": ["2.1.306"], "antigravity": ["1.4.4"] },
+  "sdkVersions": { "claude": ["0.2.172"], "antigravityEvaluation": ["0.1.22"] }
+}

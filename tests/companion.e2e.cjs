@@ -38,9 +38,20 @@ if p['action']=='setup':
  program="import os; [print('PHONE_HISTORY_%05d'%i,flush=True) for i in range(1,2001)]; os.execvpe('bash',['bash','--noprofile','--norc'],dict(os.environ,PS1='PHONE_FIXTURE> '))"
  run('tmux','new-window','-t',name,'-n','chat',shlex.join(['python3','-u','-c',program]))
  run('tmux','kill-window','-t',name+':setup')
+ # A disposable sleep executable named codex is recognized as an external
+ # provider pane without launching a provider or giving it AgentC2 ownership.
+ from pathlib import Path
+ import shutil
+ fixture=Path.home()/('agentc2-phone-'+p['marker']);fixture.mkdir()
+ shutil.copyfile(shutil.which('sleep'),fixture/'codex');(fixture/'codex').chmod(0o700)
+ ext='external-'+p['marker']
+ run('tmux','new-session','-d','-s',ext,'-c','/tmp',shlex.join([str(fixture/'codex'),'600']))
  print('{}')
 elif p['action']=='cleanup':
- for n in [name]+p['created']: subprocess.run(['tmux','kill-session','-t',n],capture_output=True)
+ for n in [name,'external-'+p['marker']]+p['created']: subprocess.run(['tmux','kill-session','-t',n],capture_output=True)
+ from pathlib import Path
+ import shutil
+ shutil.rmtree(Path.home()/('agentc2-phone-'+p['marker']),ignore_errors=True)
  print('{}')
 `;
   return new Promise((resolve, reject) => {
@@ -71,7 +82,7 @@ async function freePort() {
     app = await _electron.launch({ executablePath: packaged || require('electron'), args: [...(packaged ? [] : ['.']), `--user-data-dir=${path.join(directory, 'browser')}`], cwd: root, env: { ...process.env, NODE_ENV: 'production', AGENTC2_HOST: host, AGENT_HQ_DATA_DIR: directory } });
     const desktop = await app.firstWindow();
     desktop.on('pageerror', (error) => errors.push(`desktop: ${error.message}`));
-    await desktop.locator('.session-row').filter({ hasText: marker }).waitFor({ timeout: 60000 });
+    await desktop.locator('.session-row').filter({ has: desktop.getByText(marker, { exact: true }) }).waitFor({ timeout: 60000 });
     await desktop.locator('.session-pane:visible .terminal-panel.is-attached').waitFor({ timeout: 30000 });
     assert.equal((await desktop.evaluate(() => window.agentHQ.remoteStatus())).enabled, false);
     const port = await freePort();
@@ -129,6 +140,17 @@ async function freePort() {
     await page.getByRole('textbox', { name: 'Search sessions', exact: true }).waitFor({ timeout: 60000 });
     await page.getByRole('textbox', { name: 'Search sessions', exact: true }).fill(marker);
     await page.locator('.phone-session-row').filter({ hasText: marker }).waitFor({ timeout: 60000 });
+    const external = page.locator('.phone-session-row').filter({ hasText: `external-${marker}` });
+    assert.equal(await page.getByRole('button', { name: 'Managed only', exact: true }).getAttribute('aria-pressed'), 'true');
+    assert.equal(await external.count(), 0);
+    await page.getByRole('button', { name: 'Managed only', exact: true }).click();
+    await external.waitFor();
+    await page.getByRole('textbox', { name: 'Search sessions', exact: true }).fill('NO_MATCH_'+marker);
+    assert.equal(await page.locator('.phone-session-row').count(), 0);
+    await page.getByRole('textbox', { name: 'Search sessions', exact: true }).fill(marker);
+    await page.getByRole('button', { name: 'Managed only', exact: true }).click();
+    await page.locator('.phone-session-row').filter({ hasText: marker }).waitFor();
+    assert.equal(await external.count(), 0);
     assert.equal(await page.evaluate(() => isSecureContext), !ipMode);
     if (ipMode) assert.equal(await page.evaluate(() => typeof crypto.randomUUID), 'undefined');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);

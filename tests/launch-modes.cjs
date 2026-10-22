@@ -6,6 +6,9 @@ const { spawn } = require('node:child_process');
 const helper = Buffer.from(fs.readFileSync(path.join(__dirname, '..', 'electron', 'provider_telemetry.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, '..', 'electron', 'remote.py'), 'utf8')).toString('base64');
 const hook = fs.readFileSync(path.join(__dirname, '..', 'electron', 'session-hook.py')).toString('base64');
 const providerBinDir = process.env.AGENTC2_PROVIDER_BIN_DIR || '';
+const profiles = (process.env.AGENTC2_CLAUDE_PROFILES || 'claude3').split(',').filter(Boolean);
+if (profiles.some((command) => !/^[a-zA-Z0-9_-]+$/.test(command))) throw new Error('Claude profile commands must be executable or shell-function names');
+const providers = [['codex', 'codex'], ['claude', 'claude'], ['antigravity', 'agy'], ...profiles.map((command) => ['claude', command])];
 const source = `
 import base64,json,os,subprocess,time
 from pathlib import Path
@@ -48,11 +51,11 @@ try:
  results.append({'provider':'terminal','historyLimit':50000,'exitCode':7,'agentOptionsRejected':True})
 finally:
  if name: scope['managed_action']({'name':name},'stop')
-for provider,executable in [('codex','codex'),('claude','claude'),('antigravity','agy'),('claude','claude3')]:
+for provider,executable in ${JSON.stringify(providers)}:
  name=None
  try:
   payload={'provider':provider,'cwd':'/tmp','title':'AgentC2 launch permissions test','hookSource':base64.b64decode('${hook}').decode()}
-  if executable=='claude3': payload['preset']={'command':'claude3','args':'','name':'OpenRouter test','fullPermissions':True,'attentionHooks':True}
+  if provider=='claude' and executable!='claude': payload['preset']={'command':executable,'args':'','name':'Claude profile test','fullPermissions':True,'attentionHooks':True}
   name=scope['create'](payload)['name']
   time.sleep(2)
   pid=scope['checked'](['tmux','display-message','-p','-t',name,'#{pane_pid}'])
@@ -101,8 +104,10 @@ print(json.dumps(results))
 `;
 const ssh = require('../electron/platform.cjs').sshBinary();
 const host = process.env.AGENTC2_HOST || process.env.AGENT_HQ_HOST;
-if (!host) throw new Error('Set AGENTC2_HOST to an explicitly configured SSH test host');
-const child = spawn(ssh, ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', host, 'python3', '-'], { windowsHide: true });
+const local = process.env.AGENTC2_LAUNCH_LOCAL === '1';
+if (!local && !host) throw new Error('Set AGENTC2_HOST to an explicitly configured SSH test host, or AGENTC2_LAUNCH_LOCAL=1');
+const execution = local ? require('../electron/local.cjs').localCommand('python3', ['-']) : { binary: ssh, args: ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', host, 'python3', '-'], env: process.env };
+const child = spawn(execution.binary, execution.args, { windowsHide: true, env: execution.env });
 child.stdout.pipe(process.stdout);
 child.stderr.pipe(process.stderr);
 child.on('error', (error) => { console.error(error); process.exitCode = 1; });

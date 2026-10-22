@@ -16,6 +16,31 @@ exec((Path(__file__).resolve().parents[1] / "electron" / "provider_telemetry.py"
 exec((Path(__file__).resolve().parents[1] / "electron" / "remote.py").read_text(), scope)
 
 
+class StructuredInventory(unittest.TestCase):
+    def setUp(self):
+        self.helper = {"__name__": "structured_inventory_fixture"}
+        exec((Path(__file__).resolve().parents[1] / "electron" / "remote.py").read_text(), self.helper)
+
+    def test_worker_descendants_are_managed_but_unrelated_processes_remain_visible(self):
+        rows = "200 1 python3 ?\n201 200 codex ?\n202 201 claude ?\n300 1 codex pts/1\n400 1 tmux:server ?\n401 400 agy ?\n"
+        self.helper["run"] = lambda args, **kwargs: subprocess.CompletedProcess(args, 0, rows, "")
+        self.assertEqual([item["id"] for item in self.helper["unmanaged_processes"](200)], ["300"])
+        self.assertEqual([item["id"] for item in self.helper["unmanaged_processes"]()], ["201", "202", "300"])
+
+    def test_structured_failures_preserve_policy_identity_without_resetting_on_text(self):
+        chat = dict(id="chat-" + "a" * 32, provider="claude", providerSessionId="native-fixture")
+        def event(sequence, kind, data, item="tool-one"):
+            return dict(sequence=sequence, timestamp="2026-10-22T12:00:00.000Z", type=kind, data=data, itemId=item)
+        rows = [event(1, "session.updated", dict(state="running")), event(2, "tool.started", dict(name="Bash", input='{"command":"fixture"}')), event(3, "tool.completed", dict(name="Bash", isError=True, output="failure")), event(4, "message.delta", dict(text="Retrying")), event(5, "tool.started", dict(name="Bash", input='{"command":"fixture"}'), "tool-two"), event(6, "tool.completed", dict(name="Bash", isError=True, output="failure"), "tool-two"), event(7, "turn.completed", dict(outcome="interrupted"))]
+        mapped = self.helper["chat_inventory_events"](rows, chat)
+        self.assertEqual([item["kind"] for item in mapped], ["working", "tool_failed", "tool_failed", "completed"])
+        self.assertEqual(mapped[1]["failureSignature"], mapped[2]["failureSignature"])
+        self.assertNotEqual(mapped[1]["id"], mapped[2]["id"])
+        self.assertRegex(mapped[1]["id"], r"^[a-f0-9]{32}$")
+        self.assertNotIn("command", json.dumps(mapped))
+        self.assertEqual(mapped, self.helper["chat_inventory_events"](rows, chat))
+
+
 class ExitEvidence(unittest.TestCase):
     def session(self, status="", record="1234:7", pid="1234", dead="1", managed=True):
         name = "hq-123456abcdef" if managed else "external"

@@ -41,6 +41,8 @@ Settings, session metadata, workspace layout, and up to 500 inbox events persist
 
 Before first use, replace the `your-ssh-host` placeholder in Settings → SSH hosts with your own SSH config alias or `user@hostname`, or set `AGENTC2_HOST` before launching. Live SSH tests require `AGENTC2_HOST` explicitly; `AGENT_HQ_HOST` remains supported for existing setups. Internal session IDs, bridge names, cookies, and remote cache paths retain their legacy identifiers for compatibility.
 
+Structured chat is available for pinned, capability-checked provider versions on the selected SSH host. The shared desktop/phone view supports Markdown, tool results, questions, approvals where supported, and replay. Select **Terminal** in the launch dialog for custom commands or unsupported versions. See [unified chat setup, support, recovery, and validation limits](docs/unified-chat.md).
+
 ## Phone companion and remote control
 
 The companion is a mobile web app served by the desktop app. It can view live terminals and retained history, send prompts and special keys, create/resume agents with saved presets, start plain terminals, interrupt/stop managed sessions, inspect host resources, and acknowledge attention items. Pin or unpin from a session's list row or detail view without taking terminal control; changes persist and sync with desktop and other paired devices. Projects and notes are visible; desktop tabs and phone navigation are independent. Host and preset editing stays on desktop.
@@ -128,3 +130,5 @@ The app sends a Python helper over SSH for inventory, metrics, and lifecycle req
 ## Safety and scope
 
 AgentC2 never reads provider authentication tokens or SSH private keys. Electron isolates the renderer from Node.js; narrow validated APIs cross the preload bridge. The companion uses short-lived pairing links and revocable HttpOnly device cookies over private Tailscale connections, with origin validation on mutations and WebSocket upgrades. HTTPS cookies retain their Secure and __Host protections; private-IP mode uses a separate cookie name. OpenSSH host-key verification remains mandatory. Stop is limited to sessions created by AgentC2 and requires confirmation. This app supports Antigravity **CLI** conversations, not Antigravity IDE windows.
+
+Local sessions: **Settings → Hosts → Add this computer** runs agents without an SSH server. Linux uses local Python 3/tmux; Windows uses the default WSL distribution. See [local setup and validation limits](docs/unified-chat.md#local-sessions).
