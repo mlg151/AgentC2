@@ -2,6 +2,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('agentHQ', {
   platform: process.platform,
+  checkForUpdates: () => ipcRenderer.invoke('updates:check'),
+  openUpdate: () => ipcRenderer.invoke('updates:open'),
   getState: () => ipcRenderer.invoke('state:get'),
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
   previewOpOrder: (order) => ipcRenderer.invoke('oporder:preview', order),
@@ -33,6 +35,7 @@ contextBridge.exposeInMainWorld('agentHQ', {
     ipcRenderer.on('sessions:deleted', listener);
     return () => ipcRenderer.removeListener('sessions:deleted', listener);
   },
+  renameSession: (key, title) => ipcRenderer.invoke('session:rename', key, title),
   onSessionPinned: (callback) => {
     const listener = (_event, key, pinned) => callback(key, pinned);
     ipcRenderer.on('session:pinned', listener);

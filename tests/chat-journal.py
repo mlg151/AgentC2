@@ -57,6 +57,24 @@ class JournalTests(unittest.TestCase):
     def response(self, **extra):
         return command("respond", dict(requestId="request-one", turnId="turn-one", itemId="item-one", **extra), self.identifier)
 
+    def test_managed_title_rename_survives_restart_without_changing_activity(self):
+        creation = command("create", dict(provider="codex", cwd="/tmp/repo", title="Managed title", roeProfile="full", managedName="hq-123456abcdef"))
+        receipt, _ = self.journal.accept(creation, capabilities())
+        identifier = receipt["sessionId"]
+        before = self.journal.history(identifier)["session"]
+        with self.assertRaisesRegex(ValueError, "Managed session changed"):
+            self.journal.rename(identifier, "hq-000000000000", "Wrong target")
+        for title in ["", "\n", "\t", "x" * 101]:
+            with self.assertRaisesRegex(ValueError, "Invalid session title"):
+                self.journal.rename(identifier, "hq-123456abcdef", title)
+        self.journal.rename(identifier, "hq-123456abcdef", "Updated title")
+        self.journal.close()
+        self.journal = Journal(self.directory)
+        after = self.journal.history(identifier)["session"]
+        self.assertEqual(after["title"], "Updated title")
+        self.assertEqual(after["updatedAt"], before["updatedAt"])
+        self.assertEqual(after["providerSessionId"], before["providerSessionId"])
+
     def test_lost_acknowledgement_returns_same_receipt_after_reopen(self):
         submission, first = self.send()
         self.journal.close()

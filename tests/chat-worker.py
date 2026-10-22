@@ -14,6 +14,7 @@ import time
 import unittest
 import uuid
 import warnings
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "electron"))
 from chat_adapters import ProviderRejected
@@ -156,7 +157,16 @@ class WorkerProcessTests(unittest.TestCase):
         return receipt["sessionId"], result
 
     def wait_receipt(self, value):
-        return poll(lambda: rpc(self.root, request("receipt", commandId=value["commandId"])), lambda receipt: receipt["state"] in ("completed", "failed", "unknown"))
+        def receipt():
+            try:
+                return rpc(self.root, request("receipt", commandId=value["commandId"]))
+            except ValueError as error:
+                # A fire-and-forget command and this query use separate socket
+                # handlers. The query can arrive before durable acceptance.
+                if str(error) != "Command receipt is unavailable; do not automatically resubmit":
+                    raise
+                return None
+        return poll(receipt, lambda value: value is not None and value["state"] in ("completed", "failed", "unknown"))
 
     def test_client_disconnect_does_not_kill_worker_or_owned_provider(self):
         identifier, created = self.create()
@@ -296,11 +306,19 @@ class BootstrapTests(unittest.TestCase):
             payload = dict(chatFiles=files, request=request("health"))
             health = None
             try:
-                with warnings.catch_warnings():
+                launches = []
+                original_run = subprocess.run
+                def counted_run(args, **kwargs):
+                    if len(args) > 2 and args[1] == "-c" and "subprocess.Popen" in args[2]:
+                        launches.append(args)
+                        time.sleep(0.1)  # Let competing helpers reach bootstrap.
+                    return original_run(args, **kwargs)
+                with warnings.catch_warnings(), patch.object(subprocess, "run", side_effect=counted_run):
                     warnings.simplefilter("ignore", ResourceWarning)
                     with ThreadPoolExecutor(max_workers=4) as pool:
                         results = list(pool.map(lambda _: chat_remote(payload, root), range(4)))
                 health = results[0]
+                self.assertEqual(len(launches), 1, "Concurrent helpers must not leave delayed duplicate launchers")
                 self.assertEqual(len({result["pid"] for result in results}), 1)
                 self.assertEqual(len({result["bootId"] for result in results}), 1)
                 self.assertEqual(chat_remote(payload, root), health)
@@ -318,7 +336,10 @@ class BootstrapTests(unittest.TestCase):
                 health = upgraded
             finally:
                 if health is not None:
-                    os.kill(health["pid"], signal.SIGTERM)
+                    try:
+                        os.kill(health["pid"], signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
                     poll(lambda: not (root / "worker.sock").exists())
                     try:
                         os.waitpid(health["pid"], 0)

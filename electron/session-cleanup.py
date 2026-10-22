@@ -30,7 +30,7 @@ def cleanup_file(path):
 
 def cleanup_activity(provider, ignore_pid=None):
     """Without a proven conversation ID, a live provider protects its histories."""
-    names = {"codex": {"codex"}, "claude": {"claude", "claude3"}, "antigravity": {"agy", "antigravity"}}[provider]
+    names = {"codex": {"codex"}, "claude": {"claude", "claude3"}, "antigravity": {"agy", "antigravity"}, "opencode": {"opencode", "opencode.exe"}}[provider]
     try:
         processes = list(Path("/proc").iterdir())
     except OSError:
@@ -172,6 +172,41 @@ def cleanup_codex(session_id):
     return files, {}, path, [row["id"], row["rollout_path"], row["updated_at_ms"], bool(row["is_pinned"])]
 
 
+def cleanup_opencode(session_id):
+    if not re.fullmatch(r"ses_[A-Za-z0-9_-]{1,96}", session_id):
+        raise ValueError("OpenCode cleanup requires an exact session ID")
+    database = opencode_database()
+    if not database.exists():
+        return [], {}, None, []
+    cleanup_file(database)
+    with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=2)) as connection:
+        connection.row_factory = sqlite3.Row
+        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "session_v2" not in tables:
+            raise ValueError("Resume this legacy OpenCode history in v2 before native cleanup")
+        row = connection.execute("SELECT * FROM session_v2 WHERE id=?", (session_id,)).fetchone()
+        if row is None:
+            if "session" in tables and connection.execute("SELECT 1 FROM session WHERE id=?", (session_id,)).fetchone():
+                raise ValueError("Resume this legacy OpenCode history in v2 before native cleanup")
+            return [], {}, None, []
+        if row["parent_id"] or row["fork_session_id"] or connection.execute("SELECT 1 FROM session_v2 WHERE parent_id=? OR fork_session_id=? LIMIT 1", (session_id, session_id)).fetchone():
+            raise ValueError("Related OpenCode sessions are excluded; native delete also removes children")
+        if connection.execute("SELECT 1 FROM session_pending WHERE session_id=? LIMIT 1", (session_id,)).fetchone():
+            raise ValueError("OpenCode has pending messages; resolve them before cleanup")
+        snapshot = {"session": dict(row)}
+        for table, column in (("session_message", "session_id"), ("event", "aggregate_id")):
+            size = connection.execute(f"SELECT SUM(length(data)) FROM {table} WHERE {column}=?", (session_id,)).fetchone()[0] or 0
+            if size > 16 * 1024 * 1024:
+                raise ValueError("OpenCode session exceeds cleanup limits")
+            rows = connection.execute(f"SELECT * FROM {table} WHERE {column}=? ORDER BY id LIMIT 10001", (session_id,)).fetchall()
+            if len(rows) > 10000:
+                raise ValueError("OpenCode session exceeds cleanup limits")
+            snapshot[table] = [dict(item) for item in rows]
+        if len(json.dumps(snapshot, sort_keys=True)) > 16 * 1024 * 1024:
+            raise ValueError("OpenCode session exceeds cleanup limits")
+    return [], {}, database, snapshot
+
+
 def cleanup_plan(provider, session_id, ignore_pid=None):
     result = {"id": session_id, "provider": provider, "eligible": False, "reason": "", "bytes": None,
               "updatedAt": None, "fingerprint": "", "files": [], "estimated": provider in ("codex", "antigravity")}
@@ -192,6 +227,8 @@ def cleanup_plan(provider, session_id, ignore_pid=None):
             raise ValueError(reason)
         if provider == "codex":
             files, rewrites, transcript, row = cleanup_codex(session_id)
+        elif provider == "opencode":
+            files, rewrites, transcript, row = cleanup_opencode(session_id)
         elif provider == "antigravity":
             files, rewrites, transcript, row = antigravity_snapshot(session_id)
         else:
@@ -205,9 +242,11 @@ def cleanup_plan(provider, session_id, ignore_pid=None):
         timestamps = [item["mtime"] / 1e9 for item in owned]
         if provider == "codex" and row and row[2]:
             timestamps.append(row[2] / 1000)
+        if provider == "opencode" and row:
+            timestamps.append(row["session"]["time_updated"] / 1000)
         result.update(eligible=True, bytes=sum(item["size"] for item in owned), files=[item["path"] for item in owned] + [item["path"] + " (matching entries only)" for item in shared],
                       updatedAt=iso_from_epoch(max(timestamps)) if timestamps else None, fingerprint=fingerprint,
-                      missing=transcript is None, method={"codex": "Codex native delete", "claude": "Claude session files", "antigravity": "Antigravity CLI picker"}[provider])
+                      missing=transcript is None, method={"codex": "Codex native delete", "claude": "Claude session files", "antigravity": "Antigravity CLI picker", "opencode": "OpenCode native delete"}[provider])
         result["providerPinned"] = bool(provider == "codex" and row and row[3])
         return result, (files, rewrites, transcript, snapshot)
     except (OSError, ValueError, sqlite3.Error, TypeError, subprocess.TimeoutExpired) as error:
@@ -259,6 +298,17 @@ def cleanup_delete_one(payload, picker=None):
                 raise ValueError("Antigravity picker was not started")
             picker.delete(session_id, snapshot["row"][1], snapshot["row"][2])
             return {"id": session_id, "status": "deleted", "detail": "Antigravity confirmed picker deletion; reviewed bytes are an estimate", "bytes": current["bytes"], "estimated": True}
+        if provider == "opencode":
+            try:
+                deleted = subprocess.run(["opencode", "session", "delete", "--standalone", session_id], cwd=snapshot["row"]["session"]["directory"], text=True, capture_output=True, timeout=max(1, min(10, int(payload["deadline"] - time.monotonic()))), check=False)
+            except subprocess.TimeoutExpired:
+                return {"id": session_id, "status": "unknown", "detail": "OpenCode deletion timed out; preview again before retrying"}
+            if deleted.returncode:
+                return {"id": session_id, "status": "failed", "detail": "OpenCode did not confirm deletion; preview again"}
+            with closing(sqlite3.connect(transcript.as_uri() + "?mode=ro", uri=True, timeout=2)) as connection:
+                if connection.execute("SELECT 1 FROM session_v2 WHERE id=?", (session_id,)).fetchone():
+                    raise ValueError("Provider still lists the conversation")
+            return {"id": session_id, "status": "deleted", "detail": "OpenCode confirmed native session deletion; shared database and project files were preserved", "bytes": 0, "estimated": True}
         if provider == "codex":
             deleted = run(["codex", "delete", "--force", session_id], timeout=max(1, min(10, int(payload["deadline"] - time.monotonic()))))
             if deleted.returncode != 0:

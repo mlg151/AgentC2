@@ -4,7 +4,7 @@ import type { ExerciseInput, ExerciseInspection, ExercisePromotionPreview, Exerc
 import { Modal } from './Modal';
 
 type Choice = ExerciseInput['contestants'][number];
-const providers: Exclude<Provider, 'terminal'>[] = ['codex', 'claude', 'antigravity'];
+const providers: Exclude<Provider, 'terminal'>[] = ['codex', 'claude', 'antigravity', 'opencode'];
 
 export function ExerciseDialog({ settings, hostId, onClose, onLaunched }: { settings: Settings; hostId: string; onClose: () => void; onLaunched: () => void }) {
   const [records, setRecords] = useState<ExerciseRecord[]>([]);
@@ -33,7 +33,7 @@ export function ExerciseDialog({ settings, hostId, onClose, onLaunched }: { sett
       if (!current) return;
       setCapabilities(result);
       const installed = providers.filter((provider) => result[provider]);
-      if (!choicesEdited && installed.length >= 2) setChoices(installed.map((provider) => ({ provider })));
+      if (!choicesEdited && installed.length >= 2) setChoices(installed.slice(0, 3).map((provider) => ({ provider })));
     }).catch((cause) => { if (current) setError(`Could not check provider availability: ${String(cause)}`); });
     return () => { current = false; };
   }, [target, choicesEdited]);

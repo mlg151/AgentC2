@@ -8,7 +8,7 @@ const hook = fs.readFileSync(path.join(__dirname, '..', 'electron', 'session-hoo
 const providerBinDir = process.env.AGENTC2_PROVIDER_BIN_DIR || '';
 const profiles = (process.env.AGENTC2_CLAUDE_PROFILES || 'claude3').split(',').filter(Boolean);
 if (profiles.some((command) => !/^[a-zA-Z0-9_-]+$/.test(command))) throw new Error('Claude profile commands must be executable or shell-function names');
-const providers = [['codex', 'codex'], ['claude', 'claude'], ['antigravity', 'agy'], ...profiles.map((command) => ['claude', command])];
+const providers = [['codex', 'codex'], ['claude', 'claude'], ['antigravity', 'agy'], ['opencode', 'opencode'], ...profiles.map((command) => ['claude', command])];
 const source = `
 import base64,json,os,subprocess,time
 from pathlib import Path
@@ -76,8 +76,9 @@ for provider,executable in ${JSON.stringify(providers)}:
    events=scope['session_events'](name)
    assert events[-1]['kind']=='completed'
    if provider=='claude': assert events[-2]['kind']=='input'
-  resume=scope['agent_command'](provider,'00000000-0000-4000-8000-000000000000')
-  assert flag in resume and '00000000-0000-4000-8000-000000000000' in resume
+  conversation_id='ses_fixture123456' if provider=='opencode' else '00000000-0000-4000-8000-000000000000'
+  resume=scope['agent_command'](provider,conversation_id)
+  assert flag in resume and conversation_id in resume
   results.append({'provider':provider,'command':executable,'fullPermissions':True,'historyLimit':50000,'resumeUsesFullPermissions':True,'hookEventsVerified':provider in ['codex','claude']})
  finally:
   if name: scope['managed_action']({'name':name},'stop')

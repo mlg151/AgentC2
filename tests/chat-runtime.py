@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'electron'))
 from chat_remote import CHAT_WORKER_FILES, chat_remote
 from chat_runtime import SDK_PACKAGES, runtime_python
+from chat_protocol import CONTRACT
 
 
 class RuntimeTests(unittest.TestCase):
@@ -49,7 +50,7 @@ class RuntimeTests(unittest.TestCase):
                     return chat_remote(dict(sourceDigest=digest, request=dict(protocolVersion=1, action='capabilities', prepareProvider=provider)), directory)
                 with ThreadPoolExecutor(max_workers=2) as pool:
                     for result in pool.map(prepare, ['claude', 'antigravity']):
-                        self.assertEqual({item['provider'] for item in result}, {'codex', 'claude', 'antigravity'})
+                        self.assertEqual({item['provider'] for item in result}, set(CONTRACT['providers']))
                 executable = runtime_python(directory)
                 self.assertEqual(Path(executable).parent.parent.stat().st_mode & 0o777, 0o700)
                 check = subprocess.run([executable, '-c', "import importlib.metadata,json,sys;print(json.dumps({'prefix':sys.prefix,'base':sys.base_prefix,'claude':importlib.metadata.version('claude-agent-sdk'),'antigravity':importlib.metadata.version('google-antigravity')}))"], capture_output=True, text=True, check=True)
