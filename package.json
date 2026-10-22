@@ -10,6 +10,7 @@
     "start": "cross-env NODE_ENV=production electron .",
     "dist": "npm run build && electron-builder --publish never",
     "test:terminal": "npm run build && node tests/terminal.e2e.cjs",
+    "test:chat": "npm run build && node tests/chat-protocol.cjs && node tests/chat-service.cjs",
     "test:launch-modes": "node tests/launch-modes.cjs",
     "test:claude-gated": "node tests/claude-gated.cjs",
     "test:oporders": "npm run build && python3 tests/oporders.py && node tests/oporders.e2e.cjs && node tests/oporders.ui.e2e.cjs",
@@ -29,7 +30,7 @@
     "test:platform": "node tests/platform.cjs",
     "test:desktop": "node tests/desktop.e2e.cjs",
     "test:package": "node tests/desktop.e2e.cjs --packaged",
-    "test:ci": "npm run build && npm run test:productivity && node tests/loop-breaker.cjs && node tests/readiness.cjs && node tests/exercises.cjs && node tests/cleanup.cjs && node tests/situation.cjs && node tests/reconnect.cjs && node tests/remote-control.cjs && node tests/image-upload.cjs && node tests/tunnels.cjs && npm run test:platform && node tests/packaging.cjs && node tests/native-pty.cjs"
+    "test:ci": "npm run build && node tests/chat-protocol.cjs && node tests/chat-service.cjs && npm run test:productivity && node tests/loop-breaker.cjs && node tests/readiness.cjs && node tests/exercises.cjs && node tests/cleanup.cjs && node tests/situation.cjs && node tests/reconnect.cjs && node tests/remote-control.cjs && node tests/image-upload.cjs && node tests/tunnels.cjs && npm run test:platform && node tests/packaging.cjs && node tests/native-pty.cjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",

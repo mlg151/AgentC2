@@ -596,6 +596,8 @@ def main():
     action = payload.get("action")
     if action == "inventory":
         result = inventory()
+    elif action == "chat":
+        result = chat_remote(payload)
     elif action == "health":
         result = health(payload)
     elif action == "create":

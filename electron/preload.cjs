@@ -47,6 +47,24 @@ contextBridge.exposeInMainWorld('agentHQ', {
     return () => ipcRenderer.removeListener('health:updated', listener);
   },
   create: (input) => ipcRenderer.invoke('create', input),
+  chatCapabilities: (hostId) => ipcRenderer.invoke('chat:capabilities', hostId),
+  openChat: (id, hostId) => ipcRenderer.invoke('chat:open', id, hostId),
+  readyChat: (id, after) => ipcRenderer.invoke('chat:ready', id, after),
+  chatHistory: (id, after, limit) => ipcRenderer.invoke('chat:history', id, after, limit),
+  takeChat: (id) => ipcRenderer.invoke('chat:take', id),
+  submitChat: (id, command) => ipcRenderer.invoke('chat:submit', id, command),
+  chatReceipt: (id, commandId) => ipcRenderer.invoke('chat:receipt', id, commandId),
+  closeChat: (id) => ipcRenderer.invoke('chat:close', id),
+  onChatEvents: (callback) => {
+    const listener = (_event, value) => callback(value);
+    ipcRenderer.on('chat:events', listener);
+    return () => ipcRenderer.removeListener('chat:events', listener);
+  },
+  onChatState: (callback) => {
+    const listener = (_event, value) => callback(value);
+    ipcRenderer.on('chat:state', listener);
+    return () => ipcRenderer.removeListener('chat:state', listener);
+  },
   listWorktrees: (hostId) => ipcRenderer.invoke('worktrees:list', hostId),
   archiveWorktree: (hostId, operationId) => ipcRenderer.invoke('worktrees:archive', hostId, operationId),
   diffFiles: (input) => ipcRenderer.invoke('diff:files', input),

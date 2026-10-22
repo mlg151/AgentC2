@@ -35,14 +35,14 @@ function createWindow() {
   mainWindow.webContents.on('before-input-event', (_event, input) => {
     mainWindow.webContents.setIgnoreMenuShortcuts(Boolean((input.meta || input.control) && ['c', 'v', 'f', 'k'].includes(input.key.toLowerCase())));
   });
-  mainWindow.webContents.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => { if (isMainFrame) service?.terminals.disconnect('desktop'); });
+  mainWindow.webContents.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => { if (isMainFrame) { service?.terminals.disconnect('desktop'); service?.chats.disconnect('desktop'); } });
   if (process.env.NODE_ENV === 'development') mainWindow.loadURL('http://127.0.0.1:5173');
   else mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   mainWindow.on('close', (event) => {
     const action = closeAction({ quitting, remoteEnabled: gateway?.data.enabled, hasTray: Boolean(tray) });
     if (action !== 'close') { event.preventDefault(); if (action === 'minimize') mainWindow.minimize(); else mainWindow.hide(); }
   });
-  mainWindow.on('closed', () => { mainWindow = null; service?.terminals.disconnect('desktop'); });
+  mainWindow.on('closed', () => { mainWindow = null; service?.terminals.disconnect('desktop'); service?.chats.disconnect('desktop'); });
 }
 function updateTray() {
   if (!gateway?.data.enabled) { tray?.destroy(); tray = null; return; }
@@ -153,6 +153,14 @@ app.whenReady().then(async () => {
   handle('inventory', () => service.inventory());
   handle('health', () => service.health());
   handle('create', (input) => service.create(input));
+  handle('chat:capabilities', (hostId) => service.chats.capabilities(hostId));
+  handle('chat:open', (id, hostId) => service.chats.open(desktop, id, hostId));
+  handle('chat:ready', (id, after) => service.chats.ready(desktop, id, after));
+  handle('chat:history', (id, after, limit) => service.chats.history(desktop, id, after, limit));
+  handle('chat:take', (id) => service.chats.take(desktop, id));
+  handle('chat:submit', (id, command) => service.chats.submit(desktop, id, command));
+  handle('chat:receipt', (id, commandId) => service.chats.receipt(desktop, id, commandId));
+  handle('chat:close', (id) => { if (service.chats.handles.has(id)) service.chats.close(desktop, id); });
   handle('worktrees:list', (hostId) => service.worktrees(hostId));
   handle('worktrees:archive', (hostId, operationId) => service.archiveWorktree(hostId, operationId));
   handle('diff:files', (input) => service.diffRequest(desktop, input, 'diff_files'));
@@ -210,7 +218,7 @@ const notified = new Set();
 app.on('before-quit', () => {
   quitting = true;
   clearInterval(monitor); clearInterval(healthMonitor); clearInterval(cleanupMonitor);
-  void gateway?.dispose(); service?.terminals.closeAll(); tray?.destroy(); tray = null;
+  void gateway?.dispose(); service?.terminals.closeAll(); service?.chats.closeAll(); tray?.destroy(); tray = null;
   service?.tunnels.closeAll();
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

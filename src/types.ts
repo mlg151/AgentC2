@@ -1,3 +1,5 @@
+import type { ChatCapabilities, ChatClientState, ChatCommand, ChatPage, ChatReceipt, ChatSnapshot, ChatUpdate } from './chatTypes';
+export type { ChatProvider, ChatSessionState, ChatCommandState, ChatCapabilities, ChatUsage, ChatQuestion, ChatAnswer, ChatEvent, ChatCommand, ChatReceipt, ChatSession, ChatPage, ChatPendingRequest, ChatClientState, ChatSnapshot, ChatUpdate } from './chatTypes';
 export type Provider = 'codex' | 'claude' | 'antigravity' | 'terminal';
 export interface ProviderTelemetry { status: 'reported' | 'stale' | 'unknown' | 'unsupported'; sampledAt: string | null; source: string | null; context: { usedTokens: number; capacityTokens: number; percent: number } | null; totalTokens: number | null; tokensPerMinute: number | null; costUsd: number | null; costBasis: string | null }
 
@@ -144,6 +146,16 @@ export interface AgentHQApi {
   health(): Promise<HostHealth[]>;
   onHealth(callback: (readings: HostHealth[]) => void): () => void;
   create(input: CreateInput): Promise<{ name: string }>;
+  chatCapabilities(hostId: string): Promise<ChatCapabilities[]>;
+  openChat(id: string, hostId: string): Promise<string>;
+  readyChat(id: string, after?: number): Promise<ChatSnapshot>;
+  chatHistory(id: string, after?: number, limit?: number): Promise<ChatPage>;
+  takeChat(id: string): Promise<ChatClientState>;
+  submitChat(id: string, command: ChatCommand): Promise<ChatReceipt>;
+  chatReceipt(id: string, commandId: string): Promise<ChatReceipt>;
+  closeChat(id: string): Promise<void>;
+  onChatEvents(callback: (update: ChatUpdate) => void): () => void;
+  onChatState(callback: (state: ChatClientState) => void): () => void;
   listWorktrees(hostId: string): Promise<WorktreeRecord[]>;
   archiveWorktree(hostId: string, operationId: string): Promise<WorktreeRecord>;
   diffFiles(input: DiffScope): Promise<DiffFile[]>;

@@ -15,6 +15,7 @@ const { uploadPng } = require('./image-upload.cjs');
 const { Tunnels } = require('./tunnels.cjs');
 const { createExercises } = require('./exercises.cjs');
 const { LoopBreaker } = require('./loop-breaker.cjs');
+const { Chats } = require('./chat.cjs');
 
 function createService({ directory, home }) {
   const events = new EventEmitter();
@@ -22,8 +23,11 @@ function createService({ directory, home }) {
   const SSH_ARGS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'StrictHostKeyChecking=yes'];
   const TMUX_NAME = /^hq-[a-f0-9]{12}$/;
   const OTHER_TMUX_NAME = /^[A-Za-z0-9_.:-]{1,80}$/;
-  const helperSource = fs.readFileSync(path.join(__dirname, 'antigravity-cleanup.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'session-cleanup.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktrees.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktree-diff.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'sitrep.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'exercises.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'flash.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'provider_telemetry.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'oporders.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'remote.py'), 'utf8');
+  const helperSource = fs.readFileSync(path.join(__dirname, 'antigravity-cleanup.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'session-cleanup.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktrees.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktree-diff.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'sitrep.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'exercises.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'flash.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'provider_telemetry.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'oporders.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'chat_remote.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'remote.py'), 'utf8');
   const hookSource = fs.readFileSync(path.join(__dirname, 'session-hook.py'), 'utf8');
+  const chatFiles = Object.fromEntries(['chat_worker.py', 'chat_protocol.py', 'chat_journal.py', 'chat_adapters.py', 'chat-protocol.json', 'chat_format.py', 'chat_codex.py', 'chat_codex_schema.py', 'chat-codex-schema.json', 'chat_antigravity.py', 'chat_claude.py'].sort().map((name) => [name, fs.readFileSync(path.join(__dirname, name), 'utf8')]));
+  const chatDigest = crypto.createHash('sha256').update(JSON.stringify(chatFiles)).digest('hex');
+  const chatBootstrapped = new Set();
 
 
   const store = new Store(directory);
@@ -178,6 +182,20 @@ function createService({ directory, home }) {
   }
 
 
+  const chats = new Chats({
+    remote: async (hostId, request) => {
+      const host = getHost(hostId);
+      const key = `${host.id}/${host.target}/${host.port}`;
+      try {
+        const result = await runRemote({ action: 'chat', sourceDigest: chatDigest, allowUpgrade: true, ...(!chatBootstrapped.has(key) ? { chatFiles } : {}), request }, hostId);
+        chatBootstrapped.add(key);
+        return result;
+      } catch (error) { chatBootstrapped.delete(key); throw error; }
+    },
+    resolveHost: (hostId) => getHost(hostId).id,
+    emit: (clientId, event, value) => events.emit('client', clientId, event, value),
+  });
+
   const terminals = new Terminals({
     emit: (clientId, event, value) => events.emit('client', clientId, event, value),
     onOutput: (record, data) => tunnels.feed(getHost(record.hostId), `${record.hostId}/tmux:${record.name}`, data),
@@ -223,6 +241,11 @@ function createService({ directory, home }) {
       const oldHost = getHost(record.hostId);
       const nextHost = settings.hosts.find((h) => h.id === record.hostId);
       if (!nextHost || !nextHost.enabled || nextHost.target !== oldHost.target || nextHost.port !== oldHost.port) throw new Error('Close this host’s terminal tabs on every device before changing its connection settings');
+    }
+    for (const record of chats.sessions.values()) {
+      const oldHost = getHost(record.hostId);
+      const nextHost = settings.hosts.find((host) => host.id === record.hostId);
+      if (!nextHost || !nextHost.enabled || nextHost.target !== oldHost.target || nextHost.port !== oldHost.port) throw new Error('Close this host’s chat views on every device before changing its connection settings');
     }
     for (const h of settings.hosts) {
       const old = store.data.settings.hosts.find((item) => item.id === h.id);
@@ -528,6 +551,6 @@ function createService({ directory, home }) {
     }
     return { matches, searched: selected.length, total: sessions.length, truncated, errors };
   }
-  return { store, events, terminals, tunnels, cleanup, exercises, inventory, health, create, worktrees, flashQueue, flashDecide, archiveWorktree, diffRequest, previewSitrep, launchSitrep, action, interruptFaults, resetFault, loopBreaker, uploadClipboardImage, devUrls, openDevUrl, saveSettings, previewOpOrder, enrollOpOrder, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
+  return { store, events, terminals, chats, tunnels, cleanup, exercises, inventory, health, create, worktrees, flashQueue, flashDecide, archiveWorktree, diffRequest, previewSitrep, launchSitrep, action, interruptFaults, resetFault, loopBreaker, uploadClipboardImage, devUrls, openDevUrl, saveSettings, previewOpOrder, enrollOpOrder, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
 }
 module.exports = { createService };
