@@ -198,17 +198,28 @@ async function poll(check, label) { for(let i=0;i<100;i++){const result=await ch
     assert.equal((await service.inventory()).sessions.some((item)=>item.key===unit.key),false,'Stopped chat was not deleted');
     console.log('PASS managed deletion: ownership, unknown stop receipts, confirmed live/stopped removal, persistent tombstones, and stale-save protection');
     if(local){
+      // The disposable Linux login shell gets a visible readiness marker.
+      // A spawned tmux client is not yet an acknowledgement that input is safe.
+      fs.writeFileSync(path.join(home,'.bash_profile'),"PS1='AGENTC2_LOCAL_READY> '\n");
       const shell=await service.create({provider:'terminal',hostId:'default',cwd:repo,title:'Local terminal fixture'});
-      const terminal=await service.terminals.open(desktop,shell.name,'default',100,30);service.terminals.ready(desktop,terminal);
+      const terminal=await service.terminals.open(desktop,shell.name,'default',100,30);
+      const record=service.terminals.sessions.get('default/'+shell.name);
+      // This service-only viewer must answer VT queries as a real xterm does.
+      const replies=record.mirror.onData((data)=>record.terminal.write(data));
+      await service.terminals.ready(desktop,terminal);
+      await poll(async()=>record.serializer.serialize().includes('AGENTC2_LOCAL_READY>'),'Local login shell did not become ready');
       await service.terminals.write(desktop,terminal,'printf \'LOCAL_PTY_WITNESS\\n\'; for i in $(seq 1 80); do echo local-scroll-$i; done\r');
       await poll(async()=>service.terminals.sessions.get('default/'+shell.name)?.serializer.serialize().includes('local-scroll-80'),'Local terminal input/output not attached');
       const uploaded=await service.uploadClipboardImage(desktop,terminal,fs.readFileSync(path.join(root,'assets/app-icon.png')));
       assert.ok(uploaded.startsWith(home+'/'));assert.equal(fs.statSync(uploaded).mode&0o777,0o600);
       await service.terminals.scrollRemote(desktop,terminal,'up',20);
-      service.terminals.close(desktop,terminal);
-      const reattached=await service.terminals.open(desktop,shell.name,'default',100,30);service.terminals.ready(desktop,reattached);
+      replies.dispose();service.terminals.close(desktop,terminal);
+      const reattached=await service.terminals.open(desktop,shell.name,'default',100,30);
+      const reattachedRecord=service.terminals.sessions.get('default/'+shell.name);
+      const reattachedReplies=reattachedRecord.mirror.onData((data)=>reattachedRecord.terminal.write(data));
+      await service.terminals.ready(desktop,reattached);
       await poll(async()=>(await service.terminals.retained(desktop,reattached)).text.includes('LOCAL_PTY_WITNESS'),'Local terminal history lost after detach');
-      await service.deleteSession(desktop,'default/tmux:'+shell.name);service.terminals.close(desktop,reattached);
+      await service.deleteSession(desktop,'default/tmux:'+shell.name);reattachedReplies.dispose();service.terminals.close(desktop,reattached);
       assert.equal((await service.inventory()).sessions.some((item)=>item.id===shell.name),false,'Deleted terminal returned to inventory');
       const health=await service.health();assert.equal(health[0].connected,true);assert.ok(health[0].memoryTotal>0);
     }
