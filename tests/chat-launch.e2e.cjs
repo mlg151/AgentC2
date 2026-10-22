@@ -70,6 +70,7 @@ async function poll(check, label) { for(let i=0;i<100;i++){const result=await ch
       const rendered=await app.firstWindow(),errors=[];rendered.on('pageerror',(error)=>errors.push(error.message));
       await rendered.getByRole('textbox',{name:'Message to agent'}).waitFor({timeout:30000});
       await rendered.getByText('Fixture approved',{exact:true}).waitFor();assert.equal(await rendered.locator('vite-error-overlay').count(),0);assert.deepEqual(errors,[]);
+      await rendered.getByRole('textbox',{name:'Search sessions',exact:true}).fill(launch.title);
       if(process.env.AGENTC2_QA_SCREENSHOT_DIR){fs.mkdirSync(process.env.AGENTC2_QA_SCREENSHOT_DIR,{recursive:true});await rendered.screenshot({path:path.join(process.env.AGENTC2_QA_SCREENSHOT_DIR,'electron-chat-ssh.png')});}
       await rendered.getByRole('textbox',{name:'Message to agent'}).fill('hold');
       await rendered.locator('.structured-chat').getByRole('button',{name:'Send',exact:true}).click();
@@ -114,9 +115,26 @@ async function poll(check, label) { for(let i=0;i<100;i++){const result=await ch
       await phoneProxy.close();phoneProxy=null;await browser.close();browser=null;
       await rendered.evaluate((config)=>window.agentHQ.saveRemote(config),{enabled:false,port:gatewayPort,url:origin,transport:'https'});
       assert.deepEqual(errors,[]);
+      await service.chats.submit(desktop,second,{protocolVersion:1,commandId:crypto.randomUUID(),operation:'stop',sessionId:first.chatSessionId,payload:{}});
+      await poll(async()=>(await service.chats.history(desktop,second,0)).session.state==='stopped','Original session did not stop before resume');
+      await rendered.evaluate(()=>window.agentHQ.inventory());
+      await rendered.locator('.session-pane:visible').getByRole('button',{name:'Resume',exact:true}).click();
+      const resumeDialog=rendered.getByRole('dialog',{name:'Resume conversation',exact:true});
+      assert.equal(await resumeDialog.getByRole('combobox',{name:'Rules of Engagement for this launch'}).inputValue(),'gated','Resume silently changed the original ROE profile');
+      await resumeDialog.getByRole('button',{name:'Resume',exact:true}).click();
+      await rendered.getByText('Later answer',{exact:true}).waitFor();
+      const resumedUnit=await poll(async()=>{const snapshot=await rendered.evaluate(()=>window.agentHQ.inventory());return snapshot.sessions.find((item)=>item.transport==='chat'&&item.id!==first.name&&item.id!==isolated.name&&item.providerSessionId==='native-thread');},'Rendered resume did not preserve the native conversation ID');
+      assert.equal(resumedUnit.roeProfile,'gated');assert.equal(resumedUnit.cwd,repo);
+      const resumedPane=rendered.locator(`[data-session-key="${resumedUnit.key}"]`);
+      await resumedPane.getByRole('textbox',{name:'Message to agent'}).fill('Continue resumed conversation');
+      await resumedPane.getByRole('button',{name:'Send',exact:true}).click();
+      await resumedPane.getByText('Fixture answer',{exact:true}).waitFor();
+      rendered.once('dialog',(dialog)=>dialog.accept());await resumedPane.getByRole('button',{name:'Stop',exact:true}).click();
+      await poll(async()=>{const snapshot=await rendered.evaluate(()=>window.agentHQ.inventory());return snapshot.sessions.find((item)=>item.id===resumedUnit.id)?.chatState==='stopped';},'Resumed managed provider did not stop');
       await app.close();app=null;
     }
     for(const [chatId,h] of [[first.chatSessionId,second],[isolated.chatSessionId,treeHandle]]){
+      if((await service.chats.history(desktop,h,0)).session.state==='stopped')continue;
       await service.chats.submit(desktop,h,{protocolVersion:1,commandId:crypto.randomUUID(),operation:'stop',sessionId:chatId,payload:{}});
       await poll(async()=>(await service.chats.history(desktop,h,0)).session.state==='stopped','Stop not recorded');
     }
@@ -126,7 +144,7 @@ async function poll(check, label) { for(let i=0;i<100;i++){const result=await ch
     assert.equal(pruned.session.providerSessionId,'native-thread');
     assert.throws(()=>execFileSync('/usr/bin/tmux',['-S',tmuxSocket,'has-session','-t',first.name],{stdio:'pipe'}));
     workerPid=(await service.chats.request('default','health')).pid;
-    console.log('PASS real isolated SSH, private worker bootstrap, idempotent initial instructions, inventory/native IDs/usage, detach replay, exact approval, worktree retry, scoped stop, retained receipts after transcript pruning, structured-output SSH forwarding'+(process.env.DISPLAY?', and actual Electron/paired companion question, reconnect, denial, handoff, and revocation':''));
+    console.log('PASS real isolated SSH, private worker bootstrap, idempotent initial instructions, inventory/native IDs/usage, detach replay, exact approval, worktree retry, scoped stop, retained receipts after transcript pruning, structured-output SSH forwarding'+(process.env.DISPLAY?', and actual Electron/paired companion question, reconnect, denial, handoff, revocation, native-history resume, and ROE preservation':''));
   }catch(error){
     if(phoneProxy){await phoneProxy.page.screenshot({path:path.join(os.tmpdir(),'agentc2-chat-phone-failure.png'),fullPage:true}).catch(()=>{});console.error('Phone fixture state:',await phoneProxy.page.locator('.phone-main').innerText().catch(()=>''));}
     throw error;

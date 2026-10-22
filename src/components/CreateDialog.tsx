@@ -6,14 +6,14 @@ export function CreateDialog({ resume, settings, hostId, onClose, onSubmit, busy
   resume: Session | null; settings: Settings; hostId: string; onClose: () => void; onSubmit: (input: CreateInput) => void; busy: boolean; presetsOnly?: boolean;
 }) {
   const options = settings.presets.filter((p) => !resume || p.provider === resume.provider);
-  const [presetId, setPresetId] = useState(options[0]?.id || '');
-  const initial = options[0];
+  const initial = options.find((option) => option.id === resume?.presetId) || options[0];
+  const [presetId, setPresetId] = useState(initial?.id || '');
   const [target, setTarget] = useState(resume?.hostId || initial?.hostId || hostId || settings.hosts.find((h) => h.enabled)?.id || '');
   const [provider, setProvider] = useState(resume?.provider || initial?.provider || 'codex');
   const [cwd, setCwd] = useState(resume?.cwd || initial?.cwd || '');
   const [title, setTitle] = useState(resume?.title || '');
   const [instructions, setInstructions] = useState(resume ? '' : initial?.instructions || '');
-  const [roeOverride, setRoeOverride] = useState<CreateInput['roeProfile'] | ''>('');
+  const [roeOverride, setRoeOverride] = useState<CreateInput['roeProfile'] | ''>(resume && !resume.agentId && resume.roeProfile && resume.roeProfile !== 'unknown' ? resume.roeProfile : '');
   const [transport, setTransport] = useState<'chat' | 'terminal'>(resume?.agentId || resume?.transport === 'terminal' || (initial && (initial.command !== (initial.provider === 'antigravity' ? 'agy' : initial.provider) || initial.args.trim())) ? 'terminal' : 'chat');
   const [sessionType, setSessionType] = useState<'agent' | 'terminal'>('agent');
   const [isolated, setIsolated] = useState(false);
