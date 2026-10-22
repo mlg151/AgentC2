@@ -80,7 +80,7 @@ def oporder_render(order):
     opencode = {}
     for server in order.get("mcp") or []:
         name = server["name"]
-        selected = server.get("providers") or ["codex", "claude", "antigravity"]
+        selected = server.get("providers") or ["codex", "claude", "antigravity", "opencode"]
         transport = server["transport"]
         env = server.get("env") or []
         headers = server.get("headers") or {}

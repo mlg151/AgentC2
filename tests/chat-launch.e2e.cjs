@@ -48,6 +48,10 @@ async function poll(check, label) { for(let i=0;i<100;i++){const result=await ch
     let page=await poll(async()=>{const value=await service.chats.history(desktop,handle,0);return value.events.some((event)=>event.type==='turn.completed')&&value;},'Initial instructions were not executed');
     assert.equal(page.events.filter((event)=>event.type==='message.completed'&&event.data.role==='user').length,1,'Create retry duplicated initial instructions');
     const inventory=await service.inventory();const unit=inventory.sessions.find((item)=>item.id===first.name);assert.equal(unit.transport,'chat');assert.equal(unit.chatSessionId,first.chatSessionId);assert.equal(unit.providerSessionId,'native-thread');assert.equal(unit.telemetry.totalTokens,150);
+    assert.equal(await service.renameSession(unit.key,'Reviewed structured title'),'Reviewed structured title');
+    assert.equal((await service.inventory()).sessions.find((item)=>item.key===unit.key).title,'Reviewed structured title');
+    assert.equal((await service.chats.history(desktop,handle,0)).session.title,'Reviewed structured title');
+    await service.renameSession(unit.key,launch.title);
     service.chats.close(desktop,handle); // No viewers remain; work must continue.
     const second=await service.chats.open(desktop,first.chatSessionId,'default');await service.chats.ready(desktop,second,0);
     await service.chats.submit(desktop,second,{protocolVersion:1,commandId:crypto.randomUUID(),operation:'send',sessionId:first.chatSessionId,payload:{text:'approval'}});
