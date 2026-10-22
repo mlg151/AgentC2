@@ -171,6 +171,7 @@ export interface AgentHQApi {
   interruptFaults(): Promise<{ sessionKey: string; status: string; result?: string }[]>;
   resetFault(key: string): Promise<boolean>;
   stop(name: string, hostId?: string): Promise<void>;
+  deleteSession(key: string): Promise<void>;
   openTerminal(name: string, cols: number, rows: number, hostId?: string): Promise<string>;
   terminalHistory(id: string): Promise<{ text: string; truncated: boolean }>;
   readyTerminal(id: string): Promise<TerminalSnapshot>;

@@ -310,3 +310,5 @@ kbd{font:10px Consolas,monospace;background:#29404e;padding:3px 5px;border-radiu
 .flash-detail .inline-actions { flex-wrap: wrap; }
 .flash-detail .inline-actions button { height: 34px; padding: 0 10px; font-size: 11px; }
 .flash-detail kbd { font-size: 9px; opacity: .8; }
+
+.situation-roster .session-main .unit-session-name{flex-shrink:0;min-height:14px;font-size:11px;line-height:14px;color:#c5d8ee}

@@ -53,7 +53,7 @@ export class CompanionClient {
     const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
     const id = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('Request timed out. Action outcome may be unknown; refresh sessions before repeating it.')); }, 60000);
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('Request timed out. Action outcome may be unknown; refresh sessions before repeating it.')); }, method === 'create' ? 360000 : 60000);
       this.pending.set(id, { resolve: (value) => resolve(value as T), reject, timer });
       this.socket!.send(JSON.stringify({ id, method, args }));
     });

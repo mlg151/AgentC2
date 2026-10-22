@@ -16,7 +16,22 @@ class ProviderRejected(ValueError):
 def probe_capabilities(provider):
     if provider not in CONTRACT["providers"]:
         raise ValueError("Invalid provider")
-    binary = shutil.which(dict(codex="codex", claude="claude", antigravity="agy")[provider])
+    if provider == "antigravity":
+        from chat_antigravity import SUPPORTED_SDK_VERSION, auth_available
+        try:
+            version = importlib.metadata.version("google-antigravity")
+        except importlib.metadata.PackageNotFoundError:
+            return unavailable_capabilities(provider, reason="The daemon will automatically prepare the Antigravity SDK when this session starts")
+        if version != SUPPORTED_SDK_VERSION:
+            return unavailable_capabilities(provider, version, "The managed Antigravity SDK version needs preparation")
+        if not auth_available(os.environ):
+            return unavailable_capabilities(provider, version, "Configure Gemini API or Vertex authentication on the execution host for the Antigravity SDK")
+        return dict(provider=provider, version="SDK " + version, status="supported", reason="SDK-native history and credentials are separate from Antigravity CLI conversations.", **{name: name in ("streaming", "history", "resume", "interrupt", "approvals", "questions") for name in CONTRACT["capabilities"]})
+    if provider == "claude":
+        from chat_claude import cli_binary
+        binary = cli_binary()
+    else:
+        binary = shutil.which("codex")
     if binary is None:
         return unavailable_capabilities(provider, reason="Provider CLI is not available on this host")
     try:
@@ -29,18 +44,14 @@ def probe_capabilities(provider):
         from chat_codex_schema import BUNDLE
         if version == BUNDLE["version"]:
             return dict(provider=provider, version=version, status="supported", reason=None, **{name: name in ("streaming", "history", "resume", "interrupt", "approvals", "questions", "steering") for name in CONTRACT["capabilities"]})
-    if provider == "antigravity":
-        from chat_antigravity import SUPPORTED_VERSION
-        if version == SUPPORTED_VERSION:
-            return dict(provider=provider, version=version, status="supported", reason="CLI resume preserves native context; earlier native messages cannot be imported. Approval replies and attachments are unavailable.", **{name: name in ("streaming", "resume", "interrupt") for name in CONTRACT["capabilities"]})
     if provider == "claude":
-        from chat_claude import SUPPORTED_SDK_VERSION, SUPPORTED_CLI_VERSION, auth_available
+        from chat_claude import SUPPORTED_SDK_VERSION, SUPPORTED_CLI_VERSIONS, auth_available
         try:
             sdk_version = importlib.metadata.version("claude-agent-sdk")
         except importlib.metadata.PackageNotFoundError:
-            return unavailable_capabilities(provider, version, "Install claude-agent-sdk==" + SUPPORTED_SDK_VERSION + " in the worker's Python environment")
+            return unavailable_capabilities(provider, version, "The daemon will automatically prepare the Claude Agent SDK when this session starts")
         observed = str(version) + "; SDK " + sdk_version
-        if version == SUPPORTED_CLI_VERSION and sdk_version == SUPPORTED_SDK_VERSION:
+        if version in SUPPORTED_CLI_VERSIONS and sdk_version == SUPPORTED_SDK_VERSION:
             if not auth_available(os.environ):
                 return unavailable_capabilities(provider, observed, "Configure Claude API or supported cloud-provider authentication on the selected host; CLI subscription sign-in is not used")
             return dict(provider=provider, version=observed, status="supported", reason=None, **{name: name in ("streaming", "history", "resume", "interrupt", "approvals", "questions") for name in CONTRACT["capabilities"]})
@@ -56,7 +67,7 @@ def create_adapter(session, journal):
     if session["provider"] == "antigravity":
         from chat_antigravity import AntigravityAdapter
         if probe_capabilities("antigravity")["status"] != "supported":
-            raise ProviderRejected("Antigravity version changed or is unsupported; probe host capabilities again")
+            raise ProviderRejected("Antigravity SDK or authentication is unavailable; prepare host capabilities again")
         return AntigravityAdapter(session, journal)
     if session["provider"] == "claude":
         from chat_claude import ClaudeAdapter

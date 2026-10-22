@@ -49,7 +49,6 @@ function validateSettings(input) {
     if (p.hostId && !hosts.some((h) => h.id === p.hostId)) throw new Error('Preset host does not exist');
     const roeProfile = p.roeProfile === undefined ? '' : p.roeProfile;
     if (!ROE_PROFILES.includes(roeProfile)) throw new Error('Invalid preset Rules of Engagement profile');
-    if (roeProfile === 'gated' && p.provider === 'antigravity') throw new Error('Antigravity has no verified session-scoped gated mode');
     const loop = p.loopBreaker || {};
     if (loop.enabled !== undefined && typeof loop.enabled !== 'boolean' || loop.autoInterrupt !== undefined && typeof loop.autoInterrupt !== 'boolean' || loop.threshold !== undefined && (!Number.isInteger(loop.threshold) || loop.threshold < 2 || loop.threshold > 20) || loop.windowMinutes !== undefined && (!Number.isInteger(loop.windowMinutes) || loop.windowMinutes < 1 || loop.windowMinutes > 120) || loop.cooldownMinutes !== undefined && (!Number.isInteger(loop.cooldownMinutes) || loop.cooldownMinutes < 1 || loop.cooldownMinutes > 1440)) throw new Error('Invalid repeated-failure policy');
     if (loop.enabled && (p.provider !== 'claude' || !p.attentionHooks)) throw new Error('Repeated-failure detection requires Claude provider hooks');
@@ -118,10 +117,10 @@ function resolveRoeProfile(settings, hostId, preset, override) {
   if (override !== undefined && !ROE_PROFILES.slice(1).includes(override)) throw new Error('Invalid Rules of Engagement override');
   return override || preset?.roeProfile || settings.roe?.hostDefaults?.[hostId] || (preset?.fullPermissions === false ? 'provider-default' : 'full');
 }
-function validateRoeLaunch(provider, preset, profile) {
+function validateRoeLaunch(provider, preset, profile, transport = 'terminal') {
   if (profile !== 'gated') return;
-  if (!['codex', 'claude'].includes(provider)) throw new Error('Provider has no verified session-scoped gated mode');
-  if (preset && (preset.command !== provider || /--(?:dangerously|sandbox|ask-for-approval|permission-mode|settings|allowedTools|allowed-tools|config|profile)|(?:^|\s)-c(?:\s|=)/.test(preset.args))) throw new Error('Gated mode requires the standard provider command without conflicting permission arguments');
+  if (!['codex', 'claude'].includes(provider) && !(provider === 'antigravity' && transport === 'chat')) throw new Error('Provider has no verified session-scoped gated mode');
+  if (preset && (preset.command !== (provider === 'antigravity' ? 'agy' : provider) || /--(?:dangerously|sandbox|ask-for-approval|permission-mode|settings|allowedTools|allowed-tools|config|profile)|(?:^|\s)-c(?:\s|=)/.test(preset.args))) throw new Error('Gated mode requires the standard provider command without conflicting permission arguments');
 }
 function validateWorkspace(w) {
   if (!w || !Array.isArray(w.tabs) || w.tabs.length > 40 || !w.metadata || typeof w.metadata !== 'object') throw new Error('Invalid workspace');

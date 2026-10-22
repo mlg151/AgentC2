@@ -4,6 +4,7 @@ import asyncio
 from concurrent.futures import Future
 from dataclasses import asdict, is_dataclass
 import importlib
+import importlib.util
 import json
 import math
 import os
@@ -19,7 +20,19 @@ from chat_adapters import ProviderRejected
 from chat_format import display
 
 SUPPORTED_SDK_VERSION = "0.2.172"
-SUPPORTED_CLI_VERSION = "2.1.306"
+SUPPORTED_CLI_VERSION = "2.1.308"
+SUPPORTED_CLI_VERSIONS = ("2.1.306", SUPPORTED_CLI_VERSION)
+
+
+def cli_binary():
+    # The platform wheel includes the matching CLI; prefer it to an unrelated
+    # system installation, including when no `claude` command is installed.
+    spec = importlib.util.find_spec("claude_agent_sdk")
+    if spec is not None and spec.origin:
+        bundled = Path(spec.origin).parent / "_bundled" / "claude"
+        if bundled.is_file():
+            return str(bundled)
+    return shutil.which("claude")
 
 
 def auth_available(environment):
@@ -92,7 +105,7 @@ class ClaudeAdapter:
         environment["CLAUDE_CODE_OAUTH_TOKEN"] = ""
         environment["CLAUDE_AGENT_SDK_CLIENT_APP"] = "agentc2/0.4.1"
         return self.sdk.ClaudeAgentOptions(
-            cwd=self.session["cwd"], cli_path=shutil.which("claude"),
+            cwd=self.session["cwd"], cli_path=cli_binary(),
             system_prompt=dict(type="preset", preset="claude_code"),
             setting_sources=["user", "project", "local"],
             include_partial_messages=True, permission_mode="bypassPermissions" if profile == "full" else "default" if profile == "gated" else None,

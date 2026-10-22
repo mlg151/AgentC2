@@ -235,6 +235,31 @@ class WorkerProcessTests(unittest.TestCase):
 
 
 @unittest.skipUnless(sys.platform.startswith("linux"), "Persistent remote worker targets Linux")
+class PreparationTests(unittest.TestCase):
+    def test_worker_cannot_retire_during_provider_installation(self):
+        from unittest.mock import patch
+        from chat_worker import Worker
+        with tempfile.TemporaryDirectory(prefix="a2-prepare-") as directory:
+            worker = Worker(directory, "fixture", adapter_factory=FixtureAdapter, probe=probe)
+            entered, release = threading.Event(), threading.Event()
+            def prepare(provider):
+                entered.set()
+                release.wait(timeout=5)
+            try:
+                with patch("chat_runtime.ensure_sdk", prepare), ThreadPoolExecutor(max_workers=1) as pool:
+                    flight = pool.submit(worker.handle, request("capabilities", prepareProvider="claude"))
+                    self.assertTrue(entered.wait(timeout=5))
+                    self.assertFalse(worker.handle(request("health"))["canRetire"])
+                    with self.assertRaises(ValueError):
+                        worker.handle(request("retire"))
+                    release.set()
+                    flight.result(timeout=5)
+                self.assertTrue(worker.handle(request("health"))["canRetire"])
+            finally:
+                release.set()
+                worker.close()
+
+
 class BootstrapTests(unittest.TestCase):
     def test_ephemeral_helper_exit_leaves_worker_running(self):
         with tempfile.TemporaryDirectory(prefix="a2-helper-") as temporary:

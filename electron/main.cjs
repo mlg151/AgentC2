@@ -144,6 +144,7 @@ app.whenReady().then(async () => {
   handle('fault:reset', (key) => service.resetFault(key));
   handle('workspace:save', (input) => service.saveWorkspace(input));
   handle('session:pin', (key, pinned) => service.setSessionPinned(key, pinned));
+  handle('session:delete', (key) => service.deleteSession(desktop, key));
   handle('cleanup:preview', (input) => service.cleanup.preview(input));
   handle('cleanup:execute', (token, keys) => service.cleanup.execute(token, keys));
   handle('cleanup:state', () => service.cleanup.state());

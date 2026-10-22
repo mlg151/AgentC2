@@ -131,10 +131,12 @@ jobs:
       - run: python3 tests/worktree-diff.py
       - run: python3 tests/provider-telemetry.py
       - run: npx playwright-core install chromium
-      - name: Structured chat and managed companion regressions
+      - name: Structured chat and managed session regressions
         run: |
+          python3 tests/chat-runtime.py
           node tests/chat-ui.e2e.cjs
           node tests/companion-filters.e2e.cjs
+          node tests/desktop-sessions.e2e.cjs
           xvfb-run -a node tests/chat-launch.e2e.cjs
           AGENTC2_CHAT_TEST_LOCAL=1 xvfb-run -a node tests/chat-launch.e2e.cjs
         env:

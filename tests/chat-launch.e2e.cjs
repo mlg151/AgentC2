@@ -144,6 +144,15 @@ async function poll(check, label) { for(let i=0;i<100;i++){const result=await ch
       await resumedPane.getByText('Fixture answer',{exact:true}).waitFor();
       rendered.once('dialog',(dialog)=>dialog.accept());await resumedPane.getByRole('button',{name:'Stop',exact:true}).click();
       await poll(async()=>{const snapshot=await rendered.evaluate(()=>window.agentHQ.inventory());return snapshot.sessions.find((item)=>item.id===resumedUnit.id)?.chatState==='stopped';},'Resumed managed provider did not stop');
+      await resumedPane.getByRole('button',{name:'Delete session',exact:true}).click();
+      const deletionDialog=rendered.getByRole('dialog',{name:'Delete session',exact:true});
+      await deletionDialog.getByRole('button',{name:'Cancel',exact:true}).click();
+      assert.ok((await rendered.evaluate(()=>window.agentHQ.inventory())).sessions.some((item)=>item.key===resumedUnit.key),'Cancel deleted a session');
+      await resumedPane.getByRole('button',{name:'Delete session',exact:true}).click();
+      await deletionDialog.getByRole('button',{name:'Delete session',exact:true}).click();
+      await deletionDialog.waitFor({state:'hidden'});
+      assert.equal((await rendered.evaluate(()=>window.agentHQ.inventory())).sessions.some((item)=>item.key===resumedUnit.key),false);
+      await poll(async()=>!(await rendered.evaluate(()=>window.agentHQ.getState())).workspace.tabs.includes(resumedUnit.key),'Deleted session tab remained open');
       await app.close();app=null;
     }
     for(const [chatId,h] of [[first.chatSessionId,second],[isolated.chatSessionId,treeHandle]]){
@@ -156,6 +165,34 @@ async function poll(check, label) { for(let i=0;i<100;i++){const result=await ch
     assert.equal((await service.chats.receipt(desktop,second,first.receipt.commandId)).state,retainedReceipt.state);
     assert.equal(pruned.session.providerSessionId,'native-thread');
     assert.throws(()=>execFileSync('/usr/bin/tmux',['-S',tmuxSocket,'has-session','-t',first.name],{stdio:'pipe'}));
+    const deletionUnit=await service.create({...launch,launchId:crypto.randomBytes(16).toString('hex'),instructions:'',title:'Delete fixture'});
+    const deletionHandle=await service.chats.open(desktop,deletionUnit.chatSessionId,'default');await service.chats.ready(desktop,deletionHandle,0);
+    await poll(async()=>(await service.chats.history(desktop,deletionHandle,0)).session.state==='idle','Delete fixture not ready');
+    const deletionKey='default/tmux:'+deletionUnit.name;
+    const phoneClient={id:'delete-phone',name:'Deletion phone'};
+    const phoneHandle=await service.chats.open(phoneClient,deletionUnit.chatSessionId,'default');await service.chats.take(phoneClient,phoneHandle);
+    await assert.rejects(()=>service.deleteSession(desktop,deletionKey),/take control/i);
+    assert.equal(service.store.data.deletedSessions.includes(deletionKey),false,'Ownership rejection hid a running session');
+    await service.chats.take(desktop,deletionHandle);
+    const submit=service.chats.submit.bind(service.chats);
+    service.chats.submit=async()=>({state:'unknown',error:'Fixture lost acknowledgement'});
+    await assert.rejects(()=>service.deleteSession(desktop,deletionKey),/Fixture lost acknowledgement/);
+    assert.equal(service.store.data.deletedSessions.includes(deletionKey),false,'Unconfirmed stop hid a running session');
+    service.chats.submit=submit;
+    const staleWorkspace={tabs:[deletionKey],selectedKey:deletionKey,metadata:{[deletionKey]:{pinned:false,project:'Fixture',notes:'Deleted notes'}}};
+    service.store.save('workspace',staleWorkspace);
+    await service.deleteSession(desktop,deletionKey);
+    assert.equal((await service.chats.history(desktop,deletionHandle,0)).session.state,'stopped');
+    assert.equal((await service.inventory()).sessions.some((item)=>item.key===deletionKey),false,'Worker inventory resurrected deleted chat');
+    service.store.saveWorkspace(staleWorkspace);
+    assert.equal(service.store.data.workspace.tabs.includes(deletionKey),false,'Stale save resurrected a deleted tab');
+    const persisted=new (require('../electron/config.cjs').Store)(path.join(directory,'desktop'));
+    assert.ok(persisted.data.deletedSessions.includes(deletionKey),'Restart lost deletion');
+    await assert.rejects(()=>service.deleteSession(phoneClient,deletionKey),/Invalid managed/);
+    await assert.rejects(()=>service.deleteSession(desktop,'default/process:123'),/Invalid managed/);
+    await service.deleteSession(desktop,unit.key);
+    assert.equal((await service.inventory()).sessions.some((item)=>item.key===unit.key),false,'Stopped chat was not deleted');
+    console.log('PASS managed deletion: ownership, unknown stop receipts, confirmed live/stopped removal, persistent tombstones, and stale-save protection');
     if(local){
       const shell=await service.create({provider:'terminal',hostId:'default',cwd:repo,title:'Local terminal fixture'});
       const terminal=await service.terminals.open(desktop,shell.name,'default',100,30);service.terminals.ready(desktop,terminal);
@@ -167,7 +204,8 @@ async function poll(check, label) { for(let i=0;i<100;i++){const result=await ch
       service.terminals.close(desktop,terminal);
       const reattached=await service.terminals.open(desktop,shell.name,'default',100,30);service.terminals.ready(desktop,reattached);
       await poll(async()=>(await service.terminals.retained(desktop,reattached)).text.includes('LOCAL_PTY_WITNESS'),'Local terminal history lost after detach');
-      await service.action(desktop,'stop',shell.name,'default');service.terminals.close(desktop,reattached);
+      await service.deleteSession(desktop,'default/tmux:'+shell.name);service.terminals.close(desktop,reattached);
+      assert.equal((await service.inventory()).sessions.some((item)=>item.id===shell.name),false,'Deleted terminal returned to inventory');
       const health=await service.health();assert.equal(health[0].connected,true);assert.ok(health[0].memoryTotal>0);
     }
     workerPid=(await service.chats.request('default','health')).pid;

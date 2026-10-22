@@ -26,7 +26,7 @@ function createService({ directory, home }) {
   const OTHER_TMUX_NAME = /^[A-Za-z0-9_.:-]{1,80}$/;
   const helperSource = fs.readFileSync(path.join(__dirname, 'antigravity-cleanup.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'session-cleanup.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktrees.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktree-diff.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'sitrep.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'exercises.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'flash.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'provider_telemetry.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'oporders.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'chat_remote.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'remote.py'), 'utf8');
   const hookSource = fs.readFileSync(path.join(__dirname, 'session-hook.py'), 'utf8');
-  const chatFiles = Object.fromEntries(['chat_worker.py', 'chat_protocol.py', 'chat_journal.py', 'chat_adapters.py', 'chat-protocol.json', 'chat_format.py', 'chat_codex.py', 'chat_codex_schema.py', 'chat-codex-schema.json', 'chat_antigravity.py', 'chat_claude.py'].sort().map((name) => [name, fs.readFileSync(path.join(__dirname, name), 'utf8')]));
+  const chatFiles = Object.fromEntries(['chat_runtime.py', 'chat_antigravity_cli.py', 'chat_worker.py', 'chat_protocol.py', 'chat_journal.py', 'chat_adapters.py', 'chat-protocol.json', 'chat_format.py', 'chat_codex.py', 'chat_codex_schema.py', 'chat-codex-schema.json', 'chat_antigravity.py', 'chat_claude.py'].sort().map((name) => [name, fs.readFileSync(path.join(__dirname, name), 'utf8')]));
   const chatDigest = crypto.createHash('sha256').update(JSON.stringify(chatFiles)).digest('hex');
   const chatBootstrapped = new Set();
 
@@ -45,6 +45,7 @@ function createService({ directory, home }) {
   const flashCache = new Map();
   let flashFlight;
   const faultFlights = new Set();
+  const deletionFlights = new Set();
 
   const hostCache = new Map(Object.entries(store.data.cachedUnits).map(([hostId, units]) => [hostId, units.map((unit) => ({ ...unit, hostId, hostName: store.data.settings.hosts.find((host) => host.id === hostId)?.name || hostId }))]));
   const healthCache = new Map();
@@ -158,7 +159,7 @@ function createService({ directory, home }) {
       let output = '';
       let errors = '';
       let settled = false;
-      const timeout = setTimeout(() => child.kill(), payload.action === 'cleanup_delete' && payload.provider === 'antigravity' ? 300000 : 40000);
+      const timeout = setTimeout(() => child.kill(), payload.request?.prepareProvider ? 330000 : payload.action === 'cleanup_delete' && payload.provider === 'antigravity' ? 300000 : 40000);
 
       child.stdout.on('data', (chunk) => {
         output += chunk.toString();
@@ -248,6 +249,7 @@ function createService({ directory, home }) {
   });
 
   async function saveSettings(input) {
+    if (deletionFlights.size) throw new Error('Wait for session deletion before changing settings');
     if (cleanup.isBusy()) throw new Error('Wait for history cleanup before changing settings');
     await inventoryFlight;
     await healthFlight;
@@ -335,13 +337,13 @@ function createService({ directory, home }) {
     const host = getHost(input.hostId);
     if (input.agentId && input.roeProfile) throw new Error('An existing background agent keeps its original permission mode');
     const roeProfile = resolveRoeProfile(store.data.settings, host.id, preset, input.roeProfile);
-    validateRoeLaunch(provider, preset, roeProfile);
     const isolated = input.worktree;
     const customCommand = preset && (preset.command !== (provider === 'antigravity' ? 'agy' : provider) || preset.args.trim());
     const transport = isTerminal || input.agentId || customCommand ? 'terminal' : input.transport || 'chat';
+    validateRoeLaunch(provider, preset, roeProfile, transport);
     if (input.transport === 'chat' && transport !== 'chat') throw new Error('This launch requires terminal mode because it uses a custom command or an existing background agent');
     if (transport === 'chat') {
-      const capability = (await chats.capabilities(host.id)).find((item) => item.provider === provider);
+      const capability = (await chats.capabilities(host.id, provider)).find((item) => item.provider === provider);
       if (capability?.status !== 'supported') throw new Error(`${capability?.reason || 'Structured chat is unavailable'}. Select Terminal in the launch dialog to use the existing CLI flow.`);
     }
     if (input.recoverSitrep !== undefined && input.recoverSitrep !== true) throw new Error('Invalid SitRep recovery flag');
@@ -472,6 +474,41 @@ function createService({ directory, home }) {
     const result = await runRemote({ action, name }, host.id);
     if (action === 'stop') attention.resolveRequests(pending.filter((item) => item.name === name).map((item) => item.id));
     return result;
+  }
+  async function deleteSession(client, key) {
+    if (client.closed || client.id !== 'desktop' || typeof key !== 'string' || !/^[A-Za-z0-9_-]{1,80}\/tmux:hq-[a-f0-9]{12}$/.test(key)) throw new Error('Invalid managed session deletion');
+    if (deletionFlights.has(key)) throw new Error('Session deletion is already in progress');
+    deletionFlights.add(key);
+    let release;
+    try {
+      const snapshot = await inventory();
+      const unit = snapshot.sessions.find((session) => session.key === key);
+      if (!unit || unit.kind !== 'managed' || unit.stale) throw new Error('Reconnect the host and refresh this managed session before deleting it');
+      release = cleanup.beginLaunch(unit.hostId);
+      if (unit.transport === 'chat') {
+        if (unit.canStop) {
+          const record = chats.assertSessionOwner(client, unit.chatSessionId, unit.hostId);
+          const handle = [...record.handles].find((id) => chats.handles.get(id)?.client.id === client.id);
+          let receipt = await action(client, 'stop', unit.id, unit.hostId);
+          const deadline = Date.now() + 15000;
+          while (['accepted', 'dispatching'].includes(receipt.state) && Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            receipt = await chats.receipt(client, handle, receipt.commandId);
+          }
+          if (receipt.state !== 'completed') throw new Error(receipt.error || 'Stop is not confirmed. The session was not deleted; inspect its state before retrying.');
+        } else if (!['stopped', 'failed'].includes(unit.chatState)) {
+          throw new Error('Session state is uncertain. Reconnect or stop it before deleting it.');
+        }
+      } else {
+        await action(client, 'stop', unit.id, unit.hostId);
+      }
+      store.forgetSessions([key]);
+      events.emit('sessions:deleted', [key]);
+      events.emit('state:updated');
+    } finally {
+      release?.();
+      deletionFlights.delete(key);
+    }
   }
   async function interruptFault(client, sessionKey) {
     const fault = loopBreaker.faults().find((item) => item.sessionKey === sessionKey);
@@ -619,6 +656,6 @@ function createService({ directory, home }) {
     }
     return { matches, searched: selected.length, total: sessions.length, truncated, errors };
   }
-  return { store, events, terminals, chats, tunnels, cleanup, exercises, inventory, health, create, worktrees, flashQueue, flashDecide, archiveWorktree, diffRequest, previewSitrep, launchSitrep, action, interruptFaults, resetFault, loopBreaker, uploadClipboardImage, devUrls, openDevUrl, saveSettings, previewOpOrder, enrollOpOrder, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
+  return { store, events, terminals, chats, tunnels, cleanup, exercises, inventory, health, create, worktrees, flashQueue, flashDecide, archiveWorktree, diffRequest, previewSitrep, launchSitrep, action, deleteSession, interruptFaults, resetFault, loopBreaker, uploadClipboardImage, devUrls, openDevUrl, saveSettings, previewOpOrder, enrollOpOrder, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
 }
 module.exports = { createService };
