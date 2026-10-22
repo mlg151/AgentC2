@@ -26,7 +26,7 @@ function createService({ directory, home }) {
   const OTHER_TMUX_NAME = /^[A-Za-z0-9_.:-]{1,80}$/;
   const helperSource = fs.readFileSync(path.join(__dirname, 'antigravity-cleanup.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'session-cleanup.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktrees.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'worktree-diff.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'sitrep.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'exercises.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'flash.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'provider_telemetry.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'oporders.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'chat_remote.py'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'remote.py'), 'utf8');
   const hookSource = fs.readFileSync(path.join(__dirname, 'session-hook.py'), 'utf8');
-  const chatFiles = Object.fromEntries(['chat_runtime.py', 'chat_antigravity_cli.py', 'chat_worker.py', 'chat_protocol.py', 'chat_journal.py', 'chat_adapters.py', 'chat-protocol.json', 'chat_format.py', 'chat_codex.py', 'chat_codex_schema.py', 'chat-codex-schema.json', 'chat_antigravity.py', 'chat_claude.py'].sort().map((name) => [name, fs.readFileSync(path.join(__dirname, name), 'utf8')]));
+  const chatFiles = Object.fromEntries(['chat_runtime.py', 'chat_antigravity_cli.py', 'chat_worker.py', 'chat_protocol.py', 'chat_journal.py', 'chat_adapters.py', 'chat-protocol.json', 'chat_format.py', 'chat_codex.py', 'chat_codex_schema.py', 'chat-codex-schema.json', 'chat_antigravity.py', 'chat_claude.py', 'chat_opencode.py'].sort().map((name) => [name, fs.readFileSync(path.join(__dirname, name), 'utf8')]));
   const chatDigest = crypto.createHash('sha256').update(JSON.stringify(chatFiles)).digest('hex');
   const chatBootstrapped = new Set();
 
@@ -46,6 +46,7 @@ function createService({ directory, home }) {
   let flashFlight;
   const faultFlights = new Set();
   const deletionFlights = new Set();
+  const renameFlights = new Set();
 
   const hostCache = new Map(Object.entries(store.data.cachedUnits).map(([hostId, units]) => [hostId, units.map((unit) => ({ ...unit, hostId, hostName: store.data.settings.hosts.find((host) => host.id === hostId)?.name || hostId }))]));
   const healthCache = new Map();
@@ -249,7 +250,7 @@ function createService({ directory, home }) {
   });
 
   async function saveSettings(input) {
-    if (deletionFlights.size) throw new Error('Wait for session deletion before changing settings');
+    if (deletionFlights.size || renameFlights.size) throw new Error('Wait for session deletion or renaming before changing settings');
     if (cleanup.isBusy()) throw new Error('Wait for history cleanup before changing settings');
     await inventoryFlight;
     await healthFlight;
@@ -327,7 +328,7 @@ function createService({ directory, home }) {
   }
   async function createSession(input, requirePreset = false, internalSitrep = null) {
     const provider = input?.provider;
-    if (!['codex', 'claude', 'antigravity', 'terminal'].includes(provider)) throw new Error('Invalid provider');
+    if (!['codex', 'claude', 'antigravity', 'opencode', 'terminal'].includes(provider)) throw new Error('Invalid provider');
     const isTerminal = provider === 'terminal';
     if (input.transport !== undefined && !['chat', 'terminal'].includes(input.transport)) throw new Error('Invalid session transport');
     if (input.launchId !== undefined && !/^[a-f0-9]{32}$/.test(input.launchId)) throw new Error('Invalid launch ID');
@@ -441,7 +442,7 @@ function createService({ directory, home }) {
     const nextSteps = field(input.nextSteps, 2000);
     const title = field(input.title, 100);
     const slug = field(input.slug, 40);
-    if (!objective || !summary || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(slug) || !['codex', 'claude', 'antigravity'].includes(input.provider)) throw new Error('SitRep needs an objective, summary, provider, and task slug');
+    if (!objective || !summary || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(slug) || !['codex', 'claude', 'antigravity', 'opencode'].includes(input.provider)) throw new Error('SitRep needs an objective, summary, provider, and task slug');
     const source = await runRemote({ action: 'sitrep_source_preview', name: preview.name, operationId: preview.operationId, testCommand: '' }, preview.sourceHostId);
     if (source.revision !== preview.revision || source.warnings.length) throw new Error('Source changed after SitRep preview; review again');
     const target = await runRemote({ action: 'sitrep_target_preview', repository: preview.repository, source: source.source, patchBase64: source.patchBase64 }, preview.targetHostId);
@@ -477,7 +478,7 @@ function createService({ directory, home }) {
   }
   async function deleteSession(client, key) {
     if (client.closed || client.id !== 'desktop' || typeof key !== 'string' || !/^[A-Za-z0-9_-]{1,80}\/tmux:hq-[a-f0-9]{12}$/.test(key)) throw new Error('Invalid managed session deletion');
-    if (deletionFlights.has(key)) throw new Error('Session deletion is already in progress');
+    if (deletionFlights.has(key) || renameFlights.has(key)) throw new Error('Session deletion or renaming is already in progress');
     deletionFlights.add(key);
     let release;
     try {
@@ -607,18 +608,25 @@ function createService({ directory, home }) {
   async function renameSession(key, title) {
     validateSessionPin(key, false);
     title = validateSessionTitle(title);
-    await inventoryFlight;
-    const unit = [...hostCache.values()].flat().find((item) => item.key === key);
-    if (!unit || unit.kind !== 'managed' || !unit.managed || !TMUX_NAME.test(unit.id)) throw new Error('Managed session is unavailable. Refresh sessions before renaming it.');
-    if (cleanup.isDeleting(key)) throw new Error('History deletion is in progress; wait for its result');
-    if (store.data.deletedSessions.includes(key)) throw new Error('History has been deleted; refresh sessions');
-    const host = getHost(unit.hostId);
-    await runRemote({ action: 'rename', name: unit.id, title }, host.id);
-    unit.title = title;
-    store.cacheUnits(host.id, hostCache.get(host.id));
-    await inventory();
-    events.emit('state:updated');
-    return title;
+    if (deletionFlights.has(key) || renameFlights.has(key)) throw new Error('Session deletion or renaming is already in progress');
+    renameFlights.add(key);
+    try {
+      await inventoryFlight;
+      const hostId = key.slice(0, key.indexOf('/'));
+      const unit = hostCache.get(hostId)?.find((item) => item.key === key);
+      if (!unit || unit.kind !== 'managed' || !unit.managed || !TMUX_NAME.test(unit.id)) throw new Error('Managed session is unavailable. Refresh sessions before renaming it.');
+      if (cleanup.isDeleting(key)) throw new Error('History deletion is in progress; wait for its result');
+      if (store.data.deletedSessions.includes(key)) throw new Error('History has been deleted; refresh sessions');
+      getHost(hostId);
+      await runRemote({ action: 'rename', name: unit.id, title, ...(unit.transport === 'chat' ? { chatSessionId: unit.chatSessionId, sourceDigest: chatDigest, chatFiles, allowUpgrade: true } : {}) }, hostId);
+      await inventoryFlight;
+      const current = hostCache.get(hostId)?.find((item) => item.key === key);
+      if (current) { current.title = title; store.cacheUnits(hostId, hostCache.get(hostId)); }
+      if (store.data.attention.some((item) => item.sessionKey === key && item.title !== title)) store.save('attention', store.data.attention.map((item) => item.sessionKey === key ? { ...item, title } : item));
+      await inventory();
+      events.emit('state:updated');
+      return title;
+    } finally { renameFlights.delete(key); }
   }
   function cachedSession(key) {
     if (typeof key !== 'string' || key.length > 300) throw new Error('Invalid session key');
@@ -673,6 +681,5 @@ function createService({ directory, home }) {
     return { matches, searched: selected.length, total: sessions.length, truncated, errors };
   }
   return { store, events, terminals, chats, tunnels, cleanup, exercises, inventory, health, create, worktrees, flashQueue, flashDecide, archiveWorktree, diffRequest, previewSitrep, launchSitrep, action, deleteSession, interruptFaults, resetFault, renameSession, loopBreaker, uploadClipboardImage, devUrls, openDevUrl, saveSettings, previewOpOrder, enrollOpOrder, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
-
 }
 module.exports = { createService };

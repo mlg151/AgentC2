@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "providers": ["codex", "claude", "antigravity"],
+  "providers": ["codex", "claude", "antigravity", "opencode"],
   "operations": ["create", "send", "steer", "respond", "interrupt", "stop"],
   "eventTypes": ["session.updated", "message.delta", "message.completed", "tool.started", "tool.completed", "approval.requested", "question.requested", "request.resolved", "usage.updated", "turn.completed", "error", "provider.event"],
   "capabilities": ["streaming", "history", "resume", "interrupt", "approvals", "questions", "steering", "forks", "attachments"],

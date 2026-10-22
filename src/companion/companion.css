@@ -35,3 +35,5 @@ button{touch-action:manipulation}
 @media(min-width:700px){.phone-main{padding:28px}.phone-filters{grid-template-columns:1fr 1fr 1fr auto}.phone-terminal{height:480px}.phone-header{padding:22px 28px}.phone-health{padding:20px 28px}.phone-history{inset:35px max(35px,calc((100vw - 850px)/2))}.create-dialog .form-grid{grid-template-columns:1fr 1fr}}
 
 .phone-chat{display:flex;min-width:0;height:clamp(480px,70dvh,780px);border:1px solid #2a3d50;border-radius:8px;overflow:hidden}.phone-chat-detail h1{overflow-wrap:anywhere}.phone-chat-detail .phone-muted{overflow-wrap:anywhere;line-height:1.5}
+
+.phone-rename{margin:8px 0}.phone-rename form{display:flex;flex-wrap:wrap;align-items:end;gap:8px;padding:10px 0}.phone-rename label{display:flex;flex:1;min-width:180px;flex-direction:column;gap:6px}.phone-rename input{width:100%;background:#142630;border:1px solid #304d5c;color:#e4eef1;padding:10px;border-radius:4px}

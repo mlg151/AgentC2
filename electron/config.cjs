@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const PROVIDERS = ['codex', 'claude', 'antigravity'];
+const PROVIDERS = ['codex', 'claude', 'antigravity', 'opencode'];
 const ROE_PROFILES = ['', 'full', 'gated', 'provider-default'];
 const OPORDER_ID = /^[a-zA-Z0-9_-]{1,80}$/;
 const ENV_NAME = /^[A-Z_][A-Z0-9_]*$/;
@@ -12,7 +12,7 @@ function text(value, max = 4096) {
   return value;
 }
 function defaults() {
-  const presets = PROVIDERS.map((provider) => ({ id: provider, name: provider === 'antigravity' ? 'Antigravity' : provider === 'claude' ? 'Claude' : 'Codex', provider, command: provider === 'antigravity' ? 'agy' : provider, args: '', cwd: '', instructions: '', fullPermissions: true, attentionHooks: provider !== 'antigravity', hostId: '' }));
+  const presets = PROVIDERS.map((provider) => ({ id: provider, name: provider === 'antigravity' ? 'Antigravity' : provider === 'claude' ? 'Claude' : provider === 'opencode' ? 'OpenCode' : 'Codex', provider, command: provider === 'antigravity' ? 'agy' : provider, args: '', cwd: '', instructions: '', fullPermissions: true, attentionHooks: ['codex', 'claude'].includes(provider), hostId: '' }));
   presets.push({ ...presets[1], id: 'claude-openrouter', name: 'Claude (OpenRouter)', command: 'claude3' });
   return {
     hosts: [{ id: 'default', name: 'Primary server', target: process.env.AGENTC2_HOST || process.env.AGENT_HQ_HOST || 'your-ssh-host', port: 22, enabled: true }],
@@ -91,7 +91,7 @@ function validateSettings(input) {
     const servers = mcp.map((server) => {
       if (!server || !OPORDER_ID.test(server.name) || serverNames.has(server.name) || !['stdio', 'http'].includes(server.transport)) throw new Error('Invalid OpOrder MCP server');
       serverNames.add(server.name);
-      const providers = server.providers || ['codex', 'claude', 'antigravity'];
+      const providers = server.providers || ['codex', 'claude', 'antigravity', 'opencode'];
       if (!Array.isArray(providers) || !providers.length || providers.some((provider) => !PROVIDERS.includes(provider)) || new Set(providers).size !== providers.length) throw new Error('Invalid OpOrder MCP providers');
       const env = server.env || [];
       if (!Array.isArray(env) || env.length > 30 || env.some((name) => typeof name !== 'string' || !ENV_NAME.test(name)) || new Set(env).size !== env.length) throw new Error('OpOrder MCP environment values must be variable names');
@@ -153,17 +153,17 @@ function validateWorkspace(w) {
   return { tabs, selectedKey, splitKey, metadata, situation };
 }
 function validateSessionTitle(value) {
-  if (typeof value !== 'string' || !value.trim() || value.length > 100 || /[\x00-\x1f\x7f-\x9f]/.test(value)) throw new Error('Use a session title of 1–100 characters without control characters');
+  if (typeof value !== 'string' || !value.trim() || value.length > 100 || /[\x00-\x1f\x7f-\x9f\uD800-\uDFFF]/u.test(value)) throw new Error('Use a session title of 1–100 characters without control characters');
   return value.trim();
 }
 function validateSessionPin(key, pinned) {
-  if (typeof key !== 'string' || key.length > 300 || !/^[a-zA-Z0-9_-]{1,80}\/(?:tmux|process|codex|claude|antigravity):[a-zA-Z0-9_.:-]{1,200}$/.test(key) || typeof pinned !== 'boolean') throw new Error('Invalid session pin');
+  if (typeof key !== 'string' || key.length > 300 || !/^[a-zA-Z0-9_-]{1,80}\/(?:tmux|process|codex|claude|antigravity|opencode):[a-zA-Z0-9_.:-]{1,200}$/.test(key) || typeof pinned !== 'boolean') throw new Error('Invalid session pin');
   return key.slice(0, key.indexOf('/'));
 }
 function validateCleanupState(value) {
   if (!value || !value.lastRuns || typeof value.lastRuns !== 'object' || !Array.isArray(value.results)) throw new Error('Invalid saved cleanup state');
   const lastRuns = Object.fromEntries(Object.entries(value.lastRuns).slice(-300).map(([key, at]) => {
-    if (!/^[a-zA-Z0-9_-]{1,80}\/(codex|claude|antigravity)$/.test(key) || typeof at !== 'string' || !Number.isFinite(Date.parse(at))) throw new Error('Invalid cleanup run timestamp');
+    if (!/^[a-zA-Z0-9_-]{1,80}\/(codex|claude|antigravity|opencode)$/.test(key) || typeof at !== 'string' || !Number.isFinite(Date.parse(at))) throw new Error('Invalid cleanup run timestamp');
     return [key, at];
   }));
   const results = value.results.slice(0, 100).map((item) => {

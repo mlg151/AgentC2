@@ -2,7 +2,7 @@ const crypto = require('node:crypto');
 
 const ID = /^[a-f0-9]{32}$/;
 const COMMIT = /^[a-f0-9]{40,64}$/;
-const PROVIDERS = new Set(['codex', 'claude', 'antigravity']);
+const PROVIDERS = new Set(['codex', 'claude', 'antigravity', 'opencode']);
 
 function createExercises({ store, getHost, runRemote, createSession, beginLaunch, emit }) {
   const flights = new Set();

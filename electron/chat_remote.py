@@ -1,6 +1,6 @@
 """Ephemeral helper entrypoint for the detached worker's private Unix socket."""
 
-CHAT_WORKER_FILES = ("chat_worker.py", "chat_runtime.py", "chat_protocol.py", "chat_journal.py", "chat_adapters.py", "chat-protocol.json", "chat_format.py", "chat_codex.py", "chat_codex_schema.py", "chat-codex-schema.json", "chat_antigravity.py", "chat_antigravity_cli.py", "chat_claude.py")
+CHAT_WORKER_FILES = ("chat_worker.py", "chat_runtime.py", "chat_protocol.py", "chat_journal.py", "chat_adapters.py", "chat-protocol.json", "chat_format.py", "chat_codex.py", "chat_codex_schema.py", "chat-codex-schema.json", "chat_antigravity.py", "chat_antigravity_cli.py", "chat_claude.py", "chat_opencode.py")
 
 
 def chat_remote(payload, directory=None):

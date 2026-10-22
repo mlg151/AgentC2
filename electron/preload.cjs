@@ -2,6 +2,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('agentHQ', {
   platform: process.platform,
+  checkForUpdates: () => ipcRenderer.invoke('updates:check'),
+  openUpdate: () => ipcRenderer.invoke('updates:open'),
   getState: () => ipcRenderer.invoke('state:get'),
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
   previewOpOrder: (order) => ipcRenderer.invoke('oporder:preview', order),
