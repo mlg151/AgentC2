@@ -155,6 +155,10 @@ Follow-up text.`;
       commandId,
       result: { turnId: commandId },
     }),
+    request: async (_hostId, action, { commandId, command }) => ({
+      state: 'completed', commandId: commandId || command.commandId,
+      sessionId: command?.sessionId, result: { turnId: commandId },
+    }),
     read: async (hostId, sessionId, after, limit) => {
       const list = chatEvents.get(sessionId) || [];
       return {

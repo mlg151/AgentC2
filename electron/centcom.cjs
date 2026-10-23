@@ -5,6 +5,7 @@ const { fleetReadiness } = require('./readiness.cjs');
 const { activeFleet, commanderIdentity } = require('./centcom-fleet.cjs');
 const { createOperations } = require('./centcom-operations.cjs');
 const { createEvidence } = require('./centcom-evidence.cjs');
+const { createTurnLifecycle } = require('./centcom-turn.cjs');
 const { LIMITS, AUTOMATION_KINDS, object, fingerprint, redact, bounded, parseCentcomEnvelope } = require('./centcom-contract.cjs');
 const CONTEXT_REVISION = 2;
 
@@ -79,6 +80,7 @@ function defaults(defaultHostId = 'default') {
     maxDirectivesPerTurn: 5,
     maxBudgetUsd: 10.0,
     turnDeadlineSeconds: 600,
+    cancellationDeadlineSeconds: 10,
   };
 }
 
@@ -108,6 +110,7 @@ function validateConfig(input) {
     throw new Error('Invalid budget threshold');
   }
   if (input.turnDeadlineSeconds !== undefined && (!Number.isInteger(input.turnDeadlineSeconds) || input.turnDeadlineSeconds < 1 || input.turnDeadlineSeconds > 86400)) throw new Error('Invalid turn deadline');
+  if (input.cancellationDeadlineSeconds !== undefined && (!Number.isInteger(input.cancellationDeadlineSeconds) || input.cancellationDeadlineSeconds < 1 || input.cancellationDeadlineSeconds > 120)) throw new Error('Invalid cancellation deadline');
   if (t.fallbackSeconds !== undefined && (!Number.isInteger(t.fallbackSeconds) || (t.fallbackSeconds !== 0 && (t.fallbackSeconds < 600 || t.fallbackSeconds > 86400)))) throw new Error('Fallback must be disabled or at least ten minutes');
   for (const key of ['onUnitCompleted', 'onDependencyChange']) if (t[key] !== undefined && typeof t[key] !== 'boolean') throw new Error('Invalid event trigger configuration');
   return {
@@ -128,6 +131,7 @@ function validateConfig(input) {
       maxAutoTurnsPerHour: t.maxAutoTurnsPerHour,
     },
     turnDeadlineSeconds: input.turnDeadlineSeconds ?? 600,
+    cancellationDeadlineSeconds: input.cancellationDeadlineSeconds ?? 10,
     maxDirectivesPerTurn: input.maxDirectivesPerTurn,
     maxBudgetUsd: input.maxBudgetUsd == null ? null : Number(input.maxBudgetUsd),
   };
@@ -151,6 +155,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
     consoleCommands: {},
     status: 'idle',
     activeLogicalTurn: null,
+    providerTurn: null,
     seenEventSignatures: {},
     autoTurnsLastHour: [],
     costUsd: 0,
@@ -236,7 +241,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
   }
   function readOutcomes({ after = 0, limit = 20, collection, clientRequestId, serverId } = {}) {
     if (!Number.isSafeInteger(after) || after < 0 || !Number.isInteger(limit) || limit < 1 || limit > LIMITS.pageSize) throw new Error('Invalid outcome cursor or limit');
-    if (collection && !['directive', 'automation', 'audit', 'diagnostic', 'query'].includes(collection)) throw new Error('Invalid outcome collection');
+    if (collection && !['directive', 'automation', 'audit', 'diagnostic', 'query', 'provider'].includes(collection)) throw new Error('Invalid outcome collection');
     const matches = state.outcomes.filter((r) => r.sequence > after && (!collection || r.collection === collection) && (!clientRequestId || r.clientRequestId === clientRequestId) && (!serverId || r.serverId === serverId));
     const entries = [];
     for (const entry of matches.slice(0, limit)) {
@@ -264,6 +269,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
     auto.state = 'uncertain'; auto.error = 'Application restarted during automation persistence; inspect the saved artifact before retrying.';
   }
   function writeState() {
+    if (disposed) return;
     syncOutcomes();
     const temp = stateFile + '.tmp';
     fs.writeFileSync(temp, JSON.stringify(state, null, 2), { mode: 0o600 });
@@ -276,6 +282,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
       config: structuredClone(state.config),
       session: state.session ? structuredClone(state.session) : null,
       status: state.status,
+      providerTurn: state.providerTurn ? { commandId: state.providerTurn.commandId, turnId: state.providerTurn.turnId, status: state.providerTurn.status, hostId: state.providerTurn.hostId, sessionId: state.providerTurn.sessionId, cursor: state.providerTurn.cursor } : null,
       error: state.error || '',
       costUsd: state.costUsd || 0,
       costKnown: state.costKnown !== false,
@@ -290,7 +297,6 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
   const client = { id: 'centcom-commander', name: 'CENTCOM Engine' };
   let queue = Promise.resolve();
   let activeTurnAbort = null;
-  let activeChatHandle = null;
   const consoleFlights = new Map();
   const approvalResults = new Map();
   let disposed = false;
@@ -298,6 +304,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
   state.inFlightAlerts = [];
   let wakeTimer = null;
   let wakeFlight = null;
+  const turnLifecycle = createTurnLifecycle({ chats, client, state, persist: writeState, outcome: recordOutcome });
 
   function enqueue(action) {
     const flight = queue.then(action);
@@ -433,7 +440,10 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
     activeTurnAbort = abort;
     const check = () => { if (abort.signal.aborted || disposed) throw new Error('CENTCOM turn interrupted by Watch Officer'); };
     let session;
-    try { session = await ensureSession(); check(); }
+    try {
+      if (state.providerTurn && !await turnLifecycle.reconcile()) throw new Error('Previous CENTCOM provider turn remains uncertain; reconcile it before launching another session');
+      check(); session = await ensureSession(); check();
+    }
     catch (error) {
       if (activeTurnAbort === abort) activeTurnAbort = null;
       state.status = 'halted'; state.error = error.message; writeState();
@@ -479,83 +489,8 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
           redact(nextPrompt),
         ].join('\n');
 
-        // Keep one temporary commander view per provider turn, and release it
-        // even if completion polling, cancellation, or envelope parsing fails.
-        let finalAssistantText = '';
-        let turnCost = null;
-        let handleId;
-        let previousOwner;
-        let record;
-        try {
-          previousOwner = chats.sessions?.get(`${session.hostId}/${session.chatSessionId}`)?.owner;
-          handleId = await chats.open(client, session.chatSessionId, session.hostId);
-          record = chats.handles?.get(handleId)?.record;
-          await chats.take(client, handleId, (owner) => {
-            previousOwner = owner;
-            if (record) record.commanderPreviousOwner = owner;
-          });
-          activeChatHandle = { handleId, session };
-          check();
-          const turnStartCursor = record?.latestCursor || 0;
-          const receipt = await chats.submit(client, handleId, {
-            protocolVersion: 1, commandId: turnCommandId, operation: 'send',
-            sessionId: session.chatSessionId, payload: { text: contextualPrompt },
-          });
-          if (queryHop === initialHop && consoleCommand) consoleCommand.dispatched(receipt);
-
-          // Wait for verified turn completion
-          let completed = false;
-          const deadline = Date.now() + state.config.turnDeadlineSeconds * 1000;
-
-          while (!completed && Date.now() < deadline) {
-            const receipt = await chats.receipt(client, handleId, turnCommandId).catch(() => null);
-            check();
-            if (receipt && ['failed', 'unknown'].includes(receipt.state)) {
-              throw new Error(`CENTCOM command failed: ${receipt.error || receipt.state}`);
-            }
-            if (receipt && receipt.state === 'completed') {
-              const targetTurnId = receipt.result?.turnId || receipt.turnId || turnCommandId;
-              let after = turnStartCursor;
-              let page;
-              do {
-                page = await chats.read(session.hostId, session.chatSessionId, after, 500);
-                check();
-                for (const ev of page.events) {
-                  if (ev.turnId === targetTurnId) {
-                    if (ev.type === 'message.completed' && ev.data.role === 'assistant') {
-                      finalAssistantText = ev.data.text;
-                    }
-                    if (ev.type === 'usage.updated' && ev.data.costUsd != null) {
-                      turnCost = ev.data.costUsd;
-                    }
-                    if (ev.type === 'turn.completed') {
-                      if (ev.data.outcome !== 'completed') {
-                        throw new Error(`Turn ended with outcome ${ev.data.outcome}: ${ev.data.detail}`);
-                      }
-                      completed = true;
-                    }
-                  }
-                }
-                after = page.cursor || page.events.at(-1)?.sequence || after;
-              } while (page.hasMore);
-            }
-            if (!completed) {
-              await new Promise((r) => setTimeout(r, 250));
-            }
-          }
-
-          if (!completed) throw new Error('CENTCOM turn timed out waiting for provider completion');
-
-        } finally {
-          state.costUsd = (state.costUsd || 0) + (turnCost || 0);
-          if (turnCost === null) state.costKnown = false;
-          if (record?.owner?.id === client.id && previousOwner && !previousOwner.closed && [...record.handles].some((id) => chats.handles.get(id)?.client.id === previousOwner.id)) {
-            record.owner = previousOwner; chats.publish(record);
-          }
-          if (record) delete record.commanderPreviousOwner;
-          if (activeChatHandle?.handleId === handleId) activeChatHandle = null;
-          if (handleId && chats.close) chats.close(client, handleId);
-        }
+        const finalAssistantText = await turnLifecycle.run({ session, commandId: turnCommandId, text: contextualPrompt, signal: abort.signal, logicalTurnId: turnId,
+          dispatched: queryHop === initialHop && consoleCommand ? consoleCommand.dispatched : undefined });
         check();
 
         // Parse completion-correlated agentc2-c2 envelope
@@ -861,7 +796,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
   function scheduleWake() {
     if (wakeTimer) timers.clearTimeout(wakeTimer);
     wakeTimer = null;
-    if (disposed || state.paused || wakeFlight || (state.config.maxBudgetUsd != null && state.costUsd >= state.config.maxBudgetUsd)) return;
+    if (disposed || state.paused || wakeFlight || state.providerTurn || (state.config.maxBudgetUsd != null && state.costUsd >= state.config.maxBudgetUsd)) return;
     const delay = nextWakeDelay();
     if (!Number.isFinite(delay)) return;
     wakeTimer = timers.setTimeout(() => { wakeTimer = null; void drainAlerts().catch((error) => console.error('CENTCOM wake failed:', error.message)); }, delay);
@@ -1001,10 +936,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
   }
   function interrupt(stopProvider = true) {
     activeTurnAbort?.abort();
-    if (stopProvider && activeChatHandle) {
-      const { handleId, session } = activeChatHandle;
-      void chats.submit(client, handleId, { protocolVersion: 1, commandId: crypto.randomUUID(), operation: 'interrupt', sessionId: session.chatSessionId, payload: {} }).catch(() => {});
-    }
+    if (stopProvider) void turnLifecycle.cancel().catch(() => {});
     if (state.status === 'running') {
       state.status = 'halted'; state.error = 'Turn interrupted by Watch Officer'; writeState();
     }
@@ -1027,7 +959,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
     writeState();
     if (cancelling) {
       if (current) interrupt(false);
-      const flight = chats.request(record.hostId, 'command', { command }).then((receipt) => {
+      const flight = (current && state.providerTurn ? turnLifecycle.cancel(command) : chats.request(record.hostId, 'command', { command })).then((receipt) => {
         saved.receipt = receipt; writeState(); return receipt;
       }).finally(() => consoleFlights.delete(command.commandId));
       consoleFlights.set(command.commandId, flight);
@@ -1063,6 +995,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
     state: publicState,
     isCommander, submitCommand,
     capabilities: operations.catalog,
+    reconcile: () => enqueue(async () => { await turnLifecycle.reconcile(); return publicState(); }),
     outcomes: readOutcomes,
     manifest: capabilityManifest,
     configure: (newConfig) => {
@@ -1095,6 +1028,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
     resetSession: () => {
       interrupt();
       return enqueue(async () => {
+        if (!await turnLifecycle.reconcile()) throw new Error('Previous CENTCOM provider turn remains uncertain; cannot reset its ownership');
         retireSession();
         state.status = 'idle'; state.error = ''; writeState();
         await ensureSession();
@@ -1192,6 +1126,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
     observe: observeFleet,
     observeChat,
     dispose: () => {
+      turnLifecycle.dispose();
       disposed = true; activeTurnAbort?.abort();
       if (wakeTimer) timers.clearTimeout(wakeTimer);
       // Clean up internal listener handles

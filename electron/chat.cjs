@@ -159,9 +159,11 @@ class Chats {
 
   take(client, id, captureOwner) {
     const { record } = this.get(client, id);
+    if (record.commanderTurn && record.commanderTurn.ownerId !== client.id) return Promise.reject(new Error('CENTCOM provider turn still owns this session; reconcile cancellation before taking control'));
     return this.exclusive(record, () => {
       this.get(client, id);
       if (record.connection !== 'connected') throw new Error('Chat is reconnecting');
+      if (record.commanderTurn && record.commanderTurn.ownerId !== client.id) throw new Error('CENTCOM provider turn still owns this session; reconcile cancellation before taking control');
       captureOwner?.(record.owner);
       record.owner = client;
       this.publish(record);
@@ -179,6 +181,11 @@ class Chats {
     const { record } = this.get(client, id);
     const command = validateCommand(input);
     if (command.operation === 'create' || command.sessionId !== record.sessionId) throw new Error('Command does not target this chat view');
+    if (record.commanderTurn && ['interrupt', 'stop'].includes(command.operation) &&
+        (record.owner?.id === client.id || record.commanderPreviousOwner?.id === client.id)) {
+      const routed = this.commandRouter?.(client, id, command, record);
+      if (routed) return Promise.resolve(routed);
+    }
     return this.exclusive(record, async () => {
       this.get(client, id);
       if (record.connection !== 'connected') throw new Error('Chat is reconnecting; commands are not queued');

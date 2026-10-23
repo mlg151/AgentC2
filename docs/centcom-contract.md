@@ -117,10 +117,23 @@ instruct the commander to act on meaningful changes and avoid waiting-only
 chatter. Pausing stops the timer while preserving queued events. Known spend
 at the budget ceiling stops automatic wakeups.
 
-`turnDeadlineSeconds` defaults to 600 and accepts 1–86,400 seconds. Full provider
-cancellation reconciliation and ownership retention are still tracked in #69;
-the configurable deadline alone does not establish that an interrupted provider
-has stopped.
+`turnDeadlineSeconds` defaults to 600 and accepts 1–86,400 seconds. The deadline
+covers provider submission and journal reads. Interrupt stops envelope processing
+and sends a real provider cancellation, including while submission is blocked.
+`cancellationDeadlineSeconds` defaults to 10 and accepts 1–120 seconds. If this
+reconciliation window expires, the provider turn remains uncertain and retains
+control; a cancellation receipt alone cannot release it. The console shows this
+state. A later request reconciles the old turn before creating or sending another.
+Reset and provider changes also preserve the unresolved reservation.
+
+The reservation persists command/session/turn identities and the journal cursor
+across restart. Completion requires the explicit provider turn ID from the
+submission receipt and matching terminal journal evidence. Reads advance through
+500-event pages; an unknown terminal outcome is not completion proof. Pending
+cancellation commands must also have terminal receipts before a new turn can
+start, preventing a delayed cancellation from stopping subsequent work.
+`outcomes.read` supports `collection: "provider"` and records submission,
+provider completion, and unverified project acceptance as separate facts.
 
 `costUsd` is known spend. Once a turn lacks cost evidence, `costKnown` stays
 false, even if later turns report cost. The UI labels this as incomplete. The
@@ -132,7 +145,7 @@ work or remaining budget.
 
 The issue checklist is authoritative. Work still includes complete per-kind
 output schemas and host/provider support, linked mission evidence and complete
-launch admission coverage, stronger revision/incarnation/authorization binding, cancellation
-reconciliation, all automation validate/preview/draft/readback operations, and
+launch admission coverage, stronger revision/incarnation/authorization binding,
+all automation validate/preview/draft/readback operations, and
 an isolated production-bridge round trip with artifact verification. Current
 fixture coverage must not be presented as native-provider or live-host proof.

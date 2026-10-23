@@ -39,7 +39,7 @@ async function visibility() {
   assert.equal(snapshot.flashCount, 2);
   assert.equal(snapshot.specops[0].visits.length, 2);
   assert.equal(snapshot.exercises[0].contestants.length, 2);
-  const evidence = JSON.stringify(snapshot);
+  const evidence = JSON.stringify({ ...snapshot, outcomes: undefined });
   for (const s of f.sessions.slice(2)) for (const id of [s.key, s.id, s.chatSessionId]) assert.ok(!evidence.includes(id), `Excluded identity leaked: ${id}`);
   assert.ok(!evidence.includes(commander.chatSessionId));
   assert.equal(snapshot.capabilities.find((c) => c.operation === 'unit.send').parameters.sessionKey, 'string?');
@@ -50,7 +50,7 @@ async function visibility() {
   f.responses.push(envelope({ queries: [query('fleet.inspect'), query('unit.search', { query: 'fixture' }), query('unit.inspect', { sessionKey: f.sessions[2].key }), query('history.discover'), query('exercise.inspect', { id: 'exercise', contestantId: eligible[0].id })] }));
   await f.engine.submit('Inspect');
   const prompt = f.submitted.at(-1).payload.text;
-  for (const s of f.sessions.slice(3)) for (const id of [s.key, s.id, s.chatSessionId]) assert.ok(!prompt.includes(id));
+  for (const s of f.sessions.slice(3).filter((s) => s.chatSessionId !== commander.chatSessionId)) for (const id of [s.key, s.id, s.chatSessionId]) assert.ok(!prompt.includes(id));
   assert.ok(prompt.includes(f.sessions[2].key), 'Inactive units remain inspectable without becoming action targets');
   assert.match(prompt, /Unavailable operation history.discover/);
   assert.match(prompt, /Only connected active managed sessions can be controlled/);

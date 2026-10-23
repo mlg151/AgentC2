@@ -153,6 +153,7 @@ export interface CentcomConfig {
   maxDirectivesPerTurn: number;
   maxBudgetUsd: number | null;
   turnDeadlineSeconds?: number;
+  cancellationDeadlineSeconds?: number;
 }
 
 export type CentcomDirectiveKind =
@@ -226,6 +227,7 @@ export interface CentcomAuditEntry {
 }
 
 export interface CentcomState {
+  providerTurn?: { commandId: string; turnId: string | null; status: 'submitting' | 'running' | 'cancelling' | 'uncertain'; hostId: string; sessionId: string; cursor: number } | null;
   config: CentcomConfig;
   session: {
     name: string;

@@ -102,6 +102,9 @@ export function CentcomDialog({ settings, onClose }: { settings: Settings; onClo
         </nav>
 
         {error ? <p role="alert" className="form-error">{error}</p> : null}
+        {state?.providerTurn && ['cancelling', 'uncertain'].includes(state.providerTurn.status) ? (
+          <p role="status" className="form-error">Provider shutdown is unconfirmed. Control remains reserved. Retry your request to reconcile before starting another turn.</p>
+        ) : null}
 
         {tab === 'command' ? (
           <section className="centcom-tab-content">
@@ -538,6 +541,10 @@ export function CentcomDialog({ settings, onClose }: { settings: Settings; onClo
               <label>
                 Provider turn deadline (seconds)
                 <input type="number" min="1" max="86400" value={configDraft.turnDeadlineSeconds ?? 600} onChange={(e) => setConfigDraft({ ...configDraft, turnDeadlineSeconds: Number(e.target.value) } )} />
+              </label>
+              <label>
+                Cancellation reconciliation deadline (seconds)
+                <input type="number" min="1" max="120" value={configDraft.cancellationDeadlineSeconds ?? 10} onChange={(e) => setConfigDraft({ ...configDraft, cancellationDeadlineSeconds: Number(e.target.value) })} />
               </label>
               <label>
                 Trigger Cooldown (seconds)

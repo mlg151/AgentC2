@@ -37,7 +37,8 @@ const { Store } = require('../electron/config.cjs');
           maxBudgetUsd: 10.0,
         },
         session: null,
-        status: 'idle',
+        status: 'halted',
+        providerTurn: { commandId: 'fixture-command', turnId: 'fixture-provider-turn', status: 'uncertain', hostId: 'default', sessionId: 'chat-' + 'f'.repeat(32), cursor: 712, dispatchStarted: true },
         costUsd: 1.25,
         costKnown: false,
         directives: [
@@ -98,6 +99,7 @@ const { Store } = require('../electron/config.cjs');
     await centcomBtn.click();
     await page.getByText('CENTCOM COMMAND CONSOLE').waitFor();
     await page.getByText('KNOWN SPEND: $1.25 · INCOMPLETE').waitFor();
+    await page.getByText('Provider shutdown is unconfirmed.', { exact: false }).waitFor();
 
     // Verify tabs
     await page.getByRole('button', { name: 'Command Deck' }).waitFor();
@@ -134,11 +136,13 @@ const { Store } = require('../electron/config.cjs');
     assert.equal(await fallback.inputValue(), '600');
     await fallback.fill('0');
     await page.getByLabel('Provider turn deadline (seconds)', { exact: true }).fill('1200');
+    await page.getByLabel('Cancellation reconciliation deadline (seconds)', { exact: true }).fill('20');
     await page.getByRole('button', { name: 'Save Configuration', exact: true }).click();
     await page.waitForFunction(async () => (await window.agentHQ.centcomState()).config.triggers.fallbackSeconds === 0);
     const persisted = JSON.parse(fs.readFileSync(path.join(directory, 'centcom/centcom.json')));
     assert.equal(persisted.config.triggers.fallbackSeconds, 0);
     assert.equal(persisted.config.turnDeadlineSeconds, 1200);
+    assert.equal(persisted.config.cancellationDeadlineSeconds, 20);
 
     // Responsive check at 960x800
     await page.setViewportSize({ width: 960, height: 800 });
