@@ -283,7 +283,7 @@ kbd{font:10px Consolas,monospace;background:#29404e;padding:3px 5px;border-radiu
 .situation-header .quick-trigger{white-space:nowrap;overflow:hidden;flex:0 1 270px}
 @media(max-width:1250px){.readiness-detail{left:80px;width:min(420px,calc(100vw - 100px))}.readiness-button{min-width:80px}.readiness-button small{max-width:85px}}
 @media(max-width:1100px){.situation-header .quick-trigger{width:34px;min-width:34px;padding:0;justify-content:center;gap:0;font-size:0}.situation-header .quick-trigger svg{flex:none}}
-@media(max-width:1100px){.situation-header .host-picker select{width:94px;max-width:94px;min-width:0}.situation-header .topbar-actions>.icon-button{flex:0 0 28px}}
+@media(max-width:1100px){.situation-header .host-picker select{width:94px;max-width:94px;min-width:0}.situation-header .topbar-actions>.icon-button{flex:0 0 28px}.situation-header .topbar-actions{gap:6px}.situation-header .mission-clock span{display:none}.centcom-btn{padding:0 10px;font-size:11px}}
 
 @media(max-width:1200px){.session-pane{position:relative}.diff-drawer{position:absolute;z-index:4;left:0;right:0;bottom:18px;height:calc(100% - 40px);max-height:none;min-height:0;box-shadow:0 -8px 28px #03080dbb}.diff-drawer .diff-summary{display:none}}
 .exercise-dialog .exercise-results { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 12px; }
