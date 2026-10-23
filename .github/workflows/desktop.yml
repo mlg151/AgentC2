@@ -39,7 +39,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.1.0
         with:
-          node-version: '22'
+          node-version-file: .nvmrc
           architecture: ${{ matrix.arch }}
           cache: npm
       - name: Verify version and native runner architecture
@@ -65,13 +65,17 @@ jobs:
         run: xvfb-run -a npm run test:desktop
       - name: Native updater download and verification
         if: runner.os != 'Linux'
-        run: node tests/update-download.e2e.cjs
+        run: node scripts/run-tests.cjs updater
       - name: Native updater download and verification (Linux)
         if: runner.os == 'Linux'
-        run: xvfb-run -a node tests/update-download.e2e.cjs
+        run: xvfb-run -a node scripts/run-tests.cjs updater
+      - name: Provision Ubuntu WSL1
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .github/scripts/setup-windows-wsl.ps1
       - name: Windows local path startup regressions (requires WSL)
         if: runner.os == 'Windows'
-        run: node tests/windows-local.e2e.cjs
+        run: node scripts/run-tests.cjs windows
       - name: Package native application
         shell: bash
         env:
@@ -111,7 +115,9 @@ jobs:
         uses: actions/upload-artifact@v7.0.2
         with:
           name: Desktop-QA-${{ matrix.platform }}-${{ matrix.arch }}
-          path: ${{ runner.temp }}/agentc2-screenshots/*.png
+          path: |
+            ${{ runner.temp }}/agentc2-screenshots/*.png
+            test-results/
           if-no-files-found: ignore
           retention-days: 14
 
@@ -125,51 +131,73 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.1.0
         with:
-          node-version: '22'
+          node-version-file: .nvmrc
           cache: npm
       - name: Provision an isolated SSH account on the disposable runner
         run: bash .github/scripts/setup-linux-ssh.sh
       - run: npm ci
       - run: npm run build
-      - run: python3 tests/remote-helper.py
-      - run: python3 tests/opencode-helper.py
-      - run: node tests/rename.cjs --native
-      - run: python3 tests/oporders.py
-      - run: python3 tests/sitrep.py
-      - run: python3 tests/exercises.py
-      - run: python3 tests/flash.py
-      - run: python3 tests/loop-breaker.py
-      - run: python3 tests/worktrees.py
-      - run: python3 tests/worktree-diff.py
-      - run: python3 tests/provider-telemetry.py
+      - run: node scripts/run-tests.cjs linux-python
       - run: npx playwright-core install chromium
-      - name: Structured chat and managed session regressions
-        run: |
-          python3 tests/chat-runtime.py
-          node tests/chat-ui.e2e.cjs
-          AGENTC2_CHAT_UI_PROVIDER=opencode node tests/chat-ui.e2e.cjs
-          node tests/companion-filters.e2e.cjs
-          node tests/desktop-sessions.e2e.cjs
-          node tests/session-updates.e2e.cjs
-          xvfb-run -a node tests/chat-launch.e2e.cjs
-          AGENTC2_CHAT_TEST_LOCAL=1 xvfb-run -a node tests/chat-launch.e2e.cjs
-        env:
-          AGENTC2_QA_SCREENSHOT_DIR: ${{ runner.temp }}/agentc2-chat-screenshots
-      - name: Upload structured chat screenshots
+      - run: node scripts/run-tests.cjs linux-web
+      - run: xvfb-run -a node scripts/run-tests.cjs linux-chat
+      - name: Terminal, workspace, SPECOPS, and companion regressions
+        run: xvfb-run -a dbus-run-session -- bash .github/scripts/test-linux-ssh.sh
+      - name: Upload Linux suite diagnostics
         if: always()
         uses: actions/upload-artifact@v7.0.2
         with:
-          name: Structured-chat-QA-linux
-          path: ${{ runner.temp }}/agentc2-chat-screenshots/*.png
+          name: Linux-SSH-QA
+          path: |
+            test-results/
+            ${{ runner.temp }}/agentc2-*.log
           if-no-files-found: ignore
           retention-days: 14
-      - name: Terminal, workspace, and companion regressions
-        run: xvfb-run -a dbus-run-session -- bash .github/scripts/test-linux-ssh.sh
+
+  linux-cleanup:
+    name: Isolated cleanup regressions
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    env:
+      AGENTC2_HOST: agentc2-ci
+      AGENTC2_CLEANUP_QA_HOME: /tmp/agentc2-cleanup-ssh-ci/remote-home
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: bash .github/scripts/setup-linux-ssh.sh
+      - run: npm ci
+      - run: npm run build
+      - run: xvfb-run -a node scripts/run-tests.cjs cleanup
+      - name: Upload cleanup diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: Linux-cleanup-QA
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  quality-gate:
+    name: Quality gate
+    if: always()
+    needs: [desktop, linux-ssh, linux-cleanup]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: node scripts/quality-gate.cjs
+        env:
+          QUALITY_GATE_NEEDS: ${{ toJSON(needs) }}
 
   release:
     name: Publish version-tag release
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [desktop, linux-ssh]
+    needs: [quality-gate]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -177,7 +205,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.1.0
         with:
-          node-version: '22'
+          node-version-file: .nvmrc
       - run: node scripts/check-version.cjs
       - uses: actions/download-artifact@v8.0.2
         with:

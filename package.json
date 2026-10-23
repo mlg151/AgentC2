@@ -28,9 +28,9 @@
     "dist:mac": "npm run build && electron-builder --mac dmg zip --publish never",
     "postinstall": "electron-builder install-app-deps",
     "test:platform": "node tests/platform.cjs",
-    "test:desktop": "node tests/desktop.e2e.cjs",
-    "test:package": "node tests/desktop.e2e.cjs --packaged",
-    "test:ci": "npm run build && node tests/specops.cjs && node tests/chat-protocol.cjs && node tests/chat-service.cjs && node tests/chat-timeline.cjs && node tests/updates.cjs && node tests/source-updates.cjs && node tests/update-manifests.cjs && node tests/mac-updates.cjs && node tests/rename.cjs && npm run test:productivity && node tests/loop-breaker.cjs && node tests/readiness.cjs && node tests/exercises.cjs && node tests/cleanup.cjs && node tests/situation.cjs && node tests/reconnect.cjs && node tests/remote-control.cjs && node tests/image-upload.cjs && node tests/tunnels.cjs && node tests/local.cjs && node tests/local-service.cjs && node tests/companion-client.cjs && npm run test:platform && node tests/packaging.cjs && node tests/native-pty.cjs",
+    "test:desktop": "node scripts/run-tests.cjs desktop",
+    "test:package": "node scripts/run-tests.cjs packaged",
+    "test:ci": "npm run build && node scripts/run-tests.cjs core",
     "test:chat:runtime": "python3 tests/chat-runtime.py",
     "test:chat:ui": "node tests/chat-ui.e2e.cjs",
     "test:desktop:sessions": "npm run build && node tests/desktop-sessions.e2e.cjs",
@@ -40,7 +40,8 @@
     "test:chat:local": "npm run build && cross-env AGENTC2_CHAT_TEST_LOCAL=1 node tests/chat-launch.e2e.cjs",
     "test:specops": "node tests/specops.cjs && python3 tests/github.py",
     "test:specops:ui": "npm run build && node tests/specops.ui.e2e.cjs",
-    "test:windows:local": "npm run build && node tests/windows-local.e2e.cjs"
+    "test:windows:local": "npm run build && node tests/windows-local.e2e.cjs",
+    "test:inventory": "node scripts/run-tests.cjs --validate"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",

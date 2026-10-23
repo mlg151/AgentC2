@@ -38,3 +38,11 @@ There are no commits yet, so no established message convention exists. Use conci
 ## Security & Configuration
 
 Preserve renderer isolation, narrow preload APIs, SSH host-key verification, and managed-session-only stop controls. Keep `src/types.ts` synchronized with bridge changes. Never commit credentials or private keys. New/resumed agents currently launch with full permissions; review changes to those flags explicitly.
+
+## Required CI and regression evidence
+
+PRs target `main`. The rollout configures branch protection to require the GitHub Actions `Quality gate`, an up-to-date base, and resolved review conversations, including for administrators. Self-merge is supported with zero independent approvals. Force pushes and branch deletion are blocked.
+
+Register every new executable test in `tests/suites.json`: required CI group, nested suite with its parent, or explicitly optional with a reason. Fixtures and reusable helpers belong in their named subdirectories. `npm run test:inventory` rejects omissions; `npm run test:ci` also validates inventory. Existing npm entrypoints remain available. Use Node 22 (`.nvmrc`).
+
+Required tests use isolated fixtures without provider credentials or paid model calls. Windows CI provisions Ubuntu WSL1; missing Python/tmux is a failure. Cleanup CI uses a separate disposable SSH account. Never point cleanup tests at a real user's home. Suite reports, durations, skip messages, process logs, browser traces, and screenshots are retained as CI artifacts for 14 days. Tests are not automatically retried. Bug fixes need regression evidence reproducing the original failure; UI changes need screenshots. Report skipped checks and limitations in the PR.

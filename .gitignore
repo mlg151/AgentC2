@@ -21,3 +21,6 @@ id_ed25519*
 workspace.json
 remote-access.json
 companion-invitation.json
+
+# CI suite reports and browser diagnostics.
+test-results/
