@@ -82,7 +82,9 @@ class RuntimeTests(unittest.TestCase):
                 wait_for(lambda: rpc('receipt', commandId=stop['commandId'])['state'] == 'completed')
                 environment = {**os.environ, 'HOME': str(directory), 'PYTHONDONTWRITEBYTECODE': '1'}
                 for test in ['chat-antigravity-sdk.py', 'chat-claude-native.py']:
-                    subprocess.run([executable, str(ROOT / 'tests' / test)], check=True, env=environment)
+                    started = time.monotonic()
+                    subprocess.run([executable, str(ROOT / 'tests' / test), '-v'], check=True, env=environment)
+                    print(f'Nested suite {test}: success, {time.monotonic() - started:.1f}s', flush=True)
             finally:
                 if health:
                     os.kill(health['pid'], signal.SIGTERM)

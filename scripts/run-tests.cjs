@@ -38,7 +38,7 @@ async function run(group) {
     const python = suite.file.endsWith('.py');
     const command = python ? (process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3')) : process.execPath;
     const args = python ? [] : ['--require', path.join(root, 'tests/helpers/diagnostics.cjs')];
-    args.push(suite.file, ...(suite.args || []));
+    args.push(suite.file, ...(python ? ['-v'] : []), ...(suite.args || []));
     let tail = '';
     console.log(`\nRUN ${suite.id}`);
     const result = await new Promise((resolve) => {

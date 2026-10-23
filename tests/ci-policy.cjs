@@ -37,3 +37,10 @@ const missingWsl = spawnSync(process.execPath, ['-e', `
 assert.equal(missingWsl.status, 1, missingWsl.stdout + missingWsl.stderr);
 assert.match(missingWsl.stderr, /WSL prerequisite fixture unavailable/);
 console.log('PASS unavailable WSL prerequisites fail even with CI=true');
+const workflow = require('js-yaml').load(fs.readFileSync(path.join(__dirname, '../.github/workflows/desktop.yml'), 'utf8'));
+assert.equal(workflow.jobs['quality-gate'].if, 'always()');
+assert.deepEqual([...workflow.jobs['quality-gate'].needs].sort(), Object.keys(success).sort());
+assert.deepEqual(workflow.jobs.release.needs, ['quality-gate']);
+assert.equal(workflow.jobs.desktop.strategy['fail-fast'], false);
+assert.equal(workflow.jobs.desktop.strategy.matrix.include.length, 4);
+console.log('PASS workflow connects the complete native matrix and isolated jobs to the release gate');
