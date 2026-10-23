@@ -34,7 +34,7 @@ const inputs = {
     owners: [{ sessionKey, linkKeys: ['issue', 'report'] }], dependencies: [{ linkKey: 'issue', requires: ['report'], status: 'unknown', evidenceOutcomeIds: [] }],
     acceptanceCriteria: [{ id: 'report-verified', text: 'The report meets the reviewed issue criteria.', linkKeys: ['issue', 'report'], status: 'unverified', evidenceOutcomeIds: [] }],
     blockers: [], nextActions: [{ id: 'inspect-report', text: 'Inspect the artifact revision and verification evidence.', linkKeys: ['report'] }] } }],
-  'fleet.inspect': [{}], 'units.list': [{ limit: 20 }], 'unit.inspect': [{ sessionKey }], 'hosts.inspect': [{ hostId: host }],
+  'fleet.inspect': [{}], 'units.list': [{ limit: 20 }], 'unit.inspect': [{ sessionKey }, { sessionKey, commandId: '11111111-2222-4333-8444-555555555555' }], 'hosts.inspect': [{ hostId: host }],
   'context.read': [{ section: 'definitions', limit: 20 }], 'admission.check': [{ hostId: host, cwd: repository }],
   'artifact.read': [{ hostId: host, operationId, path: 'report.txt', offset: 0, limit: 4000 }],
   'unit.search': [{ query: 'acceptance criteria', keys: [sessionKey] }],

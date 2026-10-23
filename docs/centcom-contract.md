@@ -96,6 +96,13 @@ receipt alone leaves the latter two unverified. Use unit inspection/journal
 evidence and read-only artifact queries to assess the result; a command receipt
 never upgrades project acceptance automatically.
 
+`unit.inspect` with the returned `commandId` reads the later native receipt
+without acquiring control. Its `command.facts` keeps submission, exact provider
+turn completion, and project acceptance separate. A receipt for another session
+or command is rejected; missing terminal evidence remains unverified. These
+fields survive a truncated transcript. The original directive outcome remains
+the dispatch observation; the correlated inspection supplies newer evidence.
+
 `history.read` provides a redacted index of retained CENTCOM actions and handoffs.
 It accepts `after`, `through`, `limit` (maximum 50), `operation`, `hostId`,
 `sessionKey`, `handoffsOnly`, and `view` (`actions` or `patterns`). Copy `through`
@@ -200,7 +207,9 @@ identity, repository/worktree/revision, ROE, notes, current task evidence,
 capabilities, pending requests, and local control ownership. It reads a bounded
 journal tail without opening a controller handle. Inactive and external units
 can be inspected, but their inspection does not grant mutation authority.
-Unavailable, stale, or unsupported fields are explicit.
+Unavailable, stale, or unsupported fields are explicit. Optional `commandId`
+inspection correlates its receipt with a terminal event in the last 100 journal
+events. Older or pruned events do not prove either success or failure.
 
 `hosts.inspect` reports health, memory/CPU headroom, provider capabilities, and
 host ROE. Linux helpers also read pressure metrics and cgroup-v2 ancestor limits;
@@ -337,6 +346,14 @@ work or remaining budget.
 
 ## Remaining implementation and completion gates
 
-The issue checklist is authoritative. Work still includes actual-adapter verification for every advertised operation,
-and an isolated production-bridge round trip with artifact verification. Current
-fixture coverage must not be presented as native-provider or live-host proof.
+The issue checklist is authoritative. Work still includes actual-adapter
+verification for every advertised operation and the current-head full CI gate.
+`tests/centcom-bridge.e2e.cjs` verifies the production Electron preload/IPC,
+service, SSH transport, remote worker, and provider protocol adapter in disposable
+homes and repositories. It creates a reviewed worktree, inspects its unit, denies
+and approves input through the UI, reads the correlated native terminal receipt,
+verifies artifact bytes/SHA through commander queries, and applies/reads back a
+saved preset. It asserts no preapproval mutation and verifies query results
+actually delivered to the commander. Required Linux CI runs it under Xvfb and
+retains screenshots, outcome evidence, and transport logs. Its provider protocol
+fixture performs no model calls; this is not paid-provider or external-host proof.

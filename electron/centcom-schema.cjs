@@ -107,6 +107,7 @@ function operationInput(operation, parameters, target) {
   if (properties.roeProfile) properties.roeProfile = roe;
   if (operation === 'unit.create') patch({ provider: choice(...provider.enum, 'terminal'), transport: choice('chat', 'terminal'), model: str(200), title: str(100), instructions: str(20000), worktree: ref('worktree'), launchId: workId });
   if (['unit.send', 'unit.steer'].includes(operation)) patch({ text: str(200000, 1), expectedTurnId: str(200, 1) });
+  if (operation === 'unit.inspect') patch({ commandId: { type: 'string', pattern: '^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$' } });
   if (operation === 'chat.respond') { patch({ requestId: str(200, 1), turnId: nullable(str(200, 1)), itemId: nullable(str(200, 1)), decision: choice('allow', 'deny'), answers: arr(ref('answer'), 20, 1) }); schema.oneOf = [{ required: ['decision'], not: { required: ['answers'] } }, { required: ['answers'], not: { required: ['decision'] } }]; }
   if (operation === 'unit.search') patch({ keys: arr(str(300, 1), 200), query: str(1000, 1) });
   if (operation === 'unit.rename') patch({ title: str(100, 1) });

@@ -366,6 +366,11 @@
       "group": "linux-chat"
     },
     {
+      "id": "centcom-bridge.e2e",
+      "file": "tests/centcom-bridge.e2e.cjs",
+      "group": "linux-chat"
+    },
+    {
       "id": "cleanup.e2e",
       "file": "tests/cleanup.e2e.cjs",
       "group": "cleanup"

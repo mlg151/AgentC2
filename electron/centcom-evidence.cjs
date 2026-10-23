@@ -66,19 +66,22 @@ function createEvidence({ service: s, isCommander, activeKeys }) {
     if (input.execution && !['executing', 'waiting', 'idle', 'stopped', 'failed', 'unknown'].includes(input.execution)) throw new Error('Invalid execution filter');
     return page(items, input);
   }
-  async function inspect({ sessionKey }) {
+  async function inspect({ sessionKey, commandId }) {
     const inv = await inventory();
     const unit = inv.sessions.find((u) => u.key === sessionKey);
     if (!unit) throw new Error('Unit is unavailable, deleted, or belongs to CENTCOM');
     const detail = canonical(inv).find((u) => u.relationship.representations.some((r) => r.key === sessionKey));
     const controlKeys = await activeKeys(inv);
-    const runtime = s.commanderInspection ? await s.commanderInspection(unit).catch((error) => unknown(error.message)) : unknown('Runtime inspection service is unavailable');
-    return bounded({ ...detail, inspectedKey: sessionKey, runtime: { state: runtime.sessionState || 'unknown', sampledAt: runtime.sampledAt || null }, control: { eligible: controlKeys.has(sessionKey), reason: controlKeys.has(sessionKey) ? null : 'Only connected active managed sessions can be controlled', ownership: runtime.ownership || unknown('No control observation') },
+    const runtime = s.commanderInspection ? await s.commanderInspection(unit, commandId).catch((error) => unknown(error.message)) : unknown('Runtime inspection service is unavailable');
+    const inspection = { ...detail, inspectedKey: sessionKey, runtime: { state: runtime.sessionState || 'unknown', sampledAt: runtime.sampledAt || null }, control: { eligible: controlKeys.has(sessionKey), reason: controlKeys.has(sessionKey) ? null : 'Only connected active managed sessions can be controlled', ownership: runtime.ownership || unknown('No control observation') },
       capabilities: runtime.capabilities || unknown('Capabilities unavailable', unit.transport === 'chat' ? 'unknown' : 'unsupported'),
+      ...(commandId ? { command: runtime.command || unknown(runtime.reason || 'Command receipt unavailable', unit.transport === 'chat' ? 'unknown' : 'unsupported') } : {}),
       pendingRequests: runtime.pendingRequests || unknown('Structured request inspection unavailable', unit.transport === 'chat' ? 'unknown' : 'unsupported'),
       currentTask: runtime.currentTask || detail.currentTask, journal: runtime.journal || null,
       transcript: unit.outputTail ? { text: unit.outputTail.slice(-12000), truncated: unit.outputTail.length > 12000, source: 'inventory', sourceUpdatedAt: unit.updatedAt || null } : unknown('No transcript evidence in this inventory'),
-    });
+    };
+    const result = bounded(inspection, commandId ? 4000 : undefined);
+    return result.truncated && commandId ? { ...result, inspectedKey: sessionKey, command: inspection.command } : result;
   }
   async function hosts({ hostId } = {}) {
     const inv = await inventory();

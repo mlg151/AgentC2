@@ -1,0 +1,140 @@
+// Production Electron IPC -> service -> SSH -> worker -> provider protocol fixture.
+const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
+const { _electron } = require('playwright-core');
+const { Store } = require('../electron/config.cjs');
+const { defaults } = require('../electron/centcom.cjs');
+const { isolatedChatSsh, poll } = require('./fixtures/isolated-chat-ssh.cjs');
+
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'a2-c2-bridge-'));
+const artifacts = process.env.AGENTC2_SUITE_ARTIFACTS || process.env.AGENTC2_QA_SCREENSHOT_DIR || path.join(os.tmpdir(), 'agentc2-centcom-bridge-evidence');
+fs.mkdirSync(artifacts, { recursive: true });
+let app, ssh, page;
+(async () => {
+  try {
+    assert.equal(process.platform, 'linux', 'This required suite runs in the isolated Linux job');
+    assert.ok(process.env.DISPLAY, 'Run under Xvfb');
+    ssh = await isolatedChatSsh(directory);
+    const repository = path.join(ssh.home, 'repository'); fs.mkdirSync(repository);
+    execFileSync('git', ['init', '-q', repository]);
+    execFileSync('git', ['-C', repository, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-qm', 'Base']);
+    const data = path.join(directory, 'desktop'), store = new Store(data);
+    store.save('settings', { ...store.data.settings, hosts: [ssh.host] });
+    app = await _electron.launch({ executablePath: require('electron'), args: ['.', `--user-data-dir=${directory}/browser`], cwd: path.resolve(__dirname, '..'), env: { ...ssh.env, NODE_ENV: 'production', AGENTC2_DATA_DIR: data }, timeout: 60000 });
+    page = await app.firstWindow();
+    const errors = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    assert.equal(await page.title(), 'AgentC2'); assert.ok(page.url().startsWith('file:'));
+    await page.getByRole('button', { name: 'New unit' }).waitFor();
+    assert.equal(await page.locator('vite-error-overlay').count(), 0);
+    const call = (method, ...args) => page.evaluate(({ method, args }) => window.agentHQ[method](...args), { method, args });
+    const config = defaults();
+    config.model = 'fixture'; config.triggers = { ...config.triggers, ...Object.fromEntries(Object.keys(config.triggers).filter((key) => key.startsWith('on')).map((key) => [key, false])), fallbackSeconds: 0 };
+    await call('configureCentcom', config);
+    const stateFile = path.join(data, 'centcom/centcom.json');
+    const saved = () => JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    const terminalCount = () => saved().outcomes.filter((item) => item.collection === 'provider' && item.phase === 'terminal').length;
+    const waitAssessment = (before) => poll(() => terminalCount() > before && saved().activeLogicalTurn === null && saved().status === 'idle', 'Post-decision assessment did not finish');
+    const plan = (envelope) => fs.writeFileSync(path.join(ssh.home, 'centcom-plan.json'), JSON.stringify(['```agentc2-c2\n' + JSON.stringify({ version: 1, ...envelope }) + '\n```']));
+    const request = (operation, input, id) => ({ id, kind: 'agentc2.query', params: { operation, input } });
+    const directive = (operation, input, id, summary) => ({ id, kind: 'agentc2.action', summary, params: { operation, input } });
+    async function submit(envelope) { plan(envelope); return call('submitCentcom', 'Run the isolated verification step.'); }
+    async function query(operation, input, id) {
+      await submit({ queries: [request(operation, input, id)] });
+      const result = saved().outcomes.findLast((item) => item.collection === 'query' && item.clientRequestId === id && item.status === 'ok');
+      assert.ok(result, JSON.stringify(saved().outcomes.slice(-5)));
+      // Verify that production continuation delivered the correlated query result
+      // to the commander provider, beyond merely writing a local audit row.
+      const prompts = fs.readFileSync(path.join(ssh.home, 'centcom-prompts.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+      const delivered = prompts.flatMap((text) => {
+        const match = text.match(/<agentc2-c2-results>\n([\s\S]*?)\n<\/agentc2-c2-results>/);
+        return match ? JSON.parse(match[1]).entries || [] : [];
+      }).findLast((item) => item.collection === 'query' && item.clientRequestId === id && item.status === 'ok');
+      assert.ok(delivered, 'Correlated query result must reach the commander provider');
+      return delivered.result;
+    }
+    const operationId = crypto.randomBytes(16).toString('hex');
+    let state = await submit({ directives: [directive('unit.create', { hostId: 'default', provider: 'codex', transport: 'chat', title: 'Bridge worker', worktree: { operationId, repository, baseRef: 'HEAD', slug: 'bridge' } }, 'create-worker', 'Create reviewed bridge worker')] });
+    let proposal = state.directives.find((item) => item.clientRequestId === 'create-worker');
+    assert.equal(proposal.state, 'pending', proposal.error || proposal.validationError);
+    assert.equal((await call('listWorktrees', 'default')).length, 0, 'No worktree before approval');
+    state = await call('decideCentcomDirective', proposal.id, 'approve');
+    proposal = state.directives.find((item) => item.id === proposal.id);
+    assert.equal(proposal.state, 'completed', proposal.error);
+    const created = proposal.result, sessionKey = `default/tmux:${created.name}`, tree = created.worktree.path;
+    await poll(async () => (await call('inventory')).sessions.some((item) => item.key === sessionKey && item.chatState === 'idle'), 'Worker did not become idle');
+    const inspection = await query('unit.inspect', { sessionKey }, 'inspect-worker');
+    assert.equal(inspection.inspectedKey, sessionKey); assert.equal(inspection.control.eligible, true);
+    console.log('PASS production bridge create and read-only inspection');
+    const input = { sessionKey, text: 'write-reviewed-artifact' }, witness = path.join(tree, 'evidence.txt');
+    state = await submit({ directives: [directive('unit.send', input, 'denied-write', 'Deny this artifact write')] });
+    proposal = state.directives.find((item) => item.clientRequestId === 'denied-write');
+    assert.equal(proposal.state, 'pending', proposal.error || proposal.validationError);
+    assert.equal(fs.existsSync(witness), false);
+    await page.locator('button.centcom-btn').click();
+    await page.getByRole('button', { name: /^Directives/ }).click();
+    const deniedCard = page.locator('.centcom-directive-card').filter({ hasText: 'Deny this artifact write' });
+    const beforeDenial = terminalCount();
+    await deniedCard.getByRole('button', { name: 'Deny', exact: true }).click();
+    await poll(async () => (await call('centcomState')).directives.find((item) => item.id === proposal.id)?.state === 'denied', 'Denial did not persist');
+    assert.equal(fs.existsSync(witness), false, 'Denied action must not execute');
+    await waitAssessment(beforeDenial);
+    const deniedResult = await query('outcomes.read', { collection: 'directive', clientRequestId: 'denied-write' }, 'read-denied');
+    assert.ok(JSON.stringify(deniedResult).includes('denied'));
+    state = await submit({ directives: [directive('unit.send', input, 'approved-write', 'Write reviewed artifact')] });
+    proposal = state.directives.find((item) => item.clientRequestId === 'approved-write');
+    assert.equal(proposal.state, 'pending', proposal.error || proposal.validationError);
+    assert.equal(fs.existsSync(witness), false);
+    const approvedCard = page.locator('.centcom-directive-card').filter({ hasText: 'Write reviewed artifact' });
+    await approvedCard.getByText('Reviewed targets and authorization', { exact: true }).click();
+    await page.screenshot({ path: path.join(artifacts, 'centcom-bridge-before-approval.png') });
+    const beforeApproval = terminalCount();
+    await approvedCard.getByRole('button', { name: 'Approve & Execute', exact: true }).click();
+    await poll(async () => ['completed', 'uncertain'].includes((await call('centcomState')).directives.find((item) => item.id === proposal.id)?.state), 'Approved input was not delivered');
+    await poll(() => fs.existsSync(witness), 'Approved artifact was not written');
+    await waitAssessment(beforeApproval);
+    const receipt = (await call('centcomState')).directives.find((item) => item.id === proposal.id).result;
+    const terminal = await query('unit.inspect', { sessionKey, commandId: receipt.commandId }, 'terminal-worker');
+    assert.equal(terminal.command.receipt.commandId, receipt.commandId);
+    assert.equal(terminal.command.facts.providerTurnCompletion, 'completed');
+    assert.equal(terminal.command.facts.projectAcceptance, 'unverified');
+    const outcome = await query('outcomes.read', { collection: 'directive', clientRequestId: 'approved-write' }, 'read-approved');
+    assert.ok(JSON.stringify(outcome).includes(proposal.id));
+    const artifact = await query('artifact.read', { hostId: 'default', operationId, path: 'evidence.txt' }, 'verify-artifact');
+    assert.equal(artifact.text, 'Reviewed bridge artifact\n');
+    assert.equal(artifact.revision, crypto.createHash('sha256').update(fs.readFileSync(witness)).digest('hex'));
+    const preset = { id: 'bridge-preset', name: 'Reviewed bridge preset', provider: 'codex', command: 'codex', args: '', fullPermissions: false };
+    state = await submit({ automations: [{ id: 'save-preset', kind: 'preset', title: 'Bridge saved preset', rationale: 'Fixture evidence', evidence: ['Correlated artifact verified'], payload: preset }] });
+    const draft = state.automations.find((item) => item.clientRequestId === 'save-preset');
+    assert.equal(draft.state, 'proposed');
+    assert.ok(!JSON.parse(fs.readFileSync(store.file)).settings.presets.some((item) => item.id === preset.id));
+    await page.getByRole('button', { name: /^Automations/ }).click();
+    const automationCard = page.locator('.centcom-automation-card').filter({ hasText: 'Bridge saved preset' });
+    await automationCard.getByRole('button', { name: 'Apply Configuration', exact: true }).click();
+    await automationCard.getByText('APPLIED', { exact: true }).waitFor();
+    const readback = await query('automation.read', { id: draft.id }, 'read-saved-preset');
+    assert.equal(readback.matchesDraft, true);
+    assert.deepEqual(JSON.parse(fs.readFileSync(store.file)).settings.presets.find((item) => item.id === preset.id), draft.preview.after);
+    await automationCard.getByText('Saved artifact and revision', { exact: true }).click();
+    await page.screenshot({ path: path.join(artifacts, 'centcom-bridge-readback.png') });
+    await page.setViewportSize({ width: 960, height: 800 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    await page.screenshot({ path: path.join(artifacts, 'centcom-bridge-narrow.png') });
+    assert.deepEqual(errors, []);
+    fs.copyFileSync(stateFile, path.join(artifacts, 'centcom-outcomes.json'));
+    console.log('PASS production Electron/IPC/SSH/worker bridge: create, inspect, stage, UI deny/approve, correlated terminal evidence, artifact SHA readback, saved automation readback, and no preapproval mutation');
+  } catch (error) {
+    if (page) await page.screenshot({ path: path.join(artifacts, 'centcom-bridge-failure.png') }).catch(() => {});
+    throw error;
+  } finally {
+    await app?.close().catch(() => {}); ssh?.close();
+    for (const name of ['sshd.log', 'home/requests.jsonl', 'home/centcom-prompts.jsonl']) if (fs.existsSync(path.join(directory, name))) fs.copyFileSync(path.join(directory, name), path.join(artifacts, path.basename(name)));
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+})().catch((error) => { console.error(error); process.exitCode = 1; });

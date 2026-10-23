@@ -1,5 +1,5 @@
 const crypto = require('node:crypto');
-const { redact } = require('./centcom-contract.cjs');
+const { redact, bounded } = require('./centcom-contract.cjs');
 
 // Internal only: never exposed through preload or the companion RPC catalog.
 function commanderFacade({ chats, terminals, action, deleteSession, interruptFault, ...services }) {
@@ -43,7 +43,8 @@ function commanderFacade({ chats, terminals, action, deleteSession, interruptFau
       return { path: result.path, revision: result.revision, sizeBytes: result.sizeBytes, text: text.slice(offset, offset + limit), offset, nextOffset: Math.min(text.length, offset + limit), truncated: offset + limit < text.length, redacted: text !== result.text, offsets: 'characters in redacted text; supply revision on continuation' };
     },
     commanderCapabilities: (hostId) => chats.capabilities(hostId),
-    commanderInspection: async (unit) => {
+    commanderInspection: async (unit, commandId) => {
+      if (commandId !== undefined && (typeof commandId !== 'string' || !/^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(commandId))) throw new Error('Invalid chat command ID');
       const views = unit.transport === 'chat' ? chats : terminals;
       const key = unit.transport === 'chat' ? `${unit.hostId}/${unit.chatSessionId}` : `${unit.hostId}/${unit.id || unit.name}`;
       const owner = views.sessions.get(key)?.owner;
@@ -53,7 +54,19 @@ function commanderFacade({ chats, terminals, action, deleteSession, interruptFau
       const head = await chats.read(unit.hostId, unit.chatSessionId, 0, 1);
       const tail = await chats.read(unit.hostId, unit.chatSessionId, Math.max(head.retainedFrom - 1, head.latestCursor - 100), 100);
       const task = [...tail.events].reverse().find((e) => e.type === 'message.completed' && e.data.role === 'user');
+      let command;
+      if (commandId) {
+        const receipt = await chats.request(unit.hostId, 'receipt', { commandId });
+        if (receipt.commandId !== commandId || receipt.sessionId !== unit.chatSessionId) throw new Error('Receipt does not belong to this unit');
+        const turnId = receipt.result?.turnId || null;
+        const terminal = turnId && tail.events.findLast((event) => event.sessionId === unit.chatSessionId && event.turnId === turnId && event.type === 'turn.completed');
+        command = { status: 'reported', receipt: bounded(receipt, 4000), facts: { submission: receipt.state, commandId, sessionId: unit.chatSessionId, providerTurnId: turnId,
+          providerTurnCompletion: terminal?.data.outcome || 'unverified', projectAcceptance: 'unverified' },
+          evidence: terminal ? { sequence: terminal.sequence, timestamp: terminal.timestamp } : null,
+          coverage: 'Terminal evidence covers only this inspection journal window; an absent event is not proof of pending or failed execution.' };
+      }
       return { ownership, capabilities: tail.session.capabilities, pendingRequests: tail.pendingRequests, sessionState: tail.session.state, sampledAt: new Date().toISOString(),
+        ...(command ? { command } : {}),
         currentTask: task ? { status: 'reported', text: task.data.text, turnId: task.turnId, sourceTimestamp: task.timestamp } : { status: 'unknown', reason: 'No user task in the retained journal tail' },
         journal: { cursor: tail.cursor, latestCursor: tail.latestCursor, retainedFrom: tail.retainedFrom, truncated: tail.truncated || tail.retainedFrom > 1 || tail.latestCursor > 100, events: tail.events } };
     },
