@@ -17,7 +17,6 @@ const { localCommand } = require('../electron/local.cjs');
   };
   try { wsl('python3', ['-c', 'import shutil; assert shutil.which("tmux")']); }
   catch (error) {
-    if (process.env.CI) { console.log('SKIP Windows/WSL local startup: default WSL Python 3/tmux unavailable'); return; }
     throw error;
   }
   const root = path.resolve(__dirname, '..');

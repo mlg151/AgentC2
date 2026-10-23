@@ -66,8 +66,10 @@ assert.deepEqual(JSON.parse(parity.stdout), cases.map((item) => item.valid), 'Re
 // The production journal is remote-Linux code; Windows runs wire parity only.
 if (process.platform !== 'win32') {
   for (const test of [script, path.join(__dirname, 'chat-worker.py'), path.join(__dirname, 'chat-codex.py'), path.join(__dirname, 'chat-opencode.py'), path.join(__dirname, 'chat-antigravity.py'), path.join(__dirname, 'chat-claude-native.py')]) {
-    const result = spawnSync(python, [test], { encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } });
+    const started = Date.now();
+    const result = spawnSync(python, [test, '-v'], { encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } });
     process.stdout.write(result.stdout); process.stderr.write(result.stderr);
+    console.log(`Nested suite ${path.basename(test)}: ${result.status === 0 ? 'success' : 'failure'}, ${((Date.now() - started) / 1000).toFixed(1)}s`);
     assert.equal(result.status, 0, result.error?.message);
   }
 }

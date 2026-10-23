@@ -1,0 +1,356 @@
+{
+  "suites": [
+    {
+      "id": "specops",
+      "file": "tests/specops.cjs",
+      "group": "core"
+    },
+    {
+      "id": "chat-protocol",
+      "file": "tests/chat-protocol.cjs",
+      "group": "core"
+    },
+    {
+      "id": "chat-service",
+      "file": "tests/chat-service.cjs",
+      "group": "core"
+    },
+    {
+      "id": "chat-timeline",
+      "file": "tests/chat-timeline.cjs",
+      "group": "core"
+    },
+    {
+      "id": "updates",
+      "file": "tests/updates.cjs",
+      "group": "core"
+    },
+    {
+      "id": "source-updates",
+      "file": "tests/source-updates.cjs",
+      "group": "core"
+    },
+    {
+      "id": "update-manifests",
+      "file": "tests/update-manifests.cjs",
+      "group": "core"
+    },
+    {
+      "id": "mac-updates",
+      "file": "tests/mac-updates.cjs",
+      "group": "core"
+    },
+    {
+      "id": "rename",
+      "file": "tests/rename.cjs",
+      "group": "core"
+    },
+    {
+      "id": "loop-breaker",
+      "file": "tests/loop-breaker.cjs",
+      "group": "core"
+    },
+    {
+      "id": "readiness",
+      "file": "tests/readiness.cjs",
+      "group": "core"
+    },
+    {
+      "id": "exercises",
+      "file": "tests/exercises.cjs",
+      "group": "core"
+    },
+    {
+      "id": "cleanup",
+      "file": "tests/cleanup.cjs",
+      "group": "core"
+    },
+    {
+      "id": "situation",
+      "file": "tests/situation.cjs",
+      "group": "core"
+    },
+    {
+      "id": "reconnect",
+      "file": "tests/reconnect.cjs",
+      "group": "core"
+    },
+    {
+      "id": "remote-control",
+      "file": "tests/remote-control.cjs",
+      "group": "core"
+    },
+    {
+      "id": "image-upload",
+      "file": "tests/image-upload.cjs",
+      "group": "core"
+    },
+    {
+      "id": "tunnels",
+      "file": "tests/tunnels.cjs",
+      "group": "core"
+    },
+    {
+      "id": "local",
+      "file": "tests/local.cjs",
+      "group": "core"
+    },
+    {
+      "id": "local-service",
+      "file": "tests/local-service.cjs",
+      "group": "core"
+    },
+    {
+      "id": "companion-client",
+      "file": "tests/companion-client.cjs",
+      "group": "core"
+    },
+    {
+      "id": "packaging",
+      "file": "tests/packaging.cjs",
+      "group": "core"
+    },
+    {
+      "id": "native-pty",
+      "file": "tests/native-pty.cjs",
+      "group": "core"
+    },
+    {
+      "id": "productivity",
+      "file": "tests/productivity.cjs",
+      "group": "core"
+    },
+    {
+      "id": "platform",
+      "file": "tests/platform.cjs",
+      "group": "core"
+    },
+    {
+      "id": "ci-policy",
+      "file": "tests/ci-policy.cjs",
+      "group": "core"
+    },
+    {
+      "id": "desktop.e2e",
+      "file": "tests/desktop.e2e.cjs",
+      "group": "desktop"
+    },
+    {
+      "id": "update-download.e2e",
+      "file": "tests/update-download.e2e.cjs",
+      "group": "updater"
+    },
+    {
+      "id": "windows-local.e2e",
+      "file": "tests/windows-local.e2e.cjs",
+      "group": "windows"
+    },
+    {
+      "id": "remote-helper-python",
+      "file": "tests/remote-helper.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "opencode-helper-python",
+      "file": "tests/opencode-helper.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "oporders-python",
+      "file": "tests/oporders.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "sitrep-python",
+      "file": "tests/sitrep.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "exercises-python",
+      "file": "tests/exercises.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "flash-python",
+      "file": "tests/flash.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "loop-breaker-python",
+      "file": "tests/loop-breaker.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "worktrees-python",
+      "file": "tests/worktrees.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "worktree-diff-python",
+      "file": "tests/worktree-diff.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "provider-telemetry-python",
+      "file": "tests/provider-telemetry.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "github-python",
+      "file": "tests/github.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "chat-runtime-python",
+      "file": "tests/chat-runtime.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "chat-ui.e2e",
+      "file": "tests/chat-ui.e2e.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "companion-filters.e2e",
+      "file": "tests/companion-filters.e2e.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "desktop-sessions.e2e",
+      "file": "tests/desktop-sessions.e2e.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "session-updates.e2e",
+      "file": "tests/session-updates.e2e.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "tunnels.e2e",
+      "file": "tests/tunnels.e2e.cjs",
+      "group": "linux-ui"
+    },
+    {
+      "id": "oporders.e2e",
+      "file": "tests/oporders.e2e.cjs",
+      "group": "linux-ui"
+    },
+    {
+      "id": "oporders.ui.e2e",
+      "file": "tests/oporders.ui.e2e.cjs",
+      "group": "linux-ui"
+    },
+    {
+      "id": "sitrep.e2e",
+      "file": "tests/sitrep.e2e.cjs",
+      "group": "linux-ui"
+    },
+    {
+      "id": "exercises.e2e",
+      "file": "tests/exercises.e2e.cjs",
+      "group": "linux-ui"
+    },
+    {
+      "id": "flash.e2e",
+      "file": "tests/flash.e2e.cjs",
+      "group": "linux-ui"
+    },
+    {
+      "id": "loop-breaker.e2e",
+      "file": "tests/loop-breaker.e2e.cjs",
+      "group": "linux-ui"
+    },
+    {
+      "id": "terminal.e2e",
+      "file": "tests/terminal.e2e.cjs",
+      "group": "linux-ui"
+    },
+    {
+      "id": "workspace.e2e",
+      "file": "tests/workspace.e2e.cjs",
+      "group": "linux-ui"
+    },
+    {
+      "id": "companion.e2e",
+      "file": "tests/companion.e2e.cjs",
+      "group": "linux-ui"
+    },
+    {
+      "id": "specops.ui.e2e",
+      "file": "tests/specops.ui.e2e.cjs",
+      "group": "linux-ui"
+    },
+    {
+      "id": "chat-launch.e2e",
+      "file": "tests/chat-launch.e2e.cjs",
+      "group": "linux-chat"
+    },
+    {
+      "id": "cleanup.e2e",
+      "file": "tests/cleanup.e2e.cjs",
+      "group": "cleanup"
+    },
+    {
+      "id": "packaged",
+      "file": "tests/desktop.e2e.cjs",
+      "group": "packaged",
+      "args": [
+        "--packaged"
+      ]
+    },
+    {
+      "id": "rename-native",
+      "file": "tests/rename.cjs",
+      "group": "linux-python",
+      "args": [
+        "--native"
+      ]
+    },
+    {
+      "id": "chat-ui-opencode",
+      "file": "tests/chat-ui.e2e.cjs",
+      "group": "linux-web",
+      "env": {
+        "AGENTC2_CHAT_UI_PROVIDER": "opencode"
+      }
+    },
+    {
+      "id": "chat-launch-local",
+      "file": "tests/chat-launch.e2e.cjs",
+      "group": "linux-chat",
+      "env": {
+        "AGENTC2_CHAT_TEST_LOCAL": "1"
+      }
+    }
+  ],
+  "nested": {
+    "tests/chat-journal.py": [
+      "chat-protocol"
+    ],
+    "tests/chat-worker.py": [
+      "chat-protocol"
+    ],
+    "tests/chat-codex.py": [
+      "chat-protocol"
+    ],
+    "tests/chat-opencode.py": [
+      "chat-protocol"
+    ],
+    "tests/chat-antigravity.py": [
+      "chat-protocol"
+    ],
+    "tests/chat-claude-native.py": [
+      "chat-protocol",
+      "chat-runtime-python"
+    ],
+    "tests/chat-antigravity-sdk.py": [
+      "chat-runtime-python"
+    ]
+  },
+  "optional": {
+    "tests/launch-modes.cjs": "Opt-in SSH host with installed provider CLIs; verifies real launch and resume flags.",
+    "tests/claude-gated.cjs": "Opt-in installed Claude CLI boundary probe against a local model fixture; no paid calls.",
+    "tests/chat-live.py": "Opt-in installed-provider smoke using host credentials and real provider turns.",
+    "tests/antigravity-sdk-evaluation.py": "Optional historical SDK evaluation against a loopback fixture; requires a separately installed pinned SDK. Production SDK coverage runs under chat-runtime."
+  }
+}
