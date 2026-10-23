@@ -16,6 +16,43 @@ exec((Path(__file__).resolve().parents[1] / "electron" / "provider_telemetry.py"
 exec((Path(__file__).resolve().parents[1] / "electron" / "remote.py").read_text(), scope)
 
 
+class CentcomWorkspace(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="agentc2-centcom-workspace-")
+        self.addCleanup(self.temporary.cleanup)
+        self.home = Path(self.temporary.name)
+        home_patch = patch.dict(scope, {"HOME": self.home})
+        home_patch.start()
+        self.addCleanup(home_patch.stop)
+        self.root = self.home / ".cache" / "agentc2" / "centcom"
+
+    def test_utf8_limit_and_atomic_replacement(self):
+        content = "😀" * 250000
+        result = scope["centcom_sync"]({"files": {"SITUATION.json": content}})
+        self.assertEqual(result, {"path": str(self.root), "written": ["SITUATION.json"]})
+        target = self.root / "SITUATION.json"
+        self.assertEqual(target.stat().st_size, 1_000_000)
+        self.assertEqual(target.read_text(), content)
+        with self.assertRaisesRegex(ValueError, "Unsupported or oversized CENTCOM file"):
+            scope["centcom_sync"]({"files": {"SITUATION.json": content + "x"}})
+        self.assertEqual(target.read_text(), content)
+        scope["centcom_sync"]({"files": {"SITUATION.json": "{}"}})
+        self.assertEqual(target.read_text(), "{}")
+        self.assertEqual(list(self.root.glob("*.tmp")), [])
+
+    def test_file_allowlist_and_symlink_protection(self):
+        for name, content in [("../outside", "text"), ("OTHER.json", "{}"), ("SITUATION.json", {})]:
+            with self.subTest(name=name, content=content):
+                with self.assertRaisesRegex(ValueError, "Unsupported or oversized CENTCOM file"):
+                    scope["centcom_sync"]({"files": {name: content}})
+        outside = self.home / "outside"
+        outside.write_text("keep")
+        (self.root / "SITUATION.json").symlink_to(outside)
+        with self.assertRaisesRegex(ValueError, "symlink"):
+            scope["centcom_sync"]({"files": {"SITUATION.json": "{}"}})
+        self.assertEqual(outside.read_text(), "keep")
+
+
 class StructuredInventory(unittest.TestCase):
     def setUp(self):
         self.helper = {"__name__": "structured_inventory_fixture"}

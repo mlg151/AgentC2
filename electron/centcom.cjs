@@ -12,6 +12,45 @@ const DIRECTIVE_KINDS = [
   'chat.respond', 'fault.interrupt', 'fault.reset'
 ];
 const AUTOMATION_KINDS = ['specops_workflow', 'oporder', 'preset', 'centcom_trigger'];
+// Must match centcom_sync's per-file UTF-8 limit in remote.py.
+const SITUATION_MAX_BYTES = 1_000_000;
+
+function boundSituationSnapshot(snapshot) {
+  const encodedSize = (value) => Buffer.byteLength(JSON.stringify(value), 'utf8');
+  if (encodedSize(snapshot) <= SITUATION_MAX_BYTES) return snapshot;
+
+  const reduced = structuredClone(snapshot);
+  const collections = ['units', 'theaters', 'specops', 'exercises', 'faults', 'defconReasons'];
+  reduced.truncation = {
+    reason: 'Snapshot exceeds the CENTCOM workspace byte limit; omitted evidence is unavailable in this snapshot.',
+    totals: Object.fromEntries(collections.map((key) => [key, snapshot[key].length])),
+    omitted: Object.fromEntries(collections.map((key) => [key, 0])),
+    outputTailsOmitted: 0,
+  };
+  // Preserve fleet identities and state before spending space on terminal text.
+  for (const unit of reduced.units) {
+    if (unit.outputTail) {
+      unit.outputTail = '';
+      reduced.truncation.outputTailsOmitted++;
+    }
+  }
+  if (encodedSize(reduced) <= SITUATION_MAX_BYTES) return reduced;
+
+  const faultKeys = new Set(reduced.faults.map((fault) => fault.sessionKey));
+  const urgent = (unit) => unit.state === 'live' || unit.state === 'failed' || faultKeys.has(unit.key);
+  reduced.units.sort((a, b) => Number(urgent(b)) - Number(urgent(a)));
+  reduced.specops.sort((a, b) => Number(['running', 'halted'].includes(b.state)) - Number(['running', 'halted'].includes(a.state)));
+  // Reduce the largest collection in batches so large histories stay cheap to
+  // serialize. Counts make a partial snapshot explicit to the commander.
+  while (encodedSize(reduced) > SITUATION_MAX_BYTES) {
+    const largest = collections.filter((key) => reduced[key].length)
+      .sort((a, b) => encodedSize(reduced[b]) - encodedSize(reduced[a]))[0];
+    const keep = Math.floor(reduced[largest].length / 2);
+    reduced[largest] = reduced[largest].slice(0, keep);
+    reduced.truncation.omitted[largest] = reduced.truncation.totals[largest] - keep;
+  }
+  return reduced;
+}
 
 function text(value, max, label) {
   if (typeof value !== 'string' || !value.trim() || value.length > max || value.includes('\0')) {
@@ -211,7 +250,7 @@ function createCentcom({ directory, service, chats, emit }) {
       action: 'centcom_sync',
       files: {
         'AGENTS.md': initialDoctrine,
-        'SITUATION.json': JSON.stringify(await buildSituationSnapshot(), null, 2),
+        'SITUATION.json': JSON.stringify(await buildSituationSnapshot()),
       },
     }, host.id);
 
@@ -305,7 +344,7 @@ function createCentcom({ directory, service, chats, emit }) {
       outputTail: s.outputTail ? s.outputTail.split('\n').slice(-20).join('\n') : '',
     }));
 
-    return {
+    return boundSituationSnapshot({
       capturedAt: new Date().toISOString(),
       defcon: readiness.level,
       defconLabel: readiness.label,
@@ -316,7 +355,7 @@ function createCentcom({ directory, service, chats, emit }) {
       exercises: exercises.map((e) => ({ id: e.id, title: e.title, state: e.state, contestants: e.contestants.map((c) => ({ id: c.id, provider: c.provider, state: c.state })) })),
       faults,
       flashCount: flash.filter((f) => f.state === 'pending').length,
-    };
+    });
   }
 
   async function executeTurn(userPrompt, source = 'user', initialHop = 0) {
@@ -346,14 +385,15 @@ function createCentcom({ directory, service, chats, emit }) {
         const snapshot = await buildSituationSnapshot();
         await service.runRemote({
           action: 'centcom_sync',
-          files: { 'SITUATION.json': JSON.stringify(snapshot, null, 2) },
-        }, session.hostId).catch(() => {});
+          files: { 'SITUATION.json': JSON.stringify(snapshot) },
+        }, session.hostId);
 
         const turnCommandId = crypto.randomUUID();
         const contextualPrompt = [
           `<UNTRUSTED_FLEET_EVIDENCE>`,
           `SITUATION SNAPSHOT (DEFCON ${snapshot.defcon || '—'} · ${snapshot.defconLabel}):`,
           `Observed units: ${snapshot.units.length} · Halted missions: ${snapshot.specops.filter((m) => m.state === 'halted').length} · Faults: ${snapshot.faults.length}`,
+          ...(snapshot.truncation ? ['SITUATION.json is partial. Read its truncation totals and omitted counts before assessing the fleet.'] : []),
           `</UNTRUSTED_FLEET_EVIDENCE>`,
           '',
           nextPrompt,

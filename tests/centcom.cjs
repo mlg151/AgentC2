@@ -103,6 +103,8 @@ Follow-up text.`;
     { key: 'host-1/tmux:hq-active01', hostId: 'host-1', name: 'hq-active01', state: 'live', kind: 'managed', title: 'Task Worker' },
     { key: 'host-1/tmux:hq-exited02', hostId: 'host-1', name: 'hq-exited02', state: 'exited', kind: 'managed', title: 'Exited Worker' },
   ];
+  // A single terminal line can exceed the remote workspace's UTF-8 byte limit.
+  inventorySessions[0].outputTail = 'old output\n' + '😀'.repeat(300000) + '\nlatest evidence';
 
   let specopsMissions = [
     { id: 'specops-1', repo: 'mlg151/AgentC2', workflow: { name: 'Patch Release' }, stage: 'plan_review', state: 'halted', error: 'Watch officer review required' },
@@ -169,7 +171,12 @@ Follow-up text.`;
     getHost: (id) => ({ id, name: 'Primary Host' }),
     runRemote: async (payload) => {
       remoteCalls.push(payload);
-      return { ok: true, synced: ['AGENTS.md', 'SITUATION.json'] };
+      for (const content of Object.values(payload.files || {})) {
+        if (typeof content !== 'string' || Buffer.byteLength(content, 'utf8') > 1_000_000) {
+          throw new Error('Unsupported or oversized CENTCOM file');
+        }
+      }
+      return { path: '/fixture/centcom', written: Object.keys(payload.files || {}) };
     },
     create: async (input) => {
       const id = `chat-centcom-${++chatSessionCounter}`;
@@ -253,6 +260,12 @@ Follow-up text.`;
   assert.ok(started.session, 'Session must be created');
   assert.match(started.session.name, /^hq-centcom-/);
   assert.equal(remoteCalls[0].action, 'centcom_sync', 'Must perform remote sync to ~/.cache/agentc2/centcom');
+  const initialSituation = JSON.parse(remoteCalls[0].files['SITUATION.json']);
+  assert.equal(initialSituation.units.length, inventorySessions.length);
+  assert.ok(initialSituation.truncation.outputTailsOmitted > 0);
+  assert.equal(initialSituation.truncation.omitted.units, 0);
+  assert.ok(inventorySessions[0].outputTail.endsWith('latest evidence'), 'Snapshot reduction must not mutate inventory');
+  delete inventorySessions[0].outputTail;
 
   // Verify Single-Turn Envelope Processing & Preconditions
   const commanderSessionId = started.session.chatSessionId;
@@ -315,7 +328,11 @@ Follow-up text.`;
   );
 
   // Submit a turn request (which drains the scheduler and processes the events)
+  inventorySessions[0].outputTail = 'Ordinary terminal evidence';
   await centcom.submit('Perform checks now');
+  const normalSituation = JSON.parse(remoteCalls.at(-1).files['SITUATION.json']);
+  assert.equal(normalSituation.truncation, undefined, 'Snapshots within the limit must retain all context');
+  assert.equal(normalSituation.units[0].outputTail, 'Ordinary terminal evidence');
 
   state = centcom.state();
   assert.equal(state.status, 'awaiting_approval', 'Gated mode with pending directives enters awaiting_approval');
@@ -506,6 +523,60 @@ Follow-up text.`;
   assert.ok(autoDirective, 'Autonomous directive recorded');
   assert.equal(autoDirective.state, 'completed', 'Autonomous mode executes mutating directive without user prompt');
   assert.ok(autoState.auditLog.some((a) => a.id === autoDirective.id && a.outcome === 'completed'));
+
+  // Bound aggregate history even when every individual unit is small. Put the
+  // live unit last to verify that history cannot crowd it out of the snapshot.
+  const largeSessions = Array.from({ length: 6000 }, (_, index) => ({
+    key: `host-1/conversation:history-${index}`,
+    title: 'Historical unit 😀 '.repeat(20),
+    provider: 'codex',
+    state: 'exited',
+    kind: 'conversation',
+  }));
+  largeSessions.push(...inventorySessions);
+  const largeDirectory = path.join(tmpDir, 'large-fleet');
+  let rejectSync = false;
+  let largeMissions = specopsMissions;
+  const largeCentcom = createCentcom({
+    directory: largeDirectory,
+    service: {
+      ...mockService,
+      inventory: async () => ({ hosts: [], sessions: largeSessions }),
+      specops: { ...mockService.specops, list: () => largeMissions },
+      runRemote: async (payload) => {
+        if (rejectSync) throw new Error('Fixture workspace unavailable');
+        return mockService.runRemote(payload);
+      },
+    },
+    chats: mockChats,
+    emit: () => {},
+  });
+  const largeSyncStart = remoteCalls.length;
+  await largeCentcom.submit('Assess large fleet');
+  largeMissions = [{ id: 'oversized-mission', state: 'halted', error: '\u0000😀'.repeat(150000) }];
+  await largeCentcom.submit('Refresh large fleet');
+  const largeSyncs = remoteCalls.slice(largeSyncStart);
+  assert.equal(largeSyncs.length, 3, 'Initial session and every turn must sync a bounded snapshot');
+  for (const sync of largeSyncs) {
+    const content = sync.files['SITUATION.json'];
+    assert.ok(Buffer.byteLength(content, 'utf8') <= 1_000_000);
+    const snapshot = JSON.parse(content);
+    assert.equal(snapshot.truncation.totals.units, largeSessions.length);
+    assert.ok(snapshot.truncation.omitted.units > 0);
+    assert.equal(snapshot.units.length + snapshot.truncation.omitted.units, largeSessions.length);
+    assert.ok(snapshot.units.some((unit) => unit.key === inventorySessions[0].key), 'Live unit must survive history reduction');
+  }
+  const refreshedSituation = JSON.parse(largeSyncs.at(-1).files['SITUATION.json']);
+  assert.equal(refreshedSituation.truncation.totals.specops, 1);
+  assert.equal(refreshedSituation.truncation.omitted.specops, 1, 'Other oversized evidence must also fit the byte limit');
+  assert.match(lastSubmittedPayload.payload.text, /SITUATION.json is partial/);
+  const priorCommandId = lastSubmittedPayload.commandId;
+  rejectSync = true;
+  await assert.rejects(largeCentcom.submit('Do not use stale evidence'), /Fixture workspace unavailable/);
+  assert.equal(largeCentcom.state().status, 'halted');
+  assert.match(largeCentcom.state().error, /Fixture workspace unavailable/);
+  assert.equal(lastSubmittedPayload.commandId, priorCommandId, 'Failed refresh must not send a provider turn');
+  largeCentcom.dispose();
 
   // Clean up
   centcom.dispose();
