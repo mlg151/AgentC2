@@ -1,6 +1,11 @@
 {
   "suites": [
     {
+      "id": "auto-version",
+      "file": "tests/auto-version.cjs",
+      "group": "core"
+    },
+    {
       "id": "centcom",
       "file": "tests/centcom.cjs",
       "group": "core"

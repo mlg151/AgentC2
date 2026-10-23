@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
-const { createUpdates } = require('../electron/updates.cjs');
+const { createUpdates, createMainCheck } = require('../electron/updates.cjs');
 class FixtureUpdater extends EventEmitter {
   checks = 0; downloads = 0; installs = 0;
   async checkForUpdates() {
@@ -54,5 +54,26 @@ class FixtureUpdater extends EventEmitter {
   const current = new FixtureUpdater(); current.current = true;
   const noUpdate = createUpdates({ updater: current, version: '0.4.2' });
   assert.equal((await noUpdate.check()).status, 'current');
+  const pending = createUpdates({ updater: current, version: '0.4.2', checkMain: async () => true });
+  assert.equal((await pending.check()).status, 'pending', 'A newer main must not be reported as up to date while its release is building');
+  await assert.rejects(pending.download(), /Check for/);
+  const empty = new FixtureUpdater();
+  empty.checkForUpdates = async () => { throw Object.assign(new Error('No published versions'), { code: 'ERR_UPDATER_NO_PUBLISHED_VERSIONS' }); };
+  assert.equal((await createUpdates({ updater: empty, version: '0.4.1', checkMain: async () => true }).check()).status, 'pending', 'The first unpublished release still exposes newer main');
+  const offlineMain = createUpdates({ updater: current, version: '0.4.2', checkMain: async () => { throw Error('Offline'); } });
+  assert.match((await offlineMain.check()).error, /checking main failed/);
+  const sha = 'a'.repeat(40);
+  for (const [status, ahead_by, expected] of [['ahead', 2, true], ['diverged', 1, true], ['identical', 0, false], ['behind', 0, false]]) {
+    assert.equal(await createMainCheck(sha, async (url) => { assert.ok(url.endsWith(`/compare/${sha}...main`)); return { status, ahead_by }; })(), expected);
+  }
+  assert.equal(await createMainCheck(null, async () => { throw Error('Should not request unknown revision'); })(), null);
+  let resolveMain;
+  const slowMain = new Promise((resolve) => { resolveMain = resolve; });
+  const queuedNative = new FixtureUpdater();
+  const queued = createUpdates({ updater: queuedNative, version: '0.4.1', checkMain: () => slowMain });
+  const checking = queued.check(); await Promise.resolve();
+  const requested = queued.download(); resolveMain(true);
+  await Promise.all([checking, requested]);
+  assert.equal(queuedNative.downloads, 1, 'An update click during the parallel main check is not lost');
   console.log('PASS update lifecycle, explicit download/install, progress, duplicate actions, concurrent checks, failures, retries, and no-update state');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

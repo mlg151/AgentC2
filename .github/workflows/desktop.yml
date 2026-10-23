@@ -79,12 +79,12 @@ jobs:
       - name: Package native application
         shell: bash
         env:
-          # Secrets are never exposed to pull requests or ordinary branch builds.
-          CSC_LINK: ${{ startsWith(github.ref, 'refs/tags/v') && (matrix.platform == 'win' && secrets.WIN_CSC_LINK || matrix.platform == 'mac' && secrets.MAC_CSC_LINK) || '' }}
-          CSC_KEY_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/v') && (matrix.platform == 'win' && secrets.WIN_CSC_KEY_PASSWORD || matrix.platform == 'mac' && secrets.MAC_CSC_KEY_PASSWORD) || '' }}
-          APPLE_ID: ${{ startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'mac' && secrets.APPLE_ID || '' }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'mac' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
-          APPLE_TEAM_ID: ${{ startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'mac' && secrets.APPLE_TEAM_ID || '' }}
+          # Only protected main pushes and release tags receive signing credentials.
+          CSC_LINK: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && (matrix.platform == 'win' && secrets.WIN_CSC_LINK || matrix.platform == 'mac' && secrets.MAC_CSC_LINK) || '' }}
+          CSC_KEY_PASSWORD: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && (matrix.platform == 'win' && secrets.WIN_CSC_KEY_PASSWORD || matrix.platform == 'mac' && secrets.MAC_CSC_KEY_PASSWORD) || '' }}
+          APPLE_ID: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && matrix.platform == 'mac' && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && matrix.platform == 'mac' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && matrix.platform == 'mac' && secrets.APPLE_TEAM_ID || '' }}
           TARGET_PLATFORM: ${{ matrix.platform }}
           TARGET_ARCH: ${{ matrix.arch }}
         run: |
@@ -196,9 +196,12 @@ jobs:
           QUALITY_GATE_NEEDS: ${{ toJSON(needs) }}
 
   release:
-    name: Publish version-tag release
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    name: Publish verified release
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     needs: [quality-gate]
+    concurrency:
+      group: publish-release
+      cancel-in-progress: false
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -216,19 +219,7 @@ jobs:
       - name: Publish checked packages
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           npm ci --ignore-scripts
           node scripts/prepare-release.cjs release-assets
-          cat > "$RUNNER_TEMP/release-notes.md" <<'EOF'
-          Windows x64, Linux x64, and macOS Intel/Apple Silicon packages are attached.
-          See each *-signing.txt asset for the verified signing/notarization status.
-          Installation and unsigned-package limitations: docs/platforms.md in this tag.
-          SHA256SUMS.txt covers all attached package and signing files.
-          EOF
-          release_flags=()
-          if [[ "$RELEASE_TAG" == *-* ]]; then
-            release_flags+=(--prerelease)
-          fi
-          gh release create "$RELEASE_TAG" release-assets/* --verify-tag --draft --title "AgentC2 $RELEASE_TAG" --generate-notes --notes-file "$RUNNER_TEMP/release-notes.md" "${release_flags[@]}"
-          gh release edit "$RELEASE_TAG" --draft=false
+          node scripts/publish-release.cjs release-assets

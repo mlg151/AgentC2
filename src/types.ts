@@ -227,7 +227,7 @@ export interface CentcomState {
   auditLog: CentcomAuditEntry[];
 }
 
-export interface AppUpdate { status: 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'ready' | 'installing' | 'error'; version: string; target: string | null; percent: number | null; error: string; source: boolean }
+export interface AppUpdate { status: 'idle' | 'checking' | 'current' | 'pending' | 'available' | 'downloading' | 'ready' | 'installing' | 'error'; version: string; target: string | null; percent: number | null; error: string; source: boolean; mainAhead: boolean | null }
 export interface AgentHQApi {
   centcomState(): Promise<CentcomState>;
   configureCentcom(config: CentcomConfig): Promise<CentcomState>;

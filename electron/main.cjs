@@ -3,7 +3,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { tailscaleStatus, closeAction } = require('./platform.cjs');
 const { createService } = require('./service.cjs');
-const { createUpdates } = require('./updates.cjs');
+const { createUpdates, createMainCheck } = require('./updates.cjs');
 const { Gateway } = require('./gateway.cjs');
 const { readClipboardPng } = require('./clipboard-image.cjs');
 
@@ -168,7 +168,7 @@ app.whenReady().then(async () => {
   const updater = !app.isPackaged
     ? new (require('./source-updater.cjs').SourceUpdater)({ revision: buildInfo.revision, directory: path.join(directory, 'source-updates'), app })
     : process.platform === 'darwin' ? require('./mac-update.cjs').createMacUpdater(app) : require('electron-updater').autoUpdater;
-  const updates = createUpdates({ updater, version: app.getVersion(), source: !app.isPackaged, notify: (state) => send('updates:state', state) });
+  const updates = createUpdates({ updater, version: app.getVersion(), source: !app.isPackaged, checkMain: app.isPackaged ? createMainCheck(buildInfo.revision) : undefined, notify: (state) => send('updates:state', state) });
   handle('updates:state', () => updates.state());
   handle('updates:check', () => updates.check());
   handle('updates:download', () => updates.download());
