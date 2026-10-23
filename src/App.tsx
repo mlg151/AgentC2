@@ -71,6 +71,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [createError, setCreateError] = useState('');
   const [pinning, setPinning] = useState<Set<string>>(() => new Set());
   const initialized = useRef(false);
   const choseInitial = useRef(false);
@@ -200,6 +201,7 @@ export default function App() {
   async function create(input: CreateInput) {
     if (!window.agentHQ) return;
     setBusy(true);
+    setCreateError('');
     let started = false;
     try {
       const result = await window.agentHQ.create(input);
@@ -215,7 +217,7 @@ export default function App() {
       }
       if (session) openSession(session);
       else setError('The session started but has not appeared in inventory. Refresh to find it.');
-    } catch (cause) { setError(String(cause)); }
+    } catch (cause) { if (started) setError(String(cause)); else setCreateError(String(cause)); }
     finally { if (started) setDialog(undefined); setBusy(false); }
   }
   async function saveSettings(next: Settings) {
@@ -228,7 +230,7 @@ export default function App() {
     try { const next = await window.agentHQ?.acknowledge(id); if (next) setAttention(next); }
     catch (cause) { setError(String(cause)); }
   }
-  const closeCreate = useCallback(() => { if (!busy) setDialog(undefined); }, [busy]);
+  const closeCreate = useCallback(() => { if (!busy) { setDialog(undefined); setCreateError(''); } }, [busy]);
   const closeSettings = useCallback(() => setShowSettings(false), []);
   const closeCleanup = useCallback(() => setCleanupTarget(undefined), []);
   const closeDelete = useCallback(() => setDeleteTarget(null), []);
@@ -324,7 +326,7 @@ export default function App() {
     {settings ? <HostMonitor hosts={settings.hosts} /> : null}
     <footer className="statusbar"><span><span className={`connection-dot${inventory?.hosts.some((h) => !h.connected) || error ? ' offline' : ''}`} />{inventory ? `${inventory.hosts.filter((h) => h.connected).length}/${inventory.hosts.length} hosts connected` : 'Connecting…'}</span><span>{managedSessions.length.toLocaleString()} managed · {managedSessions.filter((s) => s.state === 'live' && !s.stale).length} live</span><span className="command-feedback" role="status" aria-live="polite">{commandKeys.prefix !== null ? `COMMAND: ${commandKeys.prefix || "_"} · Esc cancels` : commandKeys.status}</span><span className="status-fill" /><button className="text-button" onClick={() => setShowFlash((value) => !value)}>FLASH TRAFFIC {flashPending.filter((item) => item.state === 'pending').length}</button><button className="text-button" onClick={() => setShowKeyboardHelp(true)}><kbd>{commandBinding('commandMode', situation.shortcuts) || 'F1'}</kbd> COMMANDS</button><button className="text-button" onClick={() => cycleTarget(1)}><kbd>{commandBinding('cycleNext', situation.shortcuts)}</kbd> CYCLE B</button><button className="text-button" onClick={() => setShowOverwatch(true)}><kbd>{commandBinding('overwatch', situation.shortcuts)}</kbd> OVERWATCH</button></footer>
     {error ? <div className="error-banner" role="alert"><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError('')}><X size={15} /></button></div> : null}
-    {settings && dialog !== undefined ? <CreateDialog resume={dialog} settings={settings} hostId={hostFilter === 'all' ? settings.hosts.find((h) => h.enabled)?.id || '' : hostFilter} onClose={closeCreate} onSubmit={(input) => void create(input)} busy={busy} error={error} /> : null}
+    {settings && dialog !== undefined ? <CreateDialog resume={dialog} settings={settings} hostId={hostFilter === 'all' ? settings.hosts.find((h) => h.enabled)?.id || '' : hostFilter} onClose={closeCreate} onSubmit={(input) => void create(input)} busy={busy} error={createError} /> : null}
     {settings && showSettings ? <SettingsDialog onSpecops={() => { setShowSettings(false); setShowSpecops(true); }} settings={settings} onSave={saveSettings} onExternalSettings={(updated) => { setSettings(updated); void refresh(); }} onClose={closeSettings} /> : null}
     {settings && sitrepSource ? <SitRepDialog source={sitrepSource} settings={settings} initialSummary={workspace.metadata[sitrepSource.key]?.notes || ''} onLaunched={async (name, hostId) => { if (!window.agentHQ) throw new Error('Desktop bridge unavailable'); for (let attempt = 0; attempt < 6; attempt++) { const next = await window.agentHQ.inventory(); acceptInventory(next); const unit = next.sessions.find((item) => item.id === name && item.hostId === hostId); if (unit) { openSession(unit); return; } await new Promise((resolve) => setTimeout(resolve, 350)); } throw new Error('Recipient launched but has not appeared in inventory; refresh to find it.'); }} onClose={() => setSitrepSource(null)} /> : null}
     {settings && showSpecops ? <SpecopsDialog settings={settings} onClose={() => setShowSpecops(false)} /> : null}

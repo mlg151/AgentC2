@@ -25,11 +25,12 @@ const path = require('node:path');
       const inventory = () => ({ hosts: [{ id: 'default', name: 'This computer', connected: true }], sessions: [session], attention: [], faults: [] });
       const off = () => () => {};
       window.qa = { failRename: false, downloads: 0, installs: 0, updateAvailable: localStorage.getItem('no-update') !== 'true' };
-      let update = { status: 'idle', version: '0.4.1', target: null, percent: null, error: '', source: false };
+      let update = { status: 'idle', version: '0.4.1', target: null, percent: null, error: '', source: false, mainAhead: false };
       let listener = () => {};
       window.qa.emitUpdate = (patch) => { update = { ...update, ...patch }; listener(update); };
       window.agentHQ = {
-        getState: async () => ({ settings, workspace, attention: [] }), inventory: async () => inventory(),
+        getState: async () => ({ settings, workspace, attention: [] }), inventory: async () => { if (window.qa.holdInventory) await new Promise((resolve) => { window.qa.finishInventory = resolve; }); return inventory(); },
+        create: async () => { throw new Error('The working directory does not exist'); },
         saveWorkspace: async (value) => { workspace = value; return value; },
         onInventory: off, onSessionPinned: off, onSessionsDeleted: off, onAttentionOpen: off, onHealth: off,
         onDevUrls: off, onTerminalExit: off, onTerminalData: off, onTerminalState: off,
@@ -86,12 +87,25 @@ const path = require('node:path');
     await input.press('Escape'); assert.equal(await input.count(), 0);
     await page.reload();
     await pane.getByText('Reviewed OpenCode task', { exact: true }).waitFor();
+    await page.evaluate(() => { window.qa.holdInventory = true; });
+    await page.getByRole('button', { name: 'Refresh sessions', exact: true }).click();
+    await page.waitForFunction(() => Boolean(window.qa.finishInventory));
     await page.getByRole('button', { name: 'New unit', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'New session', exact: true });
     await dialog.getByRole('combobox', { name: 'Launch preset', exact: true }).selectOption('opencode');
     assert.equal(await dialog.getByRole('combobox', { name: 'Provider', exact: true }).inputValue(), 'opencode');
     assert.equal(await dialog.getByRole('combobox', { name: 'Interaction mode', exact: true }).inputValue(), 'chat');
     await page.screenshot({ path: path.join(screenshots, 'opencode-launch.png') });
+    await dialog.getByRole('button', { name: 'Start session', exact: true }).click();
+    const launchError = dialog.getByRole('alert').filter({ hasText: 'working directory does not exist' });
+    await launchError.waitFor();
+    await page.evaluate(() => { window.qa.holdInventory = false; window.qa.finishInventory(); });
+    await page.waitForFunction(() => !document.querySelector('.lucide-refresh-cw.spin'));
+    assert.equal(await launchError.isVisible(), true, 'An inventory refresh must not clear a failed launch');
+    await page.screenshot({ path: path.join(screenshots, 'launch-error-after-refresh.png') });
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+    await page.getByRole('button', { name: 'New unit', exact: true }).click();
+    assert.equal(await dialog.getByRole('alert').count(), 0, 'Closing the launch dialog clears its error');
     await dialog.getByRole('button', { name: 'Close', exact: true }).click();
     await page.setViewportSize({ width: 940, height: 650 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'Update button overflowed the minimum desktop viewport');
@@ -104,6 +118,10 @@ const path = require('node:path');
     await updates.getByRole('status').filter({ hasText: 'up to date' }).waitFor();
     await updates.getByRole('button', { name: 'Check for updates', exact: true }).click();
     await page.screenshot({ path: path.join(screenshots, 'updates-current-narrow.png') });
+    await page.evaluate(() => window.qa.emitUpdate({ status: 'pending', mainAhead: true }));
+    await updates.getByRole('status').filter({ hasText: 'Newer main detected' }).waitFor();
+    assert.equal(await updates.getByRole('button', { name: 'Download update', exact: true }).count(), 0);
+    await page.screenshot({ path: path.join(screenshots, 'updates-main-pending.png') });
     await page.evaluate(() => window.qa.emitUpdate({ status: 'available', source: true, target: 'main abc1234' }));
     await updates.getByRole('button', { name: 'Build update' }).click();
     await updates.getByRole('status').filter({ hasText: 'Preparing and building' }).waitFor();

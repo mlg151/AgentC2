@@ -14,7 +14,7 @@ export function UpdateButton() {
     const fail = (cause: unknown) => { if (active) setError(String(cause)); };
     const off = window.agentHQ?.onUpdateState?.(apply);
     const check = () => { void window.agentHQ?.checkForUpdates?.().then(apply).catch(fail); };
-    void window.agentHQ?.updateState?.().then((value) => { apply(value); if (['idle', 'current'].includes(value.status)) check(); }).catch(fail);
+    void window.agentHQ?.updateState?.().then((value) => { apply(value); if (['idle', 'current', 'pending'].includes(value.status)) check(); }).catch(fail);
     const timer = window.setInterval(check, 60 * 60000);
     return () => { active = false; off?.(); window.clearInterval(timer); };
   }, []);
@@ -27,13 +27,13 @@ export function UpdateButton() {
   }
   const status = update?.status || 'idle';
   const busy = ['checking', 'downloading', 'installing'].includes(status);
-  const label = status === 'available' ? 'Update available' : status === 'ready' ? 'Restart to update' : status === 'downloading' ? 'Updating…' : 'Updates';
+  const label = status === 'pending' ? 'New main detected' : status === 'available' ? 'Update available' : status === 'ready' ? 'Restart to update' : status === 'downloading' ? 'Updating…' : 'Updates';
   return <>
     <button className="toolbar-button update-button" title="Check, download, and install application updates" onClick={() => setOpen(true)}><Download size={14} />{label}</button>
     {open ? <Modal title="Application updates" onClose={close}>
       <h2>Application updates</h2>
       <p>Installed version: {update?.version || 'Checking…'}</p>
-      <p role="status" aria-live="polite">{status === 'checking' ? 'Checking for updates…' : status === 'current' ? 'You’re up to date.' : status === 'available' ? `Available: ${update?.target}` : status === 'downloading' ? update?.source ? 'Preparing and building the update…' : 'Downloading and verifying the update…' : status === 'ready' ? 'Your update is ready. Restart to install it.' : status === 'installing' ? 'Installing and restarting…' : 'Check for a newer version of AgentC2.'}</p>
+      <p role="status" aria-live="polite">{status === 'checking' ? 'Checking for updates…' : status === 'pending' ? 'Newer main detected. Its installable update has not finished publishing yet. Check again after the release build completes.' : status === 'current' ? update?.source || update?.mainAhead === false ? 'You’re up to date.' : 'No newer published release was found.' : status === 'available' ? `Available: ${update?.target}` : status === 'downloading' ? update?.source ? 'Preparing and building the update…' : 'Downloading and verifying the update…' : status === 'ready' ? 'Your update is ready. Restart to install it.' : status === 'installing' ? 'Installing and restarting…' : 'Check for a newer version of AgentC2.'}</p>
       {status === 'downloading' ? <progress aria-label="Update progress" max={100} value={update?.percent ?? undefined} /> : null}
       {update?.source ? <p className="field-note">Updates build the latest main in a separate checkout. Restart opens that build; your original checkout and working files are kept. Git, Node.js 22, and npm must be installed.</p> : null}
       {status === 'ready' ? <p className="field-note">Restart disconnects desktop terminals and phone access briefly. Managed agents remain on their execution hosts.</p> : null}
