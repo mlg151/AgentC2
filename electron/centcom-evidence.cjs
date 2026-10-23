@@ -112,7 +112,7 @@ function createEvidence({ service: s, isCommander, activeKeys }) {
     const entries = await sections[input.section]();
     return { ...page(entries, input), section: input.section, status: input.section === 'handoffs' && !s.commanderHandoffs ? 'unsupported' : 'reported' };
   }
-  async function admission(input, { reuse } = {}) {
+  async function admission(input, { reuse, recovery } = {}) {
     const inv = await inventory();
     const hostId = input.hostId || s.store.data.settings.hosts.find((h) => h.enabled)?.id;
     const host = inv.hosts?.find((h) => h.id === hostId);
@@ -122,11 +122,22 @@ function createEvidence({ service: s, isCommander, activeKeys }) {
     const observed = s.worktrees ? await Promise.resolve(s.worktrees(hostId)).catch(() => null) : null;
     const records = Array.isArray(observed) ? observed : null;
     const requested = input.worktree?.operationId;
-    if (requested && records?.some((w) => w.operationId === requested && w.state !== 'archived')) blockers.push('Worktree operation ID is already assigned');
+    const existing = requested && records?.find((worktree) => worktree.operationId === requested);
+    let recoveryEvidence = null;
+    if (existing) {
+      const recoverable = recovery?.operationId === requested && ['ready', 'provisioning'].includes(existing.state) && existing.status?.owned === true && existing.status.active === false && existing.status.dirty === false &&
+        existing.repository === recovery.repository && existing.baseCommit === recovery.baseCommit && existing.provider === recovery.provider && existing.slug === recovery.slug &&
+        !existing.sitrepSource && typeof existing.path === 'string' && existing.path.startsWith('/') && /^[a-f0-9]{40,64}$/.test(existing.status.headCommit || '');
+      if (recoverable) {
+        recoveryEvidence = { operationId: requested, revision: fingerprint(existing), path: existing.path, repository: existing.repository, baseCommit: existing.baseCommit, headCommit: existing.status.headCommit, state: existing.state };
+        unknowns.push('Existing owned workflow worktree requires fresh reviewed recovery');
+      } else blockers.push('Worktree operation ID is already assigned or its recovery ownership cannot be verified');
+    }
     const candidates = inv.sessions.filter((u) => u.hostId === hostId && !['saved', 'exited', 'stopped'].includes(u.state));
     const withPaths = candidates.filter((u) => u.cwd);
     let paths;
-    if (!input.worktree && host?.connected && s.commanderLaunchPaths && withPaths.length <= 200) paths = await s.commanderLaunchPaths(hostId, input.cwd, withPaths.map((u) => u.cwd)).catch(() => null);
+    if ((!input.worktree || recoveryEvidence) && host?.connected && s.commanderLaunchPaths && withPaths.length <= 200) paths = await s.commanderLaunchPaths(hostId, recoveryEvidence?.path || input.cwd, withPaths.map((u) => u.cwd)).catch(() => null);
+    if (recoveryEvidence && paths?.cwd !== recoveryEvidence.path) blockers.push('Recovery worktree path changed or could not be verified');
     const owners = candidates.filter((u) => (requested && u.worktreeOperation === requested) || (paths && u.cwd && paths.paths[withPaths.indexOf(u)] === paths.cwd));
     const sharedOwners = [];
     if (reuse) {
@@ -143,8 +154,8 @@ function createEvidence({ service: s, isCommander, activeKeys }) {
       }
     }
     if (owners.some((owner) => !sharedOwners.includes(owner.key))) blockers.push('The exact working directory or worktree is already assigned to a live unit');
-    if (!paths && !input.worktree) unknowns.push('Canonical working directory identity could not be inspected');
-    if (!input.worktree && candidates.some((u) => !u.cwd)) unknowns.push('Some live unit working directories are unknown');
+    if (!paths && (!input.worktree || recoveryEvidence)) unknowns.push('Canonical working directory identity could not be inspected');
+    if ((!input.worktree || recoveryEvidence) && candidates.some((u) => !u.cwd)) unknowns.push('Some live unit working directories are unknown');
     if (!records) unknowns.push('Managed worktree ownership could not be inspected');
     const memory = report?.headroom?.memoryBytes;
     if (Number.isFinite(memory) && memory < 256 * 1024 * 1024) blockers.push('Available memory is below the 256 MiB launch reserve');
@@ -153,6 +164,7 @@ function createEvidence({ service: s, isCommander, activeKeys }) {
     return { status: blockers.length ? 'blocked' : unknowns.length ? 'unknown' : 'admitted', hostId, blockers, unknowns,
       owners: owners.map((u) => ({ key: u.key, cwd: u.cwd || null, worktreeOperation: u.worktreeOperation || null, roeProfile: u.roeProfile || 'unknown' })),
       sharedOwners,
+      recovery: recoveryEvidence,
       resources: report?.headroom || unknown('Health unavailable'), policy: 'Block known assignment conflicts and memory exhaustion; unknowns require Watch Officer review. Repository names alone never establish conflicts.', capturedAt: new Date().toISOString() };
   }
   return { units, inspect, hosts, context, admission };

@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import fcntl
 
 WORKTREE_ROOT = (Path.home() / ".cache" / "agent-hq" / "worktrees").resolve()
 WORKTREE_ID = re.compile(r"^[a-f0-9]{32}$")
@@ -95,6 +96,21 @@ def worktree_list(_payload=None):
 
 def worktree_launch(payload):
     operation_id = payload.get("operationId")
+    worktree_file(operation_id)  # Validate before deriving the lock pathname.
+    locks = WORKTREE_ROOT / "locks"
+    locks.mkdir(parents=True, mode=0o700, exist_ok=True)
+    if locks.is_symlink():
+        raise ValueError("Worktree lock directory is unsafe")
+    descriptor = os.open(locks / (operation_id + ".lock"), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        return worktree_launch_locked(payload)
+    finally:
+        os.close(descriptor)
+
+
+def worktree_launch_locked(payload):
+    operation_id = payload.get("operationId")
     worktree_file(operation_id)
     slug = payload.get("slug")
     if not isinstance(slug, str) or not WORKTREE_SLUG.fullmatch(slug):
@@ -139,6 +155,18 @@ def worktree_launch(payload):
     request.update({"repository": str(root), "baseRef": base_ref, "branch": branch, "path": str(path), "name": name})
     digest = hashlib.sha256(json.dumps(request, sort_keys=True).encode()).hexdigest()
     record = worktree_load(operation_id)
+    expected_revision = payload.get("expectedWorktreeRevision")
+    if expected_revision == "absent":
+        if record:
+            raise ValueError("Worktree appeared after admission; inspect and review again")
+    elif expected_revision is not None:
+        if not isinstance(expected_revision, str) or not re.fullmatch(r"[a-f0-9]{64}", expected_revision) or not record:
+            raise ValueError("Invalid worktree recovery revision")
+        status = worktree_state(record)
+        snapshot = {**record, "status": status}
+        revision = hashlib.sha256(json.dumps(snapshot, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+        if record.get("state") not in ("ready", "provisioning") or not status["owned"] or status["active"] or status["dirty"] is not False or revision != expected_revision:
+            raise ValueError("Worktree recovery revision changed; review again")
     recovery = payload.get("recoverSitrep") is True and record and record.get("sitrepSource") and record.get("state") == "ready" and not sitrep
     if record:
         if (record.get("requestDigest") != digest and not recovery) or record.get("path") != str(path) or record.get("branch") != branch or record.get("name") != name or record["state"] == "archived":

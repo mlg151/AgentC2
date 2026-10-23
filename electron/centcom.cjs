@@ -15,7 +15,7 @@ const { automationExamples } = require('./centcom-examples.cjs');
 const { renderDoctrine } = require('./centcom-doctrine.cjs');
 const { summarizeAction, readHistory } = require('./centcom-history.cjs');
 const { createMissions } = require('./centcom-missions.cjs');
-const { createLaunchGuard, workflowReuse, withoutLaunchContext } = require('./centcom-launch.cjs');
+const { createLaunchGuard, workflowReuse, exerciseRecovery, withoutLaunchContext } = require('./centcom-launch.cjs');
 const { ENVELOPE_VERSION, LIMITS, AUTOMATION_KINDS, fingerprint, redact, bounded, parseCentcomEnvelope } = require('./centcom-contract.cjs');
 const CONTEXT_REVISION = 2;
 
@@ -741,7 +741,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
       const mission = entry.target === 'mission';
       const record = (mission ? service.specops.list() : service.exercises.list()).find((r) => r.id === p.id);
       if (!record) throw new Error('Operation is unavailable');
-      const blockedLaunch = mission ? record.visits?.at(-1)?.launchBlocked : record.contestants?.some((item) => item.launchBlocked);
+      const blockedLaunch = mission ? record.visits?.at(-1)?.launchBlocked : record.contestants?.some((item) => item.launchBlocked || ['failed', 'launching'].includes(item.state));
       if (entry.classification === 'action' && p.action === 'retry' && record.launchPolicy && blockedLaunch) {
         const targets = (mission ? record.visits : record.contestants).map((item) => f.find(item.name || item.sessionId, record.hostId)).filter(Boolean);
         if (pre.sessionKey && !targets.some((unit) => unit.key === pre.sessionKey)) throw new Error('Conflicting operation precondition');
@@ -834,6 +834,16 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
       const mission = request.operation === 'specops.control';
       const record = (mission ? service.specops.list() : service.exercises.list()).find((item) => item.id === p.id);
       if (!record) throw new Error('Workflow is unavailable');
+      if (!mission) {
+        const pending = record.contestants.filter((item) => ['queued', 'failed', 'launching'].includes(item.state));
+        const reports = [];
+        for (const item of pending) reports.push({ operationId: item.id, ...await evidence.admission({ hostId: record.hostId, worktree: { operationId: item.id, repository: record.repository } }, { recovery: exerciseRecovery(record, item) }) });
+        if (reports.length) {
+          const blockers = [...new Set(reports.flatMap((report) => report.blockers))], unknowns = [...new Set(reports.flatMap((report) => report.unknowns))];
+          return { ...reports[0], status: blockers.length ? 'blocked' : unknowns.length ? 'unknown' : 'admitted', blockers, unknowns,
+            owners: [...new Map(reports.flatMap((report) => report.owners).map((owner) => [owner.key, owner])).values()], recoveries: reports.flatMap((report) => report.recovery ? [report.recovery] : []), contestants: reports };
+        }
+      }
       return mission && record.worktree?.path ? evidence.admission({ hostId: record.hostId, cwd: record.worktree.path }, { reuse: workflowReuse(record) })
         : evidence.admission({ hostId: record.hostId, worktree: { repository: record.repository } });
     }
@@ -864,6 +874,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
     if (directive.validationError) throw new Error(directive.validationError);
     const r = operationRequest(directive, 'action');
     const admission = await launchAdmission(r);
+    if (fingerprint(admission?.recoveries || []) !== fingerprint(directive.binding?.evidence.worktreeRecoveries || [])) throw new Error('Worktree recovery revision changed; inspect and review again');
     if (admission?.status === 'blocked' || (admission?.status === 'unknown' && (!directive.approvedAt || admission.unknowns.some((reason) => !directive.binding?.evidence.admissionUnknowns?.includes(reason))))) throw new Error('Launch admission requires review: ' + [...admission.blockers, ...admission.unknowns].join('; '));
     if (admission) directive.admission = admission;
     return mutationContext.run({ directive, authority: () => ({ mode: state.config.authority, commander: state.session?.chatSessionId || null }) }, () => operations.execute(r.operation, r.input, 'action', directive.preconditions, check));

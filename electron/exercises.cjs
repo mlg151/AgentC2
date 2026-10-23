@@ -1,5 +1,5 @@
 const crypto = require('node:crypto');
-const { launchPolicy, withLaunchPolicy } = require('./centcom-launch.cjs');
+const { launchPolicy, withLaunchPolicy, exerciseRecovery } = require('./centcom-launch.cjs');
 
 const ID = /^[a-f0-9]{32}$/;
 const COMMIT = /^[a-f0-9]{40,64}$/;
@@ -53,10 +53,11 @@ function createExercises({ store, getHost, runRemote, createSession, beginLaunch
     for (let index = 0; index < pending.length; index++) {
       if (record.state === 'cancelled') break;
       const item = pending[index];
+        const recovery = exerciseRecovery(record, item);
         item.state = 'launching'; item.error = ''; item.launchBlocked = false; item.admission = null; save(record);
         const release = beginLaunch(record.hostId);
         try {
-          const result = await withLaunchPolicy(record.launchPolicy, { kind: 'exercise', id: record.id }, () => createSession({ provider: item.provider, presetId: item.presetId || undefined, roeProfile: item.roeProfile || undefined, hostId: record.hostId, title: `${record.title} · ${item.provider}`, instructions: record.prompt, worktree: { operationId: item.id, repository: record.repository, baseRef: record.baseCommit, slug: item.slug } }));
+          const result = await withLaunchPolicy(record.launchPolicy, { kind: 'exercise', id: record.id, recovery }, () => createSession({ provider: item.provider, presetId: item.presetId || undefined, roeProfile: item.roeProfile || undefined, hostId: record.hostId, title: `${record.title} · ${item.provider}`, instructions: record.prompt, worktree: { operationId: item.id, repository: record.repository, baseRef: record.baseCommit, slug: item.slug } }));
           item.name = result.name; item.state = 'launched';
         } catch (error) { item.state = 'failed'; item.error = String(error.message || error).slice(0, 500); if (error.beforeMutation) { item.launchBlocked = true; record.launchPolicy ||= error.launchPolicy; item.admission = error.admission || { status: 'blocked', blockers: [error.message], unknowns: [] }; } }
         finally { release(); save(record); }

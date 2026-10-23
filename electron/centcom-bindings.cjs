@@ -15,7 +15,7 @@ function identity(unit) {
 }
 
 function createBindings({ service: s, state, resolve, request }) {
-  async function capture(entry, input, pre, controlling, admissionUnknowns = []) {
+  async function capture(entry, input, pre, controlling, admissionUnknowns = [], worktreeRecoveries = []) {
     const startScope = fingerprint({ hosts: s.store.data.settings.hosts, roe: s.store.data.settings.roe, authority: state.config.authority, commander: state.session?.chatSessionId });
     const target = await resolve(entry, input, pre);
     const units = target ? (Array.isArray(target) ? target : [target]) : [];
@@ -112,18 +112,18 @@ function createBindings({ service: s, state, resolve, request }) {
       preset: input.presetId ? settings.presets.find((p) => p.id === input.presetId) || null : null,
       presets: [...new Set((input.contestants || (entry.operation === 'exercise.control' ? operationEvidence?.contestants : []) || []).map((item) => item.presetId).filter(Boolean))].sort().map((id) => ({ id, value: settings.presets.find((preset) => preset.id === id) || null })) };
     if (startScope !== fingerprint({ hosts: s.store.data.settings.hosts, roe: s.store.data.settings.roe, authority: state.config.authority, commander: state.session?.chatSessionId })) throw new Error('Authorization changed while inspecting approval evidence');
-    return { targets, authority, requestEvidence, operationEvidence, admissionUnknowns: [...admissionUnknowns].sort() };
+    return { targets, authority, requestEvidence, operationEvidence, admissionUnknowns: [...admissionUnknowns].sort(), worktreeRecoveries: structuredClone(worktreeRecoveries) };
   }
   async function bind(directive, entry, input) {
     validatePreconditions(directive.preconditions);
-    const evidence = structuredClone(await capture(entry, input, directive.preconditions, null, directive.admission?.unknowns || []));
+    const evidence = structuredClone(await capture(entry, input, directive.preconditions, null, directive.admission?.unknowns || [], directive.admission?.recoveries || []));
     return { version: 1, requestHash: fingerprint({ operation: entry.operation, input, preconditions: directive.preconditions }), evidence, evidenceHash: fingerprint(evidence) };
   }
   async function assert(directive, entry, input, controlling) {
     const binding = directive.binding;
     if (!binding || binding.version !== 1) throw new Error('Approval has no reviewed identity binding; propose the action again');
     if (binding.requestHash !== fingerprint({ operation: entry.operation, input, preconditions: directive.preconditions }) || binding.evidenceHash !== fingerprint(binding.evidence)) throw new Error('Reviewed action parameters or binding changed');
-    const current = await capture(entry, input, directive.preconditions, controlling, binding.evidence.admissionUnknowns || []);
+    const current = await capture(entry, input, directive.preconditions, controlling, binding.evidence.admissionUnknowns || [], binding.evidence.worktreeRecoveries || []);
     if (fingerprint(current) !== binding.evidenceHash) throw new Error('Approval evidence changed: target incarnation, control, revision, stage, or authorization scope requires fresh review');
   }
   return { bind, assert: (directive, controlling) => { const r = request(directive, 'action'); return assert(directive, r.entry, r.input, controlling); } };
@@ -134,6 +134,7 @@ function reviewSummary(binding) {
   const evidence = binding.evidence;
   return { version: binding.version, requestHash: binding.requestHash, evidenceHash: binding.evidenceHash,
     admissionUnknowns: evidence.admissionUnknowns || [],
+    worktreeRecoveries: evidence.worktreeRecoveries || [],
     targets: evidence.targets.map(({ identity, controller, revision }) => ({ identity, controller, ...(revision ? { revision } : {}) })),
     authority: bounded(evidence.authority, 8000), request: bounded(evidence.requestEvidence, 8000), operation: bounded(evidence.operationEvidence, 8000) };
 }

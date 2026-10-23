@@ -21,6 +21,10 @@ function assertDispatchScope(host, payload, settings) {
   const current = context.authority();
   if (current.mode !== scope.mode || current.commander !== scope.commander) reject('CENTCOM authorization changed before dispatch');
   if (payload.action === 'worktree_archive') return { ...payload, expectedHeadCommit: context.directive.binding.evidence.operationEvidence.status.headCommit };
+  if (payload.action === 'worktree_launch' && context.worktreeRecovery) {
+    if (payload.operationId !== context.worktreeRecovery.operationId) reject('Worktree recovery target changed before dispatch');
+    return { ...payload, expectedWorktreeRevision: context.worktreeRecovery.revision };
+  }
   return payload;
 }
 module.exports = { mutationContext, assertDispatchScope };

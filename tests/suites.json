@@ -71,6 +71,11 @@
       "group": "linux-python"
     },
     {
+      "id": "centcom-recovery",
+      "file": "tests/centcom-recovery.cjs",
+      "group": "linux-python"
+    },
+    {
       "id": "specops",
       "file": "tests/specops.cjs",
       "group": "core"

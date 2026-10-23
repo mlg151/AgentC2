@@ -281,12 +281,17 @@ admission query cannot supply this private workflow exception.
 
 Pre-dispatch admission/scope failures persist a blocked visit or contestant with
 its report. A C2-owned blocked launch can be retried after fresh review even when
-it has no active participant yet; uncertain post-dispatch attempts are not
-converted into safe retries. The current reserve is 256 MiB. A reported cgroup
+it has no active participant yet. Exercise recovery of a partially provisioned
+worktree requires fresh Watch Officer review in both authority modes. Its exact
+ownership record and Git revision must match the failed contestant, with a clean
+worktree, no active provider session, and no live writer at its canonical path.
+The review binds every pending recovery revision. The native helper checks it
+again under a per-operation launch lock, so changed or concurrently completed
+attempts cannot reuse approval. A new launch also requires the ownership record
+to remain absent at remote dispatch. Uncertain launched sessions cannot use this
+path to resume or replay work. The current reserve is 256 MiB. A reported cgroup
 limit without measured headroom remains unknown. Matching repository basenames
-alone do not establish a conflict. Recovery of partially provisioned exercise
-worktrees remains in the completion audit; existing operation IDs stay blocked
-pending an ownership-aware recovery path.
+alone do not establish a conflict.
 
 ## Scheduling and spend
 
@@ -332,7 +337,6 @@ work or remaining budget.
 
 ## Remaining implementation and completion gates
 
-The issue checklist is authoritative. Work still includes ownership-aware recovery of partially provisioned exercise
-worktrees, actual-adapter verification for every advertised operation,
+The issue checklist is authoritative. Work still includes actual-adapter verification for every advertised operation,
 and an isolated production-bridge round trip with artifact verification. Current
 fixture coverage must not be presented as native-provider or live-host proof.

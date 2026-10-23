@@ -3,6 +3,8 @@
 from pathlib import Path
 import base64
 import hashlib
+import json
+from concurrent.futures import ThreadPoolExecutor
 import subprocess
 import tempfile
 import unittest
@@ -65,6 +67,49 @@ class Worktrees(unittest.TestCase):
         self.assertEqual(self.scope["worktree_list"]()[0]["state"], "launched")
         with self.assertRaisesRegex(ValueError, "belongs"):
             self.scope["worktree_launch"](self.payload(3, slug="other"))
+
+    def test_reviewed_recovery_is_revision_bound_and_serialized(self):
+        payload = self.payload(15)
+        self.created.side_effect = RuntimeError("provider launch failed")
+        with self.assertRaises(RuntimeError):
+            self.scope["worktree_launch"](payload)
+        record = self.scope["worktree_list"]()[0]
+        revision = lambda item: hashlib.sha256(json.dumps(item, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+        reviewed = {**payload, "expectedWorktreeRevision": revision(record)}
+        self.created.side_effect = lambda item: {"name": item["managedName"]}
+        with self.assertRaisesRegex(ValueError, "appeared after admission"):
+            self.scope["worktree_launch"]({**payload, "expectedWorktreeRevision": "absent"})
+        dirty = Path(record["path"]) / "changed.txt"
+        dirty.write_text("Unreviewed\n")
+        with self.assertRaisesRegex(ValueError, "revision changed"):
+            self.scope["worktree_launch"](reviewed)
+        # Even a digest of a dirty snapshot cannot authorize this recovery path.
+        with self.assertRaisesRegex(ValueError, "revision changed"):
+            self.scope["worktree_launch"]({**payload, "expectedWorktreeRevision": revision(self.scope["worktree_list"]()[0])})
+        dirty.unlink()
+        original_state = self.scope["worktree_state"]
+        self.scope["worktree_state"] = lambda item: {**original_state(item), "active": True}
+        active = self.scope["worktree_list"]()[0]
+        with self.assertRaisesRegex(ValueError, "revision changed"):
+            self.scope["worktree_launch"]({**payload, "expectedWorktreeRevision": revision(active)})
+        self.scope["worktree_state"] = original_state
+        changed = {key: value for key, value in record.items() if key != "status"}
+        changed["title"] = "Changed ownership record"
+        self.scope["worktree_save"](changed)
+        with self.assertRaisesRegex(ValueError, "revision changed"):
+            self.scope["worktree_launch"](reviewed)
+        self.scope["worktree_save"]({key: value for key, value in record.items() if key != "status"})
+        def attempt(_index):
+            try:
+                self.scope["worktree_launch"](reviewed)
+                return "launched"
+            except ValueError as error:
+                return str(error)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(attempt, range(2)))
+        self.assertEqual(results.count("launched"), 1)
+        self.assertTrue(any("revision changed" in result for result in results))
+        self.assertEqual(self.created.call_count, 2, "Only the failed initial attempt and one recovery may dispatch")
 
     def test_sitrep_patch_is_applied_once_before_retryable_launch(self):
         (self.repo / "README.md").write_text("fixture\nhandoff\n")
