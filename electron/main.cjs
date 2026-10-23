@@ -94,6 +94,9 @@ app.whenReady().then(async () => {
   const legacyDirectories = ['agent-hq', 'Agent HQ'].map((name) => path.join(app.getPath('appData'), name));
   const legacyDirectory = legacyDirectories.find((candidate) => fs.existsSync(path.join(candidate, 'workspace.json')));
   const directory = process.env.AGENTC2_DATA_DIR || process.env.AGENT_HQ_DATA_DIR || (fs.existsSync(path.join(app.getPath('userData'), 'workspace.json')) ? app.getPath('userData') : legacyDirectory || app.getPath('userData'));
+  let buildInfo = {};
+  try { buildInfo = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'dist', 'build-info.json'), 'utf8')); } catch { /* Source archive without build metadata. */ }
+  if (!app.isPackaged && process.env.NODE_ENV !== 'development' && !process.argv.includes('--no-source-update') && require('./source-updater.cjs').resumeSourceUpdate({ directory: path.join(directory, 'source-updates'), revision: buildInfo.revision, app })) return;
   try {
     service = createService({ directory, home: app.getPath('home'), specopsDirectory: process.env.AGENTC2_DATA_DIR || process.env.AGENT_HQ_DATA_DIR ? undefined : path.join(app.getPath('home'), '.agentc2', 'specops') });
     gateway = new Gateway({ directory, assets: path.join(__dirname, '..', 'dist'), service });
@@ -151,11 +154,14 @@ app.whenReady().then(async () => {
   handle('fault:reset', (key) => service.resetFault(key));
   handle('workspace:save', (input) => service.saveWorkspace(input));
   handle('session:pin', (key, pinned) => service.setSessionPinned(key, pinned));
-  let buildInfo = {};
-  try { buildInfo = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'dist', 'build-info.json'), 'utf8')); } catch { /* Source archive without build metadata. */ }
-  const updates = createUpdates({ version: app.getVersion(), revision: buildInfo.revision });
+  const updater = !app.isPackaged
+    ? new (require('./source-updater.cjs').SourceUpdater)({ revision: buildInfo.revision, directory: path.join(directory, 'source-updates'), app })
+    : process.platform === 'darwin' ? require('./mac-update.cjs').createMacUpdater(app) : require('electron-updater').autoUpdater;
+  const updates = createUpdates({ updater, version: app.getVersion(), source: !app.isPackaged, notify: (state) => send('updates:state', state) });
+  handle('updates:state', () => updates.state());
   handle('updates:check', () => updates.check());
-  handle('updates:open', async () => { const update = await updates.check(); if (update.available) await shell.openExternal(update.url); });
+  handle('updates:download', () => updates.download());
+  handle('updates:install', () => updates.install());
   handle('session:rename', (key, title) => service.renameSession(key, title));
   handle('session:delete', (key) => service.deleteSession(desktop, key));
   handle('cleanup:preview', (input) => service.cleanup.preview(input));

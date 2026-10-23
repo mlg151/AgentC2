@@ -24,7 +24,10 @@ const path = require('node:path');
       const settings = { hosts: [{ id: 'default', kind: 'local', name: 'This computer', enabled: true, port: 22, target: 'localhost' }], presets: [preset('codex'), preset('opencode')], notifications: false };
       const inventory = () => ({ hosts: [{ id: 'default', name: 'This computer', connected: true }], sessions: [session], attention: [], faults: [] });
       const off = () => () => {};
-      window.qa = { failRename: false, opened: 0, updateAvailable: localStorage.getItem('no-update') !== 'true' };
+      window.qa = { failRename: false, downloads: 0, installs: 0, updateAvailable: localStorage.getItem('no-update') !== 'true' };
+      let update = { status: 'idle', version: '0.4.1', target: null, percent: null, error: '', source: false };
+      let listener = () => {};
+      window.qa.emitUpdate = (patch) => { update = { ...update, ...patch }; listener(update); };
       window.agentHQ = {
         getState: async () => ({ settings, workspace, attention: [] }), inventory: async () => inventory(),
         saveWorkspace: async (value) => { workspace = value; return value; },
@@ -32,8 +35,11 @@ const path = require('node:path');
         onDevUrls: off, onTerminalExit: off, onTerminalData: off, onTerminalState: off,
         listFlashTraffic: async () => [], health: async () => [], devUrls: async () => [],
         renameSession: async (key, title) => { if (window.qa.failRename) throw new Error('Rename fixture refused'); if (key !== session.key) throw new Error('Wrong target'); session = { ...session, title }; localStorage.setItem('title', title); return title; },
-        checkForUpdates: async () => ({ available: window.qa.updateAvailable, version: '0.4.1', revision: 'a'.repeat(40), kind: 'release', label: 'Update to v0.4.2', url: 'https://github.com/mlg151/AgentC2/releases/latest' }),
-        openUpdate: async () => { window.qa.opened++; },
+        updateState: async () => update,
+        onUpdateState: (callback) => { listener = callback; return () => { listener = () => {}; }; },
+        checkForUpdates: async () => { window.qa.emitUpdate({ status: window.qa.updateAvailable ? 'available' : 'current', target: window.qa.updateAvailable ? '0.4.2' : null, error: '' }); return update; },
+        downloadUpdate: async () => { window.qa.downloads++; window.qa.emitUpdate({ status: 'downloading', percent: 42 }); return update; },
+        installUpdate: async () => { window.qa.installs++; window.qa.emitUpdate({ status: 'installing' }); return update; },
       };
     });
     const url = `http://127.0.0.1:${server.httpServer.address().port}/`;
@@ -41,8 +47,23 @@ const path = require('node:path');
     assert.equal(page.url(), url); assert.equal(await page.title(), 'AgentC2');
     await page.locator('.session-row').filter({ hasText: 'OpenCode task' }).waitFor();
     assert.equal(await page.getByRole('button', { name: 'SPECOPS', exact: true }).isVisible(), true, 'SPECOPS and the update action must coexist after integration');
-    await page.getByRole('button', { name: 'Update to v0.4.2', exact: true }).click();
-    assert.equal(await page.evaluate(() => window.qa.opened), 1);
+    await page.getByRole('button', { name: 'Update available', exact: true }).click();
+    const updates = page.getByRole('dialog', { name: 'Application updates' });
+    await updates.getByRole('button', { name: 'Download update', exact: true }).click();
+    assert.equal(await page.evaluate(() => window.qa.downloads), 1);
+    assert.equal(await updates.getByRole('progressbar').getAttribute('value'), '42');
+    assert.equal(await updates.getByRole('button', { name: 'Restart and install' }).count(), 0);
+    await page.evaluate(() => window.qa.emitUpdate({ status: 'error', error: 'Checksum mismatch' }));
+    await updates.getByRole('alert').filter({ hasText: 'Checksum mismatch' }).waitFor();
+    await updates.getByRole('button', { name: 'Retry check' }).click();
+    await updates.getByRole('button', { name: 'Download update', exact: true }).click();
+    await page.evaluate(() => window.qa.emitUpdate({ status: 'ready', percent: 100 }));
+    await page.screenshot({ path: path.join(screenshots, 'update-ready.png') });
+    assert.equal(await page.evaluate(() => window.qa.installs), 0);
+    await updates.getByRole('button', { name: 'Restart and install' }).click();
+    assert.equal(await page.evaluate(() => window.qa.installs), 1);
+    await updates.getByRole('button', { name: 'Close', exact: true }).click();
+    await page.evaluate(() => window.qa.emitUpdate({ status: 'available' }));
     const pane = page.locator('.session-pane.is-focused');
     await pane.getByRole('button', { name: 'Rename', exact: true }).click();
     const input = pane.getByRole('textbox', { name: 'Session name', exact: true });
@@ -74,14 +95,20 @@ const path = require('node:path');
     await dialog.getByRole('button', { name: 'Close', exact: true }).click();
     await page.setViewportSize({ width: 940, height: 650 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'Update button overflowed the minimum desktop viewport');
-    const update = await page.getByRole('button', { name: 'Update to v0.4.2', exact: true }).boundingBox();
+    const update = await page.getByRole('button', { name: 'Update available', exact: true }).boundingBox();
     assert.ok(update && update.x >= 0 && update.x + update.width <= 940);
     await page.evaluate(() => localStorage.setItem('no-update', 'true'));
     await page.reload();
     await pane.waitFor();
-    assert.equal(await page.getByRole('button', { name: /Update to/ }).count(), 0);
+    await page.getByRole('button', { name: 'Updates', exact: true }).click();
+    await updates.getByRole('status').filter({ hasText: 'up to date' }).waitFor();
+    await updates.getByRole('button', { name: 'Check for updates', exact: true }).click();
+    await page.screenshot({ path: path.join(screenshots, 'updates-current-narrow.png') });
+    await page.evaluate(() => window.qa.emitUpdate({ status: 'available', source: true, target: 'main abc1234' }));
+    await updates.getByRole('button', { name: 'Build update' }).click();
+    await updates.getByRole('status').filter({ hasText: 'Preparing and building' }).waitFor();
     assert.equal(await page.locator('vite-error-overlay').count(), 0);
     assert.deepEqual(errors, []);
-    console.log(`PASS desktop rename recovery, server errors, keyboard cancel, persisted roster/tab titles, update action/absence, OpenCode launch, and 1440/940px layout; screenshots: ${screenshots}`);
+    console.log(`PASS desktop rename recovery, server errors, keyboard cancel, persisted roster/tab titles, update download/progress/error/retry/restart and persistent check control, OpenCode launch, and 1440/940px layout; screenshots: ${screenshots}`);
   } finally { await browser?.close(); await server?.close(); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

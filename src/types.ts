@@ -125,10 +125,13 @@ export interface DiffFile { id: string; path: string; staged: boolean; unstaged:
 export interface DiffHunk { id: string; text: string; actionable: boolean }
 export interface DiffDetail { revision: string; staged: DiffHunk[]; unstaged: DiffHunk[]; summary: string; binary: boolean; large: boolean }
 
-export interface AppUpdate { available: boolean; version: string; revision: string | null; kind: 'release' | 'main' | null; label: string; url: string }
+export interface AppUpdate { status: 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'ready' | 'installing' | 'error'; version: string; target: string | null; percent: number | null; error: string; source: boolean }
 export interface AgentHQApi {
   checkForUpdates(): Promise<AppUpdate>;
-  openUpdate(): Promise<void>;
+  updateState(): Promise<AppUpdate>;
+  downloadUpdate(): Promise<AppUpdate>;
+  installUpdate(): Promise<AppUpdate>;
+  onUpdateState(callback: (state: AppUpdate) => void): () => void;
   readonly platform: string;
   getState(): Promise<{ settings: Settings; workspace: Workspace; attention: AttentionItem[] }>;
   saveSettings(settings: Settings): Promise<Settings>;
