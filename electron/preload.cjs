@@ -3,7 +3,14 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('agentHQ', {
   platform: process.platform,
   checkForUpdates: () => ipcRenderer.invoke('updates:check'),
-  openUpdate: () => ipcRenderer.invoke('updates:open'),
+  updateState: () => ipcRenderer.invoke('updates:state'),
+  downloadUpdate: () => ipcRenderer.invoke('updates:download'),
+  installUpdate: () => ipcRenderer.invoke('updates:install'),
+  onUpdateState: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on('updates:state', listener);
+    return () => ipcRenderer.removeListener('updates:state', listener);
+  },
   getState: () => ipcRenderer.invoke('state:get'),
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
   previewOpOrder: (order) => ipcRenderer.invoke('oporder:preview', order),

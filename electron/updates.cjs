@@ -1,43 +1,46 @@
-const REPOSITORY = 'https://github.com/mlg151/AgentC2';
-const API = 'https://api.github.com/repos/mlg151/AgentC2';
-
-function newerVersion(candidate, current) {
-  const parse = (value) => /^v?(\d+)\.(\d+)\.(\d+)$/.exec(value || '')?.slice(1).map(Number);
-  const next = parse(candidate), installed = parse(current);
-  if (!next || !installed) return false;
-  for (let index = 0; index < 3; index++) if (next[index] !== installed[index]) return next[index] > installed[index];
-  return false;
-}
-
-function createUpdates({ version, revision, fetchJson = async (url) => {
-  const response = await fetch(url, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'AgentC2' }, signal: AbortSignal.timeout(10000) });
-  if (response.status === 404) return null;
-  if (!response.ok) throw new Error('GitHub update check is temporarily unavailable');
-  return response.json();
-}, now = Date.now }) {
-  let cached = null, checkedAt = 0, flight;
-  async function check() {
-    if (cached && now() - checkedAt < 5 * 60000) return cached;
-    if (flight) return flight;
-    flight = (async () => {
-      const [release, comparison] = await Promise.allSettled([
-        fetchJson(`${API}/releases/latest`),
-        /^[a-f0-9]{40}$/.test(revision || '') ? fetchJson(`${API}/compare/${revision}...main`) : Promise.resolve(null),
-      ]);
-      let result = { available: false, version, revision: revision || null, kind: null, label: '', url: '' };
-      if (release.status === 'fulfilled' && release.value && !release.value.draft && !release.value.prerelease && newerVersion(release.value.tag_name, version)) {
-        result = { ...result, available: true, kind: 'release', label: `Update to ${release.value.tag_name}`, url: `${REPOSITORY}/releases/latest` };
-      } else if (comparison.status === 'fulfilled' && comparison.value?.ahead_by > 0 && ['ahead', 'diverged'].includes(comparison.value.status)) {
-        result = { ...result, available: true, kind: 'main', label: 'New main available', url: `${REPOSITORY}/compare/${revision}...main` };
-      } else if (release.status === 'rejected' || comparison.status === 'rejected') {
-        // Keep a known update visible during outages; retry on the next check.
-        return cached || result;
-      }
-      cached = result; checkedAt = now();
-      return result;
-    })().finally(() => { flight = null; });
-    return flight;
+// All update operations stay in the main process; the renderer never supplies a URL or path.
+function createUpdates({ updater, version, source = false, notify = () => {} }) {
+  let state = { status: 'idle', version, target: null, percent: null, error: '', source };
+  let operation;
+  function change(patch) { state = { ...state, ...patch }; notify({ ...state }); }
+  function failed(error) { change({ status: 'error', error: String(error?.message || error).slice(0, 1500), percent: null }); }
+  updater.autoDownload = false;
+  updater.autoInstallOnAppQuit = false;
+  updater.allowPrerelease = false;
+  updater.allowDowngrade = false;
+  updater.on('checking-for-update', () => change({ status: 'checking', error: '' }));
+  updater.on('update-available', (info) => change({ status: 'available', target: info.version, error: '', percent: null }));
+  updater.on('update-not-available', () => change({ status: 'current', target: null, error: '', percent: null }));
+  updater.on('download-progress', (progress) => change({ status: 'downloading', percent: Number.isFinite(progress.percent) ? Math.max(0, Math.min(100, progress.percent)) : null }));
+  updater.on('update-downloaded', () => change({ status: 'ready', percent: 100, error: '' }));
+  updater.on('error', failed);
+  function run(action) {
+    if (operation) return operation;
+    operation = Promise.resolve().then(action).catch(failed).then(() => ({ ...state })).finally(() => { operation = null; });
+    return operation;
   }
-  return { check };
+  return {
+    state: () => ({ ...state }),
+    check() {
+      if (operation) return operation;
+      if (['ready', 'installing'].includes(state.status)) return Promise.resolve({ ...state });
+      return run(() => updater.checkForUpdates());
+    },
+    download() {
+      if (operation) return operation;
+      if (state.status !== 'available') return Promise.reject(new Error('Check for an available update before downloading'));
+      change({ status: 'downloading', percent: null, error: '' });
+      return run(() => updater.downloadUpdate());
+    },
+    install() {
+      if (state.status !== 'ready' || operation) throw new Error('The update is not ready to install');
+      change({ status: 'installing', error: '' });
+      try {
+        const result = updater.quitAndInstall(false, true);
+        if (result?.then) return result.then(() => ({ ...state })).catch((error) => { failed(error); return { ...state }; });
+      } catch (error) { failed(error); }
+      return { ...state };
+    },
+  };
 }
-module.exports = { createUpdates, newerVersion };
+module.exports = { createUpdates };

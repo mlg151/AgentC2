@@ -63,6 +63,12 @@ jobs:
       - name: Desktop regression checks (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run -a npm run test:desktop
+      - name: Native updater download and verification
+        if: runner.os != 'Linux'
+        run: node tests/update-download.e2e.cjs
+      - name: Native updater download and verification (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a node tests/update-download.e2e.cjs
       - name: Windows local path startup regressions (requires WSL)
         if: runner.os == 'Windows'
         run: node tests/windows-local.e2e.cjs
@@ -98,6 +104,7 @@ jobs:
             release/*.dmg
             release/*.zip
             release/*.blockmap
+            release/latest*.yml
             release/*-signing.txt
       - name: Upload desktop screenshots
         if: always()
@@ -182,6 +189,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
+          npm ci --ignore-scripts
           node scripts/prepare-release.cjs release-assets
           cat > "$RUNNER_TEMP/release-notes.md" <<'EOF'
           Windows x64, Linux x64, and macOS Intel/Apple Silicon packages are attached.
