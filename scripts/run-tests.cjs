@@ -8,10 +8,11 @@ function validate(base = root, data = inventory) {
   const files = fs.readdirSync(path.join(base, 'tests'), { recursive: true })
     .map((file) => `tests/${file.replaceAll('\\', '/')}`)
     .filter((file) => /\.(cjs|mjs|js|py|ts)$/.test(file) && !/^tests\/(fixtures|helpers)\//.test(file));
+  const groups = new Set(['core', 'desktop', 'packaged', 'updater', 'windows', 'linux-python', 'linux-web', 'linux-ui', 'linux-chat', 'cleanup']);
   const ids = new Set();
   const registered = new Set([...Object.keys(data.nested), ...Object.keys(data.optional)]);
   for (const suite of data.suites) {
-    if (!suite.id || ids.has(suite.id) || !suite.group || !files.includes(suite.file)) throw Error(`Invalid suite: ${JSON.stringify(suite)}`);
+    if (!suite.id || ids.has(suite.id) || !groups.has(suite.group) || !files.includes(suite.file)) throw Error(`Invalid suite: ${JSON.stringify(suite)}`);
     ids.add(suite.id); registered.add(suite.file);
   }
   for (const [file, parents] of Object.entries(data.nested)) {

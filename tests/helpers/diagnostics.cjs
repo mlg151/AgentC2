@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const directory = process.env.AGENTC2_SUITE_ARTIFACTS;
 if (directory) {
+  fs.mkdirSync(directory, { recursive: true });
   const playwright = require('playwright-core');
   let sequence = 0;
   async function instrument(context) {
