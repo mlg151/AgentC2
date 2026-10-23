@@ -4,12 +4,15 @@ const { fingerprint } = require('./centcom-contract.cjs');
 const { operationInput, validate: validateSchema, bundled } = require('./centcom-schema.cjs');
 const { createSupport, requirements } = require('./centcom-support.cjs');
 const { outputSchema } = require('./centcom-output.cjs');
+const { operationExamples } = require('./centcom-examples.cjs');
 function createOperations({ service: s, client, control, resolve, fleet, applyAutomation, readOutcomes, manifest, evidence, automations, beforeMutation = async () => {} }) {
   const registry = new Map();
   const add = (operation, classification, description, parameters, target, handler, dependencies = [], aliases = [], unavailable = '') => {
     const reviewRequired = ['configuration.save', 'specops.configure', 'oporder.enroll', 'automation.apply'].includes(operation);
-    registry.set(operation, { operation, classification, description, parameters, target, handler, dependencies, aliases, unavailable, reviewRequired,
-      inputSchema: bundled(operationInput(operation, parameters, target)), outputSchema: outputSchema(operation) });
+    const entry = { operation, classification, description, parameters, target, handler, dependencies, aliases, unavailable, reviewRequired,
+      inputSchema: bundled(operationInput(operation, parameters, target)), outputSchema: outputSchema(operation) };
+    entry.examples = operationExamples(entry);
+    registry.set(operation, entry);
   };
   const call = (path) => path.split('.').reduce((v, k) => v?.[k], s);
   const unit = (operation, description, parameters, handler, dependencies = [], aliases = []) => add(operation, 'action', description, parameters, 'session', handler, dependencies, aliases);

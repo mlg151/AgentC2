@@ -15,10 +15,17 @@ Read `capabilities.read` with `{ "operation": "unit.create" }` or
 referenced definitions. Add `"schema": "output"` for the successful adapter
 payload or automation lifecycle schema. These individual responses fit the
 outcome read limit; `definition` selects a named `$defs` definition if needed.
-The commander workspace's `CAPABILITIES.json` contains every input/output schema;
+Input-schema reads also include validated request examples. The commander
+workspace's `CAPABILITIES.json` contains every input/output schema and example;
 it and the doctrine refresh alongside each situation snapshot.
 Launch doctrine is generated from the same registry and fits the provider's
-20,000-character instruction limit.
+20,000-character instruction limit. Its index, envelope version, examples,
+authority, directive/query limits, budget, fallback, and deadlines derive from
+the executable contract and current policy. A changed schema that invalidates
+an example fails registry construction. Unsupported operations have reasons and
+no executable example. Examples use illustrative scope/revision values: resolve
+them from fresh inspection and merge existing configuration before proposing a
+change. They do not authorize actions or establish evidence.
 
 The published input schemas also validate dispatch and automation payloads.
 They describe nested worktree, contestant, question-answer, settings, OpOrder/MCP,
@@ -30,8 +37,8 @@ rules, provider permissions, revision evidence, and persistence constraints.
 Output contracts retain each adapter's actual return type, including native
 receipts, scalar metadata results, no-payload actions (`null`), configuration
 readback, and explicit partial-result markers. Upstream extension fields are
-bounded JSON and are not proof of project acceptance. Generated examples and
-the remaining adapter verification are still tracked in #69.
+bounded JSON and are not proof of project acceptance. The remaining adapter
+verification is still tracked in #69.
 
 `capabilities.support` requires `operation` and accepts `hostId`, `provider`,
 `transport`, `sessionKey`, `after`, and `limit`. It pages current support and

@@ -1,4 +1,5 @@
 const crypto = require('node:crypto');
+const ENVELOPE_VERSION = 1;
 
 const LIMITS = Object.freeze({ queries: 5, directives: 20, automations: 10, queryHops: 3, resultBytes: 64000, pageSize: 50, envelopeBytes: 256000 });
 const AUTOMATION_KINDS = ['specops_workflow', 'oporder', 'preset', 'centcom_trigger'];
@@ -33,9 +34,9 @@ function parseCentcomEnvelope(rawText) {
   if (Buffer.byteLength(blocks[0][1]) > LIMITS.envelopeBytes) return { error: 'Envelope byte limit exceeded' };
   let parsed;
   try { parsed = JSON.parse(blocks[0][1]); } catch { return { error: 'Malformed JSON in agentc2-c2 block' }; }
-  if (!object(parsed) || parsed.version !== 1) return { error: 'Envelope requires version: 1' };
+  if (!object(parsed) || parsed.version !== ENVELOPE_VERSION) return { error: `Envelope requires version: ${ENVELOPE_VERSION}` };
   const diagnostics = [];
-  const result = { version: 1, rationale: typeof parsed.rationale === 'string' ? parsed.rationale.slice(0, 2000) : '', diagnostics };
+  const result = { version: ENVELOPE_VERSION, rationale: typeof parsed.rationale === 'string' ? parsed.rationale.slice(0, 2000) : '', diagnostics };
   if (typeof parsed.rationale === 'string' && parsed.rationale.length > 2000) diagnostics.push({ code: 'truncated', field: 'rationale', originalLength: parsed.rationale.length, limit: 2000 });
   for (const k of Object.keys(parsed)) if (!['version', 'rationale', 'queries', 'directives', 'automations'].includes(k)) diagnostics.push({ code: 'invalid_field', field: k, message: 'Unknown envelope field' });
   for (const collection of ['queries', 'directives', 'automations']) {
@@ -76,4 +77,4 @@ function parseCentcomEnvelope(rawText) {
   return result;
 }
 
-module.exports = { LIMITS, AUTOMATION_KINDS, object, fingerprint, redact, bounded, parseCentcomEnvelope };
+module.exports = { ENVELOPE_VERSION, LIMITS, AUTOMATION_KINDS, object, fingerprint, redact, bounded, parseCentcomEnvelope };

@@ -21,6 +21,11 @@
       "group": "core"
     },
     {
+      "id": "centcom-doctrine",
+      "file": "tests/centcom-doctrine.cjs",
+      "group": "core"
+    },
+    {
       "id": "centcom-support",
       "file": "tests/centcom-support.cjs",
       "group": "core"
