@@ -9,6 +9,7 @@ const { createTurnLifecycle } = require('./centcom-turn.cjs');
 const { createAutomations } = require('./centcom-automations.cjs');
 const { createBindings, reviewSummary } = require('./centcom-bindings.cjs');
 const { mutationContext } = require('./centcom-dispatch.cjs');
+const { automationSchema } = require('./centcom-schema.cjs');
 const { LIMITS, AUTOMATION_KINDS, fingerprint, redact, bounded, parseCentcomEnvelope } = require('./centcom-contract.cjs');
 const CONTEXT_REVISION = 2;
 
@@ -381,6 +382,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
       files: {
         'AGENTS.md': initialDoctrine,
         'SITUATION.json': JSON.stringify(await buildSituationSnapshot()),
+        'CAPABILITIES.json': JSON.stringify(capabilityManifest(undefined, { full: true })),
       },
     }, host.id);
 
@@ -440,7 +442,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
       'Prefer event-driven waits; do not emit waiting-only chatter. Title-based workflow suggestions are hypotheses; cite repeated action evidence from outcomes.read.',
       '## Executable capabilities (availability refreshes in SITUATION.json each turn)',
       JSON.stringify(operations.catalog().map(({ operation, classification, parameters, reviewRequired, available, unavailableReason }) => ({ operation, classification, parameters, reviewRequired, available, unavailableReason }))),
-      'Full schemas and current limits/authority are in SITUATION.json.contract and capabilities.read.',
+      'Input schemas and current limits/authority are in CAPABILITIES.json. Use capabilities.read with operation or automationKind to retrieve one full input schema; an unfiltered read returns the index. Service validation also checks live references and revisions.',
       '',
       '## Protocol Envelope',
       'Wrap your tactical directives and queries in exactly one fenced `agentc2-c2` JSON block at the very end of your final response:',
@@ -526,7 +528,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
         const snapshot = await buildSituationSnapshot();
         await service.runRemote({
           action: 'centcom_sync',
-          files: { 'SITUATION.json': JSON.stringify(snapshot) },
+          files: { 'AGENTS.md': buildDoctrinePrompt(), 'SITUATION.json': JSON.stringify(snapshot), 'CAPABILITIES.json': JSON.stringify(capabilityManifest(undefined, { full: true })) },
         }, session.hostId);
 
         check();
@@ -787,7 +789,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
 
   const evidence = createEvidence({ service, isCommander, activeKeys: async (inventory) => (await fleet(inventory)).keys });
   const automations = createAutomations({ service, state, validateConfig, persist: writeState, stateFile });
-  const operations = createOperations({ evidence, automations: { ...automations, read: (id) => automations.read(state.automations.find((a) => a.id === id)) }, readOutcomes, manifest: () => capabilityManifest(), service, client,
+  const operations = createOperations({ evidence, automations: { ...automations, read: (id) => automations.read(state.automations.find((a) => a.id === id)) }, readOutcomes, manifest: capabilityManifest, service, client,
     beforeMutation: async () => { await bindings.assert(mutationContext.getStore()?.directive); },
     control: (unit, fn) => service.commanderControl(client, unit, async (handle, controlling) => {
     try {
@@ -802,10 +804,17 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
     const r = operationRequest(directive, classification);
     return { ...r, entry: operations.validate(r.operation, r.input, classification) };
   } });
-  function capabilityManifest(context) {
+  function capabilityManifest(context, { operation, automationKind, full = false } = {}) {
+    if (operation && automationKind) throw new Error('Select either operation or automationKind');
+    const catalog = operations.catalog(context);
+    if (operation && !operations.definition(operation)) throw new Error('Unknown capability operation');
+    if (automationKind && !AUTOMATION_KINDS.includes(automationKind)) throw new Error('Unknown automation kind');
     return { version: 1, authority: state.config.authority, limits: { ...LIMITS, maxDirectivesPerTurn: state.config.maxDirectivesPerTurn, maxBudgetUsd: state.config.maxBudgetUsd },
       spend: { knownUsd: state.costUsd, coverage: state.costKnown ? 'complete' : 'incomplete', budgetPolicy: 'Stop at known spend ceiling; unknown spend is not zero.' },
-      operations: operations.catalog(context), automationKinds: AUTOMATION_KINDS,
+      operations: automationKind ? [] : catalog.filter((e) => !operation || e.operation === operations.definition(operation).operation).map((entry) => full || operation ? entry
+        : { operation: entry.operation, classification: entry.classification, reviewRequired: entry.reviewRequired, available: entry.available, unavailableReason: entry.unavailableReason, schemaQuery: { operation: entry.operation } }), automationKinds: AUTOMATION_KINDS,
+      automations: operation ? [] : AUTOMATION_KINDS.filter((kind) => !automationKind || kind === automationKind).map((kind) => ({ kind,
+        ...(full || automationKind ? { inputSchema: automationSchema(kind) } : { schemaQuery: { automationKind: kind } }), reviewRequired: true })),
       approval: { permanentChanges: 'watch_officer', nativePermissions: 'separate_from_c2', uncertain: 'inspect_before_retry' } };
   }
   async function launchAdmission(request) {

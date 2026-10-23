@@ -38,6 +38,8 @@ class CentcomWorkspace(unittest.TestCase):
         self.assertEqual(target.read_text(), content)
         scope["centcom_sync"]({"files": {"SITUATION.json": "{}"}})
         self.assertEqual(target.read_text(), "{}")
+        scope["centcom_sync"]({"files": {"CAPABILITIES.json": '{"version":1}'}})
+        self.assertEqual((self.root / "CAPABILITIES.json").read_text(), '{"version":1}')
         self.assertEqual(list(self.root.glob("*.tmp")), [])
 
     def test_file_allowlist_and_symlink_protection(self):
@@ -50,6 +52,10 @@ class CentcomWorkspace(unittest.TestCase):
         (self.root / "SITUATION.json").symlink_to(outside)
         with self.assertRaisesRegex(ValueError, "symlink"):
             scope["centcom_sync"]({"files": {"SITUATION.json": "{}"}})
+        self.assertEqual(outside.read_text(), "keep")
+        (self.root / "CAPABILITIES.json").symlink_to(outside)
+        with self.assertRaisesRegex(ValueError, "symlink"):
+            scope["centcom_sync"]({"files": {"CAPABILITIES.json": "{}"}})
         self.assertEqual(outside.read_text(), "keep")
 
 

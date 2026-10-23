@@ -318,13 +318,20 @@ async function catalogCoverage() {
     if ('provider' in p) p.provider = 'codex';
     if ('action' in p) p.action = entry.operation === 'specops.control' ? 'resume' : 'retry';
     if (entry.operation === 'chat.respond') p.decision = 'allow';
+    if (entry.operation === 'flash.decide') p.decision = 'allow';
+    if (entry.operation === 'exercise.create') p.contestants = [{ provider: 'codex' }, { provider: 'claude' }];
+    if (entry.operation === 'diff.hunk') p.operation = 'stage';
+    if (entry.operation === 'sitrep.handoff') { p.operationId = 'a'.repeat(32); p.slug = 'fixture'; }
+    if (entry.operation.startsWith('oporder.')) { p.order = { version: 1, id: 'fixture', hostId: 'alpha', repository: '/repo' }; if (p.revision) p.revision = 'a'.repeat(64); }
+    if (entry.operation.startsWith('automation.') && p.kind) { p.kind = 'centcom_trigger'; p.payload = { fallbackSeconds: 600 }; }
+    if (entry.operation.startsWith('github.')) { p.repo = 'fixture/repo'; p.issue = 1; p.number = 1; p.headCommit = 'a'.repeat(40); p.repository = '/repo'; p.updatedAt = '2026-01-01'; p.evidence = { commit: 'a'.repeat(40), summary: 'Verified fixture evidence' }; }
     if (entry.operation === 'sitrep.inspect') p.testCommand = '';
     if (entry.operation === 'attention.acknowledge') f.state.attention.push({ id: p.id, sessionKey: f.sessions[0].key });
     await registry.execute(entry.operation, p, entry.classification);
   }
-  await assert.rejects(registry.execute('configuration.save', { settings: { cleanup: [] } }, 'action'), /Only hosts/);
+  await assert.rejects(registry.execute('configuration.save', { settings: { cleanup: [] } }, 'action'), /unknown field cleanup/);
   await assert.rejects(registry.execute('exercise.verify', {}, 'query'), /is an action/);
-  await assert.rejects(registry.execute('sitrep.inspect', { operationId: 'fixture', sourceHostId: 'alpha', targetHostId: 'alpha', repository: '/tmp', testCommand: 'npm test', sessionKey: f.sessions[0].key }, 'query'), /test commands require/);
+  await assert.rejects(registry.execute('sitrep.inspect', { operationId: 'fixture', sourceHostId: 'alpha', targetHostId: 'alpha', repository: '/tmp', testCommand: 'npm test', sessionKey: f.sessions[0].key }, 'query'), /sitrep.inspect.testCommand/);
   assert.equal(f.chats.handles.size, 0);
 }
 

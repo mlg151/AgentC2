@@ -42,10 +42,10 @@ const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agentc2-centcom-automat
       await assert.rejects(automations.apply(draft), /already resolved/);
     }
     assert.throws(() => automations.validate('specops', {}), /Unsupported/);
-    assert.throws(() => automations.validate('preset', { ...preset, provider: 'invented' }), /Invalid launch preset/);
-    assert.throws(() => automations.validate('specops_workflow', { ...workflow, stages: [] }), /Invalid workflow/);
-    assert.throws(() => automations.validate('centcom_trigger', { onFlashTraffic: 'yes' }), /Invalid event/);
-    assert.throws(() => automations.validate('centcom_trigger', { invented: true }), /Unknown/);
+    assert.throws(() => automations.validate('preset', { ...preset, provider: 'invented' }), /automation.preset.provider/);
+    assert.throws(() => automations.validate('specops_workflow', { ...workflow, stages: [] }), /automation.specops_workflow.stages/);
+    assert.throws(() => automations.validate('centcom_trigger', { onFlashTraffic: 'yes' }), { code: 'invalid_schema' });
+    assert.throws(() => automations.validate('centcom_trigger', { invented: true }), { code: 'invalid_schema' });
 
     const preview = await automations.preview('preset', { ...preset, name: 'Replacement' });
     const draft = { id: 'stale', kind: 'preset', payload: preview.payload, preview, state: 'proposed' };

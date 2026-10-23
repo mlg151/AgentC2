@@ -1,16 +1,18 @@
 // Metadata and executable handlers live together. Both envelope dialects use
 // this registry, so doctrine cannot advertise an unimplemented dispatch branch.
 const { fingerprint } = require('./centcom-contract.cjs');
+const { operationInput, validate: validateSchema, bundled } = require('./centcom-schema.cjs');
 function createOperations({ service: s, client, control, resolve, fleet, applyAutomation, readOutcomes, manifest, evidence, automations, beforeMutation = async () => {} }) {
   const registry = new Map();
   const add = (operation, classification, description, parameters, target, handler, dependencies = [], aliases = [], unavailable = '') => {
     const reviewRequired = ['configuration.save', 'specops.configure', 'oporder.enroll', 'automation.apply'].includes(operation);
-    registry.set(operation, { operation, classification, description, parameters, target, handler, dependencies, aliases, unavailable, reviewRequired });
+    registry.set(operation, { operation, classification, description, parameters, target, handler, dependencies, aliases, unavailable, reviewRequired,
+      inputSchema: bundled(operationInput(operation, parameters, target)) });
   };
   const call = (path) => path.split('.').reduce((v, k) => v?.[k], s);
   const unit = (operation, description, parameters, handler, dependencies = [], aliases = []) => add(operation, 'action', description, parameters, 'session', handler, dependencies, aliases);
   const controlled = (u, fn) => control(u, fn);
-  add('capabilities.read', 'query', 'Read the versioned implemented contract, authority, and effective limits.', {}, 'none', () => manifest());
+  add('capabilities.read', 'query', 'Read the versioned contract. Select operation or automationKind for its complete input schema within the result limit.', { operation: 'string?', automationKind: 'string?' }, 'none', (p) => manifest(undefined, p));
   add('outcomes.read', 'query', 'Read durable directive, automation, approval, audit, query, and diagnostic outcomes by cursor. Project acceptance is separate from command delivery.', { after: 'number?', limit: 'number?', collection: 'string?', clientRequestId: 'string?', serverId: 'string?' }, 'none', (p) => readOutcomes(p));
   add('fleet.inspect', 'query', 'Inspect the connected active managed fleet.', {}, 'none', async () => (await fleet()).inventory);
   add('units.list', 'query', 'Page canonical managed, external, and saved units; inspection does not grant control.', { hostId: 'string?', provider: 'string?', classification: 'string?', execution: 'string?', after: 'string?', limit: 'number?' }, 'none', (p) => evidence.units(p));
@@ -105,8 +107,7 @@ function createOperations({ service: s, client, control, resolve, fleet, applyAu
       const needsSession = ['session', 'sessions', 'sitrep', 'mission', 'exercise', 'contestant'].includes(entry.target);
       const reason = availability(registry.get(entry.operation)) || (context && needsSession && !context.sessions.length ? 'No connected active managed sessions are currently eligible' : '');
       const parameters = { ...(entry.target === 'session' ? { sessionKey: 'string?', key: 'string?', name: 'string?', hostId: 'string?', chatSessionId: 'string?' } : {}), ...entry.parameters };
-      const properties = Object.fromEntries(Object.entries(parameters).map(([key, type]) => [key, { type: type === 'nullable' ? ['string', 'null'] : type.replace('?', '') }]));
-      return { ...entry, parameters, inputSchema: { type: 'object', properties, required: Object.keys(parameters).filter((key) => !parameters[key].endsWith('?')), additionalProperties: false }, available: !reason, unavailableReason: reason || null };
+      return { ...entry, parameters, available: !reason, unavailableReason: reason || null };
     });
   }
   function definition(operation) {
@@ -118,16 +119,7 @@ function createOperations({ service: s, client, control, resolve, fleet, applyAu
     const reason = availability(entry);
     if (reason) throw Object.assign(new Error(`Unavailable operation ${operation}: ${reason}`), { code: 'unsupported_operation' });
     if (entry.classification !== classification) throw new Error(`${operation} is an ${entry.classification}; use agentc2.${entry.classification}`);
-    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error(`Malformed input for ${operation}`);
-    const targetFields = ['sessionKey', 'key', 'name', 'hostId', 'chatSessionId'];
-    const allowed = new Set([...Object.keys(entry.parameters), ...(entry.target === 'session' ? targetFields : [])]);
-    for (const key of Object.keys(input)) if (!allowed.has(key)) throw new Error(`Malformed ${operation} parameter: ${key}`);
-    for (const [key, schema] of Object.entries(entry.parameters)) {
-      const value = input[key], type = schema.replace('?', '');
-      if (value === undefined && schema.endsWith('?')) continue;
-      const valid = type === 'nullable' ? value === null || typeof value === 'string' : type === 'array' ? Array.isArray(value) : type === 'object' ? value && typeof value === 'object' && !Array.isArray(value) : typeof value === type;
-      if (!valid) throw new Error(`Malformed ${operation} parameter: ${key} (${schema})`);
-    }
+    validateSchema(entry.inputSchema, input, entry.inputSchema.$defs, operation);
     for (const key of ['sessionKey', 'key', 'name', 'hostId', 'chatSessionId']) {
       if (entry.target === 'session' && input[key] !== undefined && (typeof input[key] !== 'string' || !input[key] || input[key].includes('\0'))) throw new Error(`Malformed session target: ${key}`);
     }

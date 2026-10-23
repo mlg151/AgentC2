@@ -785,7 +785,7 @@ def centcom_sync(payload):
         raise ValueError("Invalid CENTCOM workspace files")
     written = []
     for name, content in files.items():
-        if name not in ("AGENTS.md", "SITUATION.json") or not isinstance(content, str) or len(content.encode("utf-8")) > 1_000_000:
+        if name not in ("AGENTS.md", "SITUATION.json", "CAPABILITIES.json") or not isinstance(content, str) or len(content.encode("utf-8")) > 1_000_000:
             raise ValueError("Unsupported or oversized CENTCOM file")
         target = root / name
         if target.is_symlink():

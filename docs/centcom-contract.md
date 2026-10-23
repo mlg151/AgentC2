@@ -8,10 +8,25 @@ The issue remains open; the full capability and verification contract is still i
 The commander uses one `agentc2-c2` fenced JSON envelope, version 1. Queries use
 `agentc2.query` and directives use `agentc2.action`, each with
 `params: { operation, input }`. Legacy operation names remain accepted aliases.
-`SITUATION.json.contract` and the `capabilities.read` query expose the implemented
-registry, current C2 authority, effective limits, and review requirements.
+`SITUATION.json.contract` and an unfiltered `capabilities.read` expose a compact
+registry index, current C2 authority, effective limits, and review requirements.
+Read `capabilities.read` with `{ "operation": "unit.create" }` or
+`{ "automationKind": "specops_workflow" }` for the selected input schema and its
+referenced definitions. These individual responses fit the outcome read limit.
+The commander workspace's `CAPABILITIES.json` contains every input schema;
+it and the doctrine refresh alongside each situation snapshot.
 Launch doctrine is generated from the same registry and fits the provider's
 20,000-character instruction limit.
+
+The published input schemas also validate dispatch and automation payloads.
+They describe nested worktree, contestant, question-answer, settings, OpOrder/MCP,
+workflow-stage, and trigger structures, including conditional fields and limits.
+Unknown nested fields produce a diagnostic instead of silently changing a draft.
+The schema for SPECOPS YAML includes its content structure. Existing service
+validators additionally enforce live host/profile references, workflow graph
+rules, provider permissions, revision evidence, and persistence constraints.
+Output schemas, generated examples, and host/provider support discovery remain
+tracked by the open acceptance criteria in #69.
 
 Give each directive and automation a unique string `id`. The engine preserves
 that client ID alongside its durable server ID. Reusing an ID within the same

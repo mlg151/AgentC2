@@ -3,6 +3,7 @@ const YAML = require('yaml');
 const { validateSettings } = require('./config.cjs');
 const { validateConfig: validateSpecops } = require('./specops.cjs');
 const { AUTOMATION_KINDS, object, fingerprint } = require('./centcom-contract.cjs');
+const { automationPayloads, validate: validateSchema } = require('./centcom-schema.cjs');
 
 // Reuse the persistence adapters' validators. Preview is read-only; saving a
 // draft never applies its configuration, regardless of C2 authority.
@@ -10,6 +11,7 @@ function createAutomations({ service, state, validateConfig, persist, stateFile 
   function validate(kind, payload) {
     if (!AUTOMATION_KINDS.includes(kind)) throw new Error(`Unsupported automation kind: ${kind}`);
     if (!object(payload)) throw new Error('Automation payload must be an object');
+    validateSchema(automationPayloads[kind], payload, undefined, `automation.${kind}`);
     const settings = service.store.data.settings;
     let artifact, before, scope;
     if (kind === 'preset') {
