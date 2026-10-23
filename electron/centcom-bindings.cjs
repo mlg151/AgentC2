@@ -15,7 +15,7 @@ function identity(unit) {
 }
 
 function createBindings({ service: s, state, resolve, request }) {
-  async function capture(entry, input, pre, controlling) {
+  async function capture(entry, input, pre, controlling, admissionUnknowns = []) {
     const startScope = fingerprint({ hosts: s.store.data.settings.hosts, roe: s.store.data.settings.roe, authority: state.config.authority, commander: state.session?.chatSessionId });
     const target = await resolve(entry, input, pre);
     const units = target ? (Array.isArray(target) ? target : [target]) : [];
@@ -52,8 +52,9 @@ function createBindings({ service: s, state, resolve, request }) {
     targets.sort((a, b) => a.identity.key.localeCompare(b.identity.key));
     const settings = s.store.data.settings;
     const draftHost = entry.operation === 'automation.apply' ? state.automations.find((a) => a.id === input.id)?.payload?.order?.hostId : null;
+    const workflowHost = ['mission', 'exercise', 'contestant'].includes(entry.target) ? (entry.target === 'mission' ? s.specops.list() : s.exercises.list()).find((record) => record.id === input.id)?.hostId : null;
     const handoff = entry.operation === 'sitrep.handoff' ? s.sitrepSource(input.id) : null;
-    const hostIds = [...new Set([...units.map((u) => u.hostId), input.hostId, input.sourceHostId, input.targetHostId, input.order?.hostId, draftHost, handoff?.sourceHostId, handoff?.targetHostId].filter(Boolean))];
+    const hostIds = [...new Set([...units.map((u) => u.hostId), input.hostId, input.sourceHostId, input.targetHostId, input.order?.hostId, draftHost, workflowHost, handoff?.sourceHostId, handoff?.targetHostId].filter(Boolean))];
     if (!hostIds.length && entry.operation === 'unit.create') hostIds.push(state.config.hostId);
     const hosts = hostIds.sort().map((id) => {
       const host = settings.hosts.find((h) => h.id === id);
@@ -70,8 +71,8 @@ function createBindings({ service: s, state, resolve, request }) {
       const mission = s.specops.list().find((r) => r.id === input.id);
       if (pre.stage && pre.stage !== mission?.stage) throw new Error('Mission stage changed');
       if (pre.state && pre.state !== mission?.state) throw new Error('Mission state changed');
-      operationEvidence = { id: mission.id, stage: mission.stage, state: mission.state, workflow: mission.workflow, worktree: mission.worktree, baseCommit: mission.baseCommit,
-        visits: mission.visits.map((v) => ({ id: v.id, stage: v.stage, name: v.name, sessionId: v.sessionId, completion: v.completion, outcome: v.outcome })) };
+      operationEvidence = { id: mission.id, stage: mission.stage, state: mission.state, workflow: mission.workflow, worktree: mission.worktree, baseCommit: mission.baseCommit, launchPolicy: mission.launchPolicy || null, launchAdmission: mission.launchAdmission || null,
+        visits: mission.visits.map((v) => ({ id: v.id, stage: v.stage, name: v.name, sessionId: v.sessionId, completion: v.completion, turnId: v.turnId, outcome: v.outcome, launchBlocked: v.launchBlocked })) };
     }
     if (entry.operation.startsWith('exercise.') && entry.operation !== 'exercise.create') {
       operationEvidence = s.exercises.list().find((r) => r.id === input.id);
@@ -108,20 +109,21 @@ function createBindings({ service: s, state, resolve, request }) {
       if (!/^[a-f0-9]{40,64}$/.test(operationEvidence.status?.headCommit || '')) throw new Error('Worktree HEAD revision is unavailable');
     }
     const authority = { mode: state.config.authority, commander: state.session?.chatSessionId || null, hosts, roe: settings.roe || null,
-      preset: input.presetId ? settings.presets.find((p) => p.id === input.presetId) || null : null };
+      preset: input.presetId ? settings.presets.find((p) => p.id === input.presetId) || null : null,
+      presets: [...new Set((input.contestants || (entry.operation === 'exercise.control' ? operationEvidence?.contestants : []) || []).map((item) => item.presetId).filter(Boolean))].sort().map((id) => ({ id, value: settings.presets.find((preset) => preset.id === id) || null })) };
     if (startScope !== fingerprint({ hosts: s.store.data.settings.hosts, roe: s.store.data.settings.roe, authority: state.config.authority, commander: state.session?.chatSessionId })) throw new Error('Authorization changed while inspecting approval evidence');
-    return { targets, authority, requestEvidence, operationEvidence };
+    return { targets, authority, requestEvidence, operationEvidence, admissionUnknowns: [...admissionUnknowns].sort() };
   }
   async function bind(directive, entry, input) {
     validatePreconditions(directive.preconditions);
-    const evidence = structuredClone(await capture(entry, input, directive.preconditions));
+    const evidence = structuredClone(await capture(entry, input, directive.preconditions, null, directive.admission?.unknowns || []));
     return { version: 1, requestHash: fingerprint({ operation: entry.operation, input, preconditions: directive.preconditions }), evidence, evidenceHash: fingerprint(evidence) };
   }
   async function assert(directive, entry, input, controlling) {
     const binding = directive.binding;
     if (!binding || binding.version !== 1) throw new Error('Approval has no reviewed identity binding; propose the action again');
     if (binding.requestHash !== fingerprint({ operation: entry.operation, input, preconditions: directive.preconditions }) || binding.evidenceHash !== fingerprint(binding.evidence)) throw new Error('Reviewed action parameters or binding changed');
-    const current = await capture(entry, input, directive.preconditions, controlling);
+    const current = await capture(entry, input, directive.preconditions, controlling, binding.evidence.admissionUnknowns || []);
     if (fingerprint(current) !== binding.evidenceHash) throw new Error('Approval evidence changed: target incarnation, control, revision, stage, or authorization scope requires fresh review');
   }
   return { bind, assert: (directive, controlling) => { const r = request(directive, 'action'); return assert(directive, r.entry, r.input, controlling); } };
@@ -131,6 +133,7 @@ function reviewSummary(binding) {
   if (!binding?.evidence || !Array.isArray(binding.evidence.targets)) return null;
   const evidence = binding.evidence;
   return { version: binding.version, requestHash: binding.requestHash, evidenceHash: binding.evidenceHash,
+    admissionUnknowns: evidence.admissionUnknowns || [],
     targets: evidence.targets.map(({ identity, controller, revision }) => ({ identity, controller, ...(revision ? { revision } : {}) })),
     authority: bounded(evidence.authority, 8000), request: bounded(evidence.requestEvidence, 8000), operation: bounded(evidence.operationEvidence, 8000) };
 }

@@ -336,7 +336,7 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
     if (input.recoverSitrep !== undefined && input.recoverSitrep !== true) throw new Error('Invalid SitRep recovery flag');
     if (input.recoverSitrep && !isolated) throw new Error('SitRep recovery requires an owned worktree');
     if (isolated && (isTerminal || input.conversationId || input.agentId || !/^[a-f0-9]{32}$/.test(isolated.operationId || '') || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(isolated.slug || '') || typeof isolated.repository !== 'string' || isolated.repository.length > 4096 || typeof isolated.baseRef !== 'string' || isolated.baseRef.length > 200)) throw new Error('Invalid isolated task');
-    const created = await runRemote({
+    const payload = {
       action: isolated ? 'worktree_launch' : 'create', provider, transport,
       ...(!isolated && transport === 'chat' ? { managedName: `hq-${crypto.createHash('sha256').update(input.launchId || crypto.randomUUID()).digest('hex').slice(0, 12)}` } : {}),
       ...(transport === 'chat' ? { sourceDigest: chatDigest, chatFiles, allowUpgrade: true } : {}),
@@ -347,7 +347,8 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
       preset, roeProfile, hookSource, instructions: String(input.instructions || '').slice(0, 20000),
       ...(isolated ? { operationId: isolated.operationId, repository: isolated.repository, baseRef: isolated.baseRef, slug: isolated.slug, ...(input.recoverSitrep ? { recoverSitrep: true } : {}) } : {}),
       ...(internalSitrep ? { sitrep: internalSitrep } : {}),
-    }, input.hostId);
+    };
+    const created = await centcom.guardLaunch({ ...input, hostId: host.id, cwd: input.cwd || preset?.cwd || '' }, () => runRemote(payload, input.hostId));
     void inventory().catch(() => {});
     return created;
   }

@@ -1,4 +1,5 @@
 const crypto = require('node:crypto');
+const { launchPolicy, withLaunchPolicy, workflowReuse } = require('./centcom-launch.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 const YAML = require('yaml');
@@ -89,7 +90,7 @@ function createSpecops({ directory, runRemote, createSession, chats, getHost, em
   if (runs.length) save();
   function find(id) { const r = runs.find((r) => r.id === id); if (!r) throw new Error('Unknown mission'); return r; }
   function halt(r, error) { r.state = 'halted'; r.error = String(error.message || error).slice(0, 1000); save(); return r; }
-  const list = () => structuredClone(runs.map((r) => ({ ...r, sourceLinks: (Array.isArray(r.source) ? r.source : [r.source]).filter((issue) => Number.isSafeInteger(issue?.number)).map((issue) => ({ key: `issue-${issue.number}`, kind: 'issue', externalId: String(issue.number), repository: r.repo })), source: undefined, profiles: undefined, visits: r.visits.map(({ prompt, ...v }) => v), canResume: r.state === 'halted' && Boolean(r.visits.at(-1)?.sessionId) && !r.visits.at(-1)?.completion && !r.publicationStarted, canRetry: r.state === 'halted' && Boolean(r.visits.at(-1)?.completion) && !r.publicationStarted })));
+  const list = () => structuredClone(runs.map((r) => ({ ...r, sourceLinks: (Array.isArray(r.source) ? r.source : [r.source]).filter((issue) => Number.isSafeInteger(issue?.number)).map((issue) => ({ key: `issue-${issue.number}`, kind: 'issue', externalId: String(issue.number), repository: r.repo })), source: undefined, profiles: undefined, visits: r.visits.map(({ prompt, ...v }) => v), canResume: r.state === 'halted' && Boolean(r.visits.at(-1)?.sessionId) && !r.visits.at(-1)?.completion && !r.publicationStarted, canRetry: r.state === 'halted' && Boolean(r.visits.at(-1)?.completion || r.visits.at(-1)?.launchBlocked) && !r.publicationStarted })));
   const definition = () => ({ ...structuredClone(config), yaml: YAML.stringify(config), directory });
   function configure(source) {
     text(source, 200000, 'workflow YAML');
@@ -110,7 +111,7 @@ function createSpecops({ directory, runRemote, createSession, chats, getHost, em
     const capabilities = await chats.capabilities(hostId);
     const assigned = config.profiles.filter((p) => workflow.stages.some((s) => s.profile === p.id));
     for (const p of assigned) if (!capabilities.some((c) => c.provider === p.provider && c.status === 'supported')) throw new Error(`${p.name}: structured provider is unavailable on this host`);
-    const r = { version: 1, id: crypto.randomBytes(16).toString('hex'), hostId, repo, repository: base.repository, baseCommit: base.baseCommit, workflow: structuredClone(workflow), profiles: structuredClone(assigned), source, state: 'advancing', stage: workflow.stages[0].id, visits: [], denials: {}, error: '', createdAt: Date.now(), costUsd: 0, costKnown: true, worktree: null };
+    const r = { version: 1, id: crypto.randomBytes(16).toString('hex'), hostId, repo, repository: base.repository, baseCommit: base.baseCommit, workflow: structuredClone(workflow), profiles: structuredClone(assigned), source, state: 'advancing', stage: workflow.stages[0].id, visits: [], denials: {}, error: '', createdAt: Date.now(), costUsd: 0, costKnown: true, worktree: null, launchPolicy: launchPolicy() };
     runs.unshift(r); save(); await dispatch(r); return structuredClone(r);
   }
   function prompt(r, stage) {
@@ -131,14 +132,17 @@ function createSpecops({ directory, runRemote, createSession, chats, getHost, em
     r.visits.push(visit); r.state = 'launching'; save();
     try {
       const instructions = prompt(r, stage);
-      const launched = await createSession({ hostId: r.hostId, provider: profile.provider, model: profile.model, transport: 'chat', launchId: visit.id, title: `${r.workflow.name.slice(0, 55)} · ${stage.id}`, roeProfile: stage.role === 'implementer' || stage.allow_write === true ? 'full' : 'gated', ...(r.worktree ? { cwd: r.worktree.path } : { worktree: { operationId: r.id, repository: r.repository, baseRef: r.baseCommit, slug: 'specops' } }) });
+      const launched = await withLaunchPolicy(r.launchPolicy, { kind: 'specops', id: r.id, reuse: workflowReuse(r) }, () => createSession({ hostId: r.hostId, provider: profile.provider, model: profile.model, transport: 'chat', launchId: visit.id, title: `${r.workflow.name.slice(0, 55)} · ${stage.id}`, roeProfile: stage.role === 'implementer' || stage.allow_write === true ? 'full' : 'gated', ...(r.worktree ? { cwd: r.worktree.path } : { worktree: { operationId: r.id, repository: r.repository, baseRef: r.baseCommit, slug: 'specops' } }) }));
       if (!r.worktree) r.worktree = launched.worktree;
       visit.name = launched.name;
       visit.sessionId = launched.chatSessionId || 'chat-' + uuidForManaged(launched.name).replaceAll('-', '');
       visit.prompt = instructions;
       // A create response only acknowledges dispatch; wait for idle before send.
       r.state = 'running'; save();
-    } catch (error) { halt(r, error); }
+    } catch (error) {
+      if (error.beforeMutation) { visit.launchBlocked = true; r.launchPolicy ||= error.launchPolicy; r.launchAdmission = error.admission || { status: 'blocked', blockers: [error.message], unknowns: [] }; }
+      halt(r, error);
+    }
   }
   async function tick(r) {
     if (typeof r === 'string') r = find(r);
@@ -158,6 +162,7 @@ function createSpecops({ directory, runRemote, createSession, chats, getHost, em
       const receipt = await chats.request(r.hostId, 'receipt', { commandId: v.sendId });
       if (['failed', 'unknown'].includes(receipt.state)) throw new Error('Stage command failed or is uncertain: ' + (receipt.error || receipt.state));
       if (receipt.state !== 'completed' || !receipt.result?.turnId) return;
+      v.turnId = receipt.result.turnId;
       let completed = v.completion || null;
       for (const e of page.events) {
         if (e.turnId !== receipt.result.turnId) { v.cursor = e.sequence; continue; }
@@ -224,17 +229,19 @@ function createSpecops({ directory, runRemote, createSession, chats, getHost, em
     if (flights.has(id) || ['launching', 'advancing', 'publishing'].includes(r.state)) throw new Error('Wait for the current dispatch to finish');
     flights.add(id);
     try {
-    if (action === 'retry' && r.state === 'halted' && !r.publicationStarted && r.visits.at(-1)?.completion) {
+    if (action === 'retry' && r.state === 'halted' && !r.publicationStarted && (r.visits.at(-1)?.completion || r.visits.at(-1)?.launchBlocked)) {
       const v = r.visits.at(-1);
-      const page = await chats.read(r.hostId, v.sessionId, v.cursor, 1);
-      if (page.session.state !== 'idle') throw new Error('Previous stage must be idle before an explicit retry');
+      if (!v.launchBlocked) {
+        const page = await chats.read(r.hostId, v.sessionId, v.cursor, 1);
+        if (page.session.state !== 'idle') throw new Error('Previous stage must be idle before an explicit retry');
+      }
       r.stage = r.pendingStage || v.stage;
       if (r.pendingStage) { const edge = `${v.stage}:${r.pendingStage}`; r.denials[edge] = Math.max(0, r.denials[edge] - 1); }
-      delete r.pendingStage; r.state = 'advancing'; r.error = ''; save();
+      delete r.pendingStage; r.state = 'advancing'; r.error = ''; r.launchAdmission = null; r.launchPolicy = launchPolicy() || r.launchPolicy; save();
       await dispatch(r); return structuredClone(r);
     }
     if (action === 'cancel' && !['completed', 'cancelled'].includes(r.state)) { r.state = 'cancelled'; r.error = 'Routing cancelled; running units remain available for explicit stop.'; save(); }
-    else if (action === 'resume' && r.state === 'halted' && r.visits.at(-1)?.sessionId && !r.pendingStage && !r.publicationStarted && !r.visits.at(-1)?.completion) { r.state = 'running'; r.error = ''; save(); }
+    else if (action === 'resume' && r.state === 'halted' && r.visits.at(-1)?.sessionId && !r.pendingStage && !r.publicationStarted && !r.visits.at(-1)?.completion) { r.state = 'running'; r.error = ''; r.launchPolicy = launchPolicy() || r.launchPolicy; save(); }
     else throw new Error('Mission cannot perform this action. Inspect its recorded stage and artifacts.');
     return structuredClone(r);
     } finally { flights.delete(id); }

@@ -15,6 +15,7 @@ const { automationExamples } = require('./centcom-examples.cjs');
 const { renderDoctrine } = require('./centcom-doctrine.cjs');
 const { summarizeAction, readHistory } = require('./centcom-history.cjs');
 const { createMissions } = require('./centcom-missions.cjs');
+const { createLaunchGuard, workflowReuse, withoutLaunchContext } = require('./centcom-launch.cjs');
 const { ENVELOPE_VERSION, LIMITS, AUTOMATION_KINDS, fingerprint, redact, bounded, parseCentcomEnvelope } = require('./centcom-contract.cjs');
 const CONTEXT_REVISION = 2;
 
@@ -370,7 +371,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
   const turnLifecycle = createTurnLifecycle({ chats, client, state, persist: writeState, outcome: recordOutcome });
 
   function enqueue(action) {
-    const flight = queue.then(action);
+    const flight = queue.then(() => withoutLaunchContext(action));
     queue = flight.catch((err) => {
       console.error('CENTCOM scheduler turn error:', err);
     });
@@ -740,6 +741,12 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
       const mission = entry.target === 'mission';
       const record = (mission ? service.specops.list() : service.exercises.list()).find((r) => r.id === p.id);
       if (!record) throw new Error('Operation is unavailable');
+      const blockedLaunch = mission ? record.visits?.at(-1)?.launchBlocked : record.contestants?.some((item) => item.launchBlocked);
+      if (entry.classification === 'action' && p.action === 'retry' && record.launchPolicy && blockedLaunch) {
+        const targets = (mission ? record.visits : record.contestants).map((item) => f.find(item.name || item.sessionId, record.hostId)).filter(Boolean);
+        if (pre.sessionKey && !targets.some((unit) => unit.key === pre.sessionKey)) throw new Error('Conflicting operation precondition');
+        return [...new Map(targets.map((unit) => [unit.key, unit])).values()];
+      }
       const participants = mission ? record.visits || [] : record.contestants || [];
       const selected = p.contestantId ? participants.filter((c) => c.id === p.contestantId)
         : mission && entry.classification === 'action' ? participants.slice(-1) : participants;
@@ -760,6 +767,17 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
   }
 
   const evidence = createEvidence({ service, isCommander, activeKeys: async (inventory) => (await fleet(inventory)).keys });
+  const launchGuard = createLaunchGuard({ service, evidence, authority: () => ({ mode: state.config.authority, commander: state.session?.chatSessionId || null }),
+    legacyPolicy: (workflow) => {
+      if (!workflow?.id || !['specops', 'exercise'].includes(workflow.kind)) return null;
+      const operation = workflow.kind === 'specops' ? 'specops.launch' : 'exercise.create';
+      const source = state.directives.find((directive) => {
+        const kind = directive.canonicalOperation || directive.params?.operation || directive.kind;
+        const input = directive.params?.input || directive.params;
+        return directive.result?.id === workflow.id && (kind === operation || (kind === `${workflow.kind}.control` && ['resume', 'retry'].includes(input?.action)));
+      });
+      return source ? { version: 0, directiveId: source.id, legacy: true } : null;
+    } });
   const missions = createMissions({ state, service, persist: writeState, inventory: () => service.inventory(), isCommander });
   const automations = createAutomations({ service, state, validateConfig, persist: writeState, stateFile });
   const operations = createOperations({ evidence, missions, readHistory: (input) => readHistory(state, input), automations: { ...automations, read: (id) => automations.read(state.automations.find((a) => a.id === id)) }, readOutcomes, manifest: capabilityManifest, service, client,
@@ -807,8 +825,18 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
   }
   async function launchAdmission(request) {
     const p = request.input;
-    if (request.operation === 'unit.create') return evidence.admission(p);
+    if (request.operation === 'unit.create') {
+      const preset = service.store.data.settings.presets.find((item) => item.id === p.presetId);
+      return evidence.admission({ ...p, cwd: p.cwd || preset?.cwd || '' });
+    }
     if (['specops.launch', 'exercise.create'].includes(request.operation)) return evidence.admission({ hostId: p.hostId, worktree: { repository: p.repository } });
+    if (['specops.control', 'exercise.control'].includes(request.operation) && p.action === 'retry') {
+      const mission = request.operation === 'specops.control';
+      const record = (mission ? service.specops.list() : service.exercises.list()).find((item) => item.id === p.id);
+      if (!record) throw new Error('Workflow is unavailable');
+      return mission && record.worktree?.path ? evidence.admission({ hostId: record.hostId, cwd: record.worktree.path }, { reuse: workflowReuse(record) })
+        : evidence.admission({ hostId: record.hostId, worktree: { repository: record.repository } });
+    }
     if (request.operation === 'sitrep.handoff') {
       const preview = service.sitrepSource(p.id);
       if (!preview) throw new Error('SitRep preview is unavailable');
@@ -836,7 +864,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
     if (directive.validationError) throw new Error(directive.validationError);
     const r = operationRequest(directive, 'action');
     const admission = await launchAdmission(r);
-    if (admission?.status === 'blocked' || (admission?.status === 'unknown' && !directive.approvedAt)) throw new Error('Launch admission requires review: ' + [...admission.blockers, ...admission.unknowns].join('; '));
+    if (admission?.status === 'blocked' || (admission?.status === 'unknown' && (!directive.approvedAt || admission.unknowns.some((reason) => !directive.binding?.evidence.admissionUnknowns?.includes(reason))))) throw new Error('Launch admission requires review: ' + [...admission.blockers, ...admission.unknowns].join('; '));
     if (admission) directive.admission = admission;
     return mutationContext.run({ directive, authority: () => ({ mode: state.config.authority, commander: state.session?.chatSessionId || null }) }, () => operations.execute(r.operation, r.input, 'action', directive.preconditions, check));
   }
@@ -1024,6 +1052,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
   scheduleWake();
   return {
     state: publicState,
+    guardLaunch: launchGuard.run,
     isCommander, submitCommand,
     capabilities: operations.catalog,
     reconcile: () => enqueue(async () => { await turnLifecycle.reconcile(); return publicState(); }),

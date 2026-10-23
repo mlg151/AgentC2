@@ -51,7 +51,7 @@ export interface Session {
 export interface SpecopsProfile { id: string; name: string; provider: string; model: string; ranks: string[] }
 export interface SpecopsWorkflow { version: 1; id: string; name: string; trigger: string; stages: { id: string; profile: string; rank: string; role: string }[] }
 export interface SpecopsDefinition { profiles: SpecopsProfile[]; workflows: SpecopsWorkflow[]; yaml: string; directory: string }
-export interface SpecopsRun { sourceLinks?: { key: string; kind: 'issue'; externalId: string; repository: string }[]; canResume: boolean; canRetry: boolean; id: string; hostId: string; repo: string; state: string; stage: string; error: string; workflow: SpecopsWorkflow; visits: { id: string; stage: string; name: string; output: string; outcome: string }[]; costUsd: number; costKnown: boolean }
+export interface SpecopsRun { launchAdmission?: { status: string; blockers: string[]; unknowns: string[] } | null; sourceLinks?: { key: string; kind: 'issue'; externalId: string; repository: string }[]; canResume: boolean; canRetry: boolean; id: string; hostId: string; repo: string; state: string; stage: string; error: string; workflow: SpecopsWorkflow; visits: { id: string; stage: string; name: string; output: string; outcome: string; turnId?: string; launchBlocked?: boolean }[]; costUsd: number; costKnown: boolean }
 export interface GithubResult { [key: string]: unknown }
 
 export interface Inventory {
@@ -80,7 +80,7 @@ export interface SitrepPreview { version: 1; id: string; source: { operationId: 
 export interface SitrepLaunchInput { id: string; operationId: string; objective: string; summary: string; nextSteps: string; title: string; slug: string; provider: Exclude<Provider, 'terminal'>; presetId?: string; roeProfile?: RoeProfile }
 export interface ExerciseInput { title: string; hostId: string; repository: string; baseRef: string; prompt: string; testCommand: string; contestants: { provider: Exclude<Provider, 'terminal'>; presetId?: string; roeProfile?: RoeProfile }[] }
 export interface ExerciseTest { command: string; exitCode: number | null; timedOut: boolean; output: string; outputTruncated: boolean; durationMs: number; ranAt: number }
-export interface ExerciseContestant { id: string; provider: Exclude<Provider, 'terminal'>; presetId: string; roeProfile: string; slug: string; state: string; name: string; error: string; markedComplete: boolean; evidence: { revision: string; test: ExerciseTest | null; verifiedAt: number; explicitCompletion: boolean } | null }
+export interface ExerciseContestant { launchBlocked?: boolean; admission?: { status: string; blockers: string[]; unknowns: string[] } | null; id: string; provider: Exclude<Provider, 'terminal'>; presetId: string; roeProfile: string; slug: string; state: string; name: string; error: string; markedComplete: boolean; evidence: { revision: string; test: ExerciseTest | null; verifiedAt: number; explicitCompletion: boolean } | null }
 export interface ExerciseRecord { version: 1; id: string; title: string; hostId: string; repository: string; baseCommit: string; prompt: string; testCommand: string; contestants: ExerciseContestant[]; state: string; createdAt: number; promotion: { contestantId: string; revision: string; target: string; branch: string; patchBytes: number; at: number } | null }
 export interface ExerciseInspection { operationId: string; baseCommit: string; branch: string; path: string; active: boolean; headCommit: string; revision: string; patchBytes: number; patch: string; patchTruncated: boolean; untracked: string[]; warnings: string[]; test: ExerciseTest | null; evidence: ExerciseContestant['evidence'] }
 export interface ExercisePromotionPreview { contestantId: string; target: string; branch: string; headCommit: string; revision: string; patchBytes: number; paths: number; ready: boolean; test: ExerciseTest | null }
@@ -185,6 +185,7 @@ export interface CentcomOperationRequest {
 export interface CentcomDirective {
   id: string;
   binding?: Record<string, unknown> | null;
+  admission?: { status: string; blockers: string[]; unknowns: string[] } | null;
   clientRequestId?: string | null;
   turnId: string;
   kind: CentcomDirectiveKind;

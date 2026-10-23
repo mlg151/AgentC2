@@ -64,7 +64,7 @@ function createOperations({ service: s, client, control, resolve, fleet, applyAu
   add('specops.configure', 'action', 'Validate and save SPECOPS workflow YAML.', { yaml: 'string' }, 'none', (p) => s.specops.configure(p.yaml), ['specops.configure']);
   add('specops.inspect', 'query', 'Inspect a mission with only active participants and their evidence.', { id: 'string' }, 'mission', (p) => s.specops.list().find((r) => r.id === p.id), ['specops.list'], ['inspect_specops']);
   add('specops.launch', 'action', 'Launch a SPECOPS workflow.', { workflowId: 'string', hostId: 'string', repository: 'string', repo: 'string', issue: 'number?', query: 'string?', baseRef: 'string?' }, 'none', (p) => s.specops.launch(p), ['specops.launch']);
-  add('specops.control', 'action', 'Resume, retry, or cancel a mission with active participants.', { id: 'string', action: 'string' }, 'mission', (p) => {
+  add('specops.control', 'action', 'Resume, retry, or cancel a mission with active participants; an owned admission-blocked launch can be retried after fresh review.', { id: 'string', action: 'string' }, 'mission', (p) => {
     if (!['resume', 'retry', 'cancel'].includes(p.action)) throw new Error('Invalid SPECOPS control action');
     return s.specops.control(p.id, p.action);
   }, ['specops.control', 'specops.list']);

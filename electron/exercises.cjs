@@ -1,4 +1,5 @@
 const crypto = require('node:crypto');
+const { launchPolicy, withLaunchPolicy } = require('./centcom-launch.cjs');
 
 const ID = /^[a-f0-9]{32}$/;
 const COMMIT = /^[a-f0-9]{40,64}$/;
@@ -38,7 +39,7 @@ function createExercises({ store, getHost, runRemote, createSession, beginLaunch
     });
     const base = await runRemote({ action: 'exercise_base', repository, baseRef }, hostId);
     if (!COMMIT.test(base.baseCommit)) throw new Error('Remote base is invalid');
-    const record = save({ version: 1, id: crypto.randomBytes(16).toString('hex'), title, hostId, repository: base.repository, baseCommit: base.baseCommit, prompt, testCommand, contestants, state: 'launching', createdAt: Date.now(), promotion: null });
+    const record = save({ version: 1, id: crypto.randomBytes(16).toString('hex'), title, hostId, repository: base.repository, baseCommit: base.baseCommit, prompt, testCommand, contestants, state: 'launching', createdAt: Date.now(), promotion: null, launchPolicy: launchPolicy() });
     return launch(record.id);
   }
   async function launch(id) {
@@ -46,17 +47,18 @@ function createExercises({ store, getHost, runRemote, createSession, beginLaunch
     if (flights.has(id)) throw new Error('Exercise launch is already in progress');
     if (record.state === 'cancelled' || record.promotion) throw new Error('Exercise cannot be relaunched');
     const pending = record.contestants.filter((item) => ['queued', 'failed', 'launching'].includes(item.state));
+    record.launchPolicy = launchPolicy() || record.launchPolicy;
     flights.add(id);
     try {
     for (let index = 0; index < pending.length; index++) {
       if (record.state === 'cancelled') break;
       const item = pending[index];
-        item.state = 'launching'; item.error = ''; save(record);
+        item.state = 'launching'; item.error = ''; item.launchBlocked = false; item.admission = null; save(record);
         const release = beginLaunch(record.hostId);
         try {
-          const result = await createSession({ provider: item.provider, presetId: item.presetId || undefined, roeProfile: item.roeProfile || undefined, hostId: record.hostId, title: `${record.title} · ${item.provider}`, instructions: record.prompt, worktree: { operationId: item.id, repository: record.repository, baseRef: record.baseCommit, slug: item.slug } });
+          const result = await withLaunchPolicy(record.launchPolicy, { kind: 'exercise', id: record.id }, () => createSession({ provider: item.provider, presetId: item.presetId || undefined, roeProfile: item.roeProfile || undefined, hostId: record.hostId, title: `${record.title} · ${item.provider}`, instructions: record.prompt, worktree: { operationId: item.id, repository: record.repository, baseRef: record.baseCommit, slug: item.slug } }));
           item.name = result.name; item.state = 'launched';
-        } catch (error) { item.state = 'failed'; item.error = String(error.message || error).slice(0, 500); }
+        } catch (error) { item.state = 'failed'; item.error = String(error.message || error).slice(0, 500); if (error.beforeMutation) { item.launchBlocked = true; record.launchPolicy ||= error.launchPolicy; item.admission = error.admission || { status: 'blocked', blockers: [error.message], unknowns: [] }; } }
         finally { release(); save(record); }
     }
     if (record.state !== 'cancelled') record.state = record.contestants.some((item) => item.state === 'failed') ? 'partial' : 'running';

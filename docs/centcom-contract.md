@@ -260,9 +260,33 @@ CENTCOM launches (`unit.create`, `specops.launch`, `exercise.create`, and
 `sitrep.handoff`), the engine repeats admission at dispatch. Existing worktree
 operation IDs, canonical working-directory aliases, and low memory can block
 launch. Unknown ownership or headroom requires Watch Officer review even in
-Autonomous C2. The current reserve is 256 MiB. Matching repository basenames
-alone do not establish a conflict. Admission for workflow-internal retries and
-later automated stages remains part of the issue's completion audit.
+Autonomous C2. The production session launcher repeats checks for every C2-owned
+SPECOPS stage, exercise contestant/retry, and nested SitRep launch. A private
+workflow provenance record survives restart and retains reviewed host routes,
+ROE, contestant presets, and C2 authority. Changed scope blocks further launches.
+Legacy workflows traceable to retained C2 launch directives but lacking a policy
+halt for fresh review; they cannot silently become unguarded desktop launches.
+Known resource/assignment conflicts cannot be waived by approval. Approval covers
+only the reviewed unknown conditions in its current call; new unknowns need fresh
+review, and later automatic stages receive no indefinite exception.
+
+C2 launches on a host serialize their final inspection/dispatch and refresh
+inventory before releasing the next launch. These are admission checks against
+observed state, not a global resource reservation against outside processes.
+SPECOPS can reuse its owned worktree only for exact recorded predecessors whose
+fresh native state is idle/failed/stopped, whose latest correlated turn has a
+terminal outcome, and which have no pending requests. Another writer, another
+turn, missing ownership/path evidence, or stale identity blocks reuse. The public
+admission query cannot supply this private workflow exception.
+
+Pre-dispatch admission/scope failures persist a blocked visit or contestant with
+its report. A C2-owned blocked launch can be retried after fresh review even when
+it has no active participant yet; uncertain post-dispatch attempts are not
+converted into safe retries. The current reserve is 256 MiB. A reported cgroup
+limit without measured headroom remains unknown. Matching repository basenames
+alone do not establish a conflict. Recovery of partially provisioned exercise
+worktrees remains in the completion audit; existing operation IDs stay blocked
+pending an ownership-aware recovery path.
 
 ## Scheduling and spend
 
@@ -308,7 +332,7 @@ work or remaining budget.
 
 ## Remaining implementation and completion gates
 
-The issue checklist is authoritative. Work still includes actual-adapter verification for every advertised operation,
-complete launch admission coverage,
+The issue checklist is authoritative. Work still includes ownership-aware recovery of partially provisioned exercise
+worktrees, actual-adapter verification for every advertised operation,
 and an isolated production-bridge round trip with artifact verification. Current
 fixture coverage must not be presented as native-provider or live-host proof.

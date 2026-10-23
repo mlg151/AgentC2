@@ -92,7 +92,7 @@ function createEvidence({ service: s, isCommander, activeKeys }) {
       const group = health?.resources;
       const groupAvailable = Number.isFinite(group?.memoryHeadroomBytes) ? group.memoryHeadroomBytes : null;
       return { id: h.id, connected: h.connected, health: health ? redact(health) : unknown('Host health is unavailable'), capabilities,
-        headroom: { status: health?.connected && available !== null ? 'reported' : 'unknown', memoryBytes: available === null ? null : groupAvailable === null ? available : Math.min(available, groupAvailable),
+        headroom: { status: health?.connected && available !== null && (group?.memoryLimitStatus !== 'limited' || groupAvailable !== null) ? 'reported' : 'unknown', memoryBytes: available === null ? null : groupAvailable === null ? available : Math.min(available, groupAvailable),
           cpuPercent: Number.isFinite(health?.cpuPercent) && health.connected ? Math.max(0, 100 - health.cpuPercent) : null,
           scope: group?.memoryLimitStatus === 'limited' ? 'host_and_reported_cgroup' : 'host; cgroup headroom may be unknown',
           limitsCoverage: group?.memoryLimitStatus || 'unknown', sampledAt: health?.sampledAt || null },
@@ -112,7 +112,7 @@ function createEvidence({ service: s, isCommander, activeKeys }) {
     const entries = await sections[input.section]();
     return { ...page(entries, input), section: input.section, status: input.section === 'handoffs' && !s.commanderHandoffs ? 'unsupported' : 'reported' };
   }
-  async function admission(input) {
+  async function admission(input, { reuse } = {}) {
     const inv = await inventory();
     const hostId = input.hostId || s.store.data.settings.hosts.find((h) => h.enabled)?.id;
     const host = inv.hosts?.find((h) => h.id === hostId);
@@ -128,7 +128,21 @@ function createEvidence({ service: s, isCommander, activeKeys }) {
     let paths;
     if (!input.worktree && host?.connected && s.commanderLaunchPaths && withPaths.length <= 200) paths = await s.commanderLaunchPaths(hostId, input.cwd, withPaths.map((u) => u.cwd)).catch(() => null);
     const owners = candidates.filter((u) => (requested && u.worktreeOperation === requested) || (paths && u.cwd && paths.paths[withPaths.indexOf(u)] === paths.cwd));
-    if (owners.length) blockers.push('The exact working directory or worktree is already assigned to a live unit');
+    const sharedOwners = [];
+    if (reuse) {
+      const worktree = records?.find((record) => record.operationId === reuse.operationId);
+      if (!worktree?.status?.owned || worktree.state === 'archived' || worktree.path !== input.cwd || paths?.cwd !== worktree.path) blockers.push('Workflow worktree ownership/path changed or could not be verified');
+      else for (const owner of owners) {
+        const predecessor = reuse.predecessors?.find((item) => item.sessionKey === owner.key && item.chatSessionId === owner.chatSessionId && item.turnId);
+        if (!predecessor || !owner.managed || owner.kind !== 'managed' || owner.stale || owner.missing || owner.transport !== 'chat') continue;
+        const detail = await s.commanderInspection(owner).catch(() => null);
+        const events = detail?.journal?.events || [];
+        const latestTurn = [...events].reverse().find((event) => event.turnId)?.turnId;
+        const ended = events.some((event) => event.type === 'turn.completed' && event.turnId === predecessor.turnId && ['completed', 'failed', 'interrupted'].includes(event.data?.outcome));
+        if (['idle', 'failed', 'stopped'].includes(detail?.sessionState) && Array.isArray(detail.pendingRequests) && !detail.pendingRequests.length && latestTurn === predecessor.turnId && ended) sharedOwners.push(owner.key);
+      }
+    }
+    if (owners.some((owner) => !sharedOwners.includes(owner.key))) blockers.push('The exact working directory or worktree is already assigned to a live unit');
     if (!paths && !input.worktree) unknowns.push('Canonical working directory identity could not be inspected');
     if (!input.worktree && candidates.some((u) => !u.cwd)) unknowns.push('Some live unit working directories are unknown');
     if (!records) unknowns.push('Managed worktree ownership could not be inspected');
@@ -138,6 +152,7 @@ function createEvidence({ service: s, isCommander, activeKeys }) {
     if (report?.headroom?.cpuPercent != null && report.headroom.cpuPercent < 5) unknowns.push('Host CPU is above 95% utilization');
     return { status: blockers.length ? 'blocked' : unknowns.length ? 'unknown' : 'admitted', hostId, blockers, unknowns,
       owners: owners.map((u) => ({ key: u.key, cwd: u.cwd || null, worktreeOperation: u.worktreeOperation || null, roeProfile: u.roeProfile || 'unknown' })),
+      sharedOwners,
       resources: report?.headroom || unknown('Health unavailable'), policy: 'Block known assignment conflicts and memory exhaustion; unknowns require Watch Officer review. Repository names alone never establish conflicts.', capturedAt: new Date().toISOString() };
   }
   return { units, inspect, hosts, context, admission };

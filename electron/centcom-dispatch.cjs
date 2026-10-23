@@ -17,6 +17,7 @@ function assertDispatchScope(host, payload, settings) {
   if (!expected || fingerprint(expected) !== fingerprint(host)) reject('Reviewed host route changed before dispatch');
   if (fingerprint(scope.roe) !== fingerprint(settings.roe || null)) reject('Rules of Engagement changed before dispatch');
   if (scope.preset && fingerprint(scope.preset) !== fingerprint(settings.presets.find((p) => p.id === scope.preset.id) || null)) reject('Reviewed launch preset changed before dispatch');
+  for (const preset of scope.presets || []) if (fingerprint(preset.value) !== fingerprint(settings.presets.find((item) => item.id === preset.id) || null)) reject('Reviewed contestant preset changed before dispatch');
   const current = context.authority();
   if (current.mode !== scope.mode || current.commander !== scope.commander) reject('CENTCOM authorization changed before dispatch');
   if (payload.action === 'worktree_archive') return { ...payload, expectedHeadCommit: context.directive.binding.evidence.operationEvidence.status.headCommit };

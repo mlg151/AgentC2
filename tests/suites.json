@@ -31,6 +31,11 @@
       "group": "core"
     },
     {
+      "id": "centcom-launch",
+      "file": "tests/centcom-launch.cjs",
+      "group": "core"
+    },
+    {
       "id": "centcom-missions",
       "file": "tests/centcom-missions.cjs",
       "group": "core"
