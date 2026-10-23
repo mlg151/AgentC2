@@ -354,6 +354,7 @@ kbd{font:10px Consolas,monospace;background:#29404e;padding:3px 5px;border-radiu
 .centcom-badge.spend { background: #17232d; color: #9bb6c4; border: 1px solid #354c5c; }
 .centcom-tabs { margin: 2px 0; }
 .centcom-tab-content { display: flex; flex-direction: column; gap: 14px; min-height: 440px; overflow-y: auto; padding-right: 4px; scrollbar-color: #3c5260 transparent; scrollbar-width: thin; }
+.centcom-tab-content .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
 .centcom-quick-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .centcom-quick-actions button svg { flex: none; }
 .centcom-chat-frame { flex: 1; min-height: 420px; max-height: 540px; display: flex; flex-direction: column; border: 1px solid #2c404d; border-radius: 6px; overflow: hidden; background: #0a1218; }
