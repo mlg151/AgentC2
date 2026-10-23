@@ -23,6 +23,21 @@ contextBridge.exposeInMainWorld('agentHQ', {
   configureSpecops: (yaml) => ipcRenderer.invoke('specops:configure', yaml),
   launchSpecops: (input) => ipcRenderer.invoke('specops:launch', input),
   controlSpecops: (id, action) => ipcRenderer.invoke('specops:control', id, action),
+  centcomState: () => ipcRenderer.invoke('centcom:state'),
+  configureCentcom: (config) => ipcRenderer.invoke('centcom:configure', config),
+  startCentcom: (prompt) => ipcRenderer.invoke('centcom:start', prompt),
+  submitCentcom: (text) => ipcRenderer.invoke('centcom:submit', text),
+  interruptCentcom: () => ipcRenderer.invoke('centcom:interrupt'),
+  pauseCentcom: (paused) => ipcRenderer.invoke('centcom:pause', paused),
+  resetCentcomSession: () => ipcRenderer.invoke('centcom:reset'),
+  decideCentcomDirective: (id, decision) => ipcRenderer.invoke('centcom:decide-directive', id, decision),
+  decideAllCentcomDirectives: (decision) => ipcRenderer.invoke('centcom:decide-all-directives', decision),
+  applyCentcomAutomation: (id, decision) => ipcRenderer.invoke('centcom:apply-automation', id, decision),
+  onCentcomState: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on('centcom:updated', listener);
+    return () => ipcRenderer.removeListener('centcom:updated', listener);
+  },
   listExercises: () => ipcRenderer.invoke('exercise:list'),
   exerciseCapabilities: (hostId) => ipcRenderer.invoke('exercise:capabilities', hostId),
   createExercise: (input) => ipcRenderer.invoke('exercise:create', input),

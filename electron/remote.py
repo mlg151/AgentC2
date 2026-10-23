@@ -697,6 +697,39 @@ def history(payload):
     return {"text": output[-4000000:], "truncated": len(output) > 4000000}
 
 
+def centcom_sync(payload):
+    root = HOME / ".cache" / "agentc2" / "centcom"
+    if root.is_symlink():
+        raise ValueError("CENTCOM workspace path is a symlink")
+    root.mkdir(parents=True, mode=0o700, exist_ok=True)
+    info = root.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+        raise ValueError("CENTCOM workspace is not owned safely")
+    root.chmod(0o700)
+    files = payload.get("files") or {}
+    if not isinstance(files, dict):
+        raise ValueError("Invalid CENTCOM workspace files")
+    written = []
+    for name, content in files.items():
+        if name not in ("AGENTS.md", "SITUATION.json") or not isinstance(content, str) or len(content.encode("utf-8")) > 1_000_000:
+            raise ValueError("Unsupported or oversized CENTCOM file")
+        target = root / name
+        if target.is_symlink():
+            raise ValueError(f"CENTCOM file target is a symlink: {name}")
+        temp = root / (name + "." + uuid.uuid4().hex + ".tmp")
+        fd = os.open(temp, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as out:
+                out.write(content)
+                out.flush()
+                os.fsync(out.fileno())
+            os.replace(temp, target)
+            written.append(name)
+        finally:
+            temp.unlink(missing_ok=True)
+    return {"path": str(root), "written": written}
+
+
 def managed_action(payload, action):
     name = payload.get("name", "")
     if not TMUX_RE.fullmatch(name) or tmux_option(name, "@hq_provider") not in SESSION_PROVIDERS:
@@ -774,6 +807,9 @@ def main():
         result = cleanup_preview(payload)
     elif action == "cleanup_delete":
         result = cleanup_delete(payload)
+    elif action == "centcom_sync":
+        with cleanup_lock():
+            result = centcom_sync(payload)
     elif action == "configure":
         result = configure_session(payload)
     elif action == "rename":

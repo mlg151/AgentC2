@@ -122,6 +122,7 @@ app.whenReady().then(async () => {
     service.events.on('health:updated', (value) => send('health:updated', value));
     service.events.on('session:pinned', (key, pinned) => send('session:pinned', key, pinned));
     service.events.on('sessions:deleted', (keys) => send('sessions:deleted', keys));
+    service.events.on('centcom:updated', (value) => send('centcom:updated', value));
     for (const item of service.store.data.attention) notified.add(item.id);
     if (gateway.data.enabled) await gateway.start().catch((error) => { gateway.error = error.message; });
     updateTray();
@@ -139,6 +140,16 @@ app.whenReady().then(async () => {
   handle('specops:configure', (yaml) => service.specops.configure(yaml));
   handle('specops:launch', (input) => service.specops.launch(input));
   handle('specops:control', (id, action) => service.specops.control(id, action));
+  handle('centcom:state', () => service.centcom.state());
+  handle('centcom:configure', (input) => service.centcom.configure(input));
+  handle('centcom:start', (prompt) => service.centcom.start(prompt));
+  handle('centcom:submit', (text) => service.centcom.submit(text));
+  handle('centcom:interrupt', () => service.centcom.interrupt());
+  handle('centcom:pause', (paused) => service.centcom.pause(paused));
+  handle('centcom:reset', () => service.centcom.resetSession());
+  handle('centcom:decide-directive', (id, decision) => service.centcom.decideDirective(id, decision));
+  handle('centcom:decide-all-directives', (decision) => service.centcom.decideAllDirectives(decision));
+  handle('centcom:apply-automation', (id, decision) => service.centcom.applyAutomation(id, decision));
   handle('exercise:list', () => service.exercises.list());
   handle('exercise:capabilities', (hostId) => service.exercises.capabilities(hostId));
   handle('exercise:create', (input) => service.exercises.create(input));
@@ -239,7 +250,7 @@ const notified = new Set();
 app.on('before-quit', () => {
   quitting = true;
   clearInterval(monitor); clearInterval(healthMonitor); clearInterval(cleanupMonitor);
-  service?.specops.dispose(); void gateway?.dispose(); service?.terminals.closeAll(); service?.chats.closeAll(); tray?.destroy(); tray = null;
+  service?.specops.dispose(); service?.centcom.dispose(); void gateway?.dispose(); service?.terminals.closeAll(); service?.chats.closeAll(); tray?.destroy(); tray = null;
   service?.tunnels.closeAll();
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
