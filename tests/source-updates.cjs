@@ -52,7 +52,7 @@ const { createUpdates } = require('../electron/updates.cjs');
     assert.equal(resumeSourceUpdate({ directory, revision: target, app }), false, 'Manually rebuilt checkouts are not redirected');
     assert.equal(resumeSourceUpdate({ directory, revision: target, app: { ...app, getAppPath: () => built } }), false, 'No relaunch loop');
     assert.equal(sourceExecutable('/fixture', 'win32').endsWith('electron.exe'), true);
-    assert.equal(sourceExecutable('/fixture', 'darwin').endsWith('Electron.app/Contents/MacOS/Electron'), true);
+    assert.equal(sourceExecutable('/fixture', 'darwin').endsWith(path.join('Electron.app', 'Contents', 'MacOS', 'Electron')), true);
     const current = createUpdates({ updater: new SourceUpdater({ revision: target, directory, app, repository, execute }), version: '0.4.2', source: true });
     assert.equal((await current.check()).status, 'current');
     console.log('PASS real Git fetch, pinned source builds, dirty checkout preservation, build failure cleanup, restart selection/persistence, and platform executable paths');
