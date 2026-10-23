@@ -41,6 +41,7 @@
     "test:specops": "node tests/specops.cjs && python3 tests/github.py",
     "test:specops:ui": "npm run build && node tests/specops.ui.e2e.cjs",
     "test:windows:local": "npm run build && node tests/windows-local.e2e.cjs",
+    "test:centcom": "node tests/centcom.cjs",
     "test:inventory": "node scripts/run-tests.cjs --validate"
   },
   "dependencies": {

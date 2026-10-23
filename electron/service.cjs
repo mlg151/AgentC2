@@ -17,9 +17,10 @@ const { Tunnels } = require('./tunnels.cjs');
 const { createExercises } = require('./exercises.cjs');
 const { LoopBreaker } = require('./loop-breaker.cjs');
 const { createSpecops } = require('./specops.cjs');
+const { createCentcom } = require('./centcom.cjs');
 const { Chats } = require('./chat.cjs');
 
-function createService({ directory, home, specopsDirectory }) {
+function createService({ directory, home, specopsDirectory, centcomDirectory }) {
   const events = new EventEmitter();
   const SSH_BINARY = sshBinary();
   const SSH_ARGS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'StrictHostKeyChecking=yes'];
@@ -691,6 +692,35 @@ function createService({ directory, home, specopsDirectory }) {
   }
   const github = (input) => runRemote({ ...input, action: 'github' }, getHost(input?.hostId).id);
   const specops = createSpecops({ directory: specopsDirectory || path.join(directory, 'specops'), runRemote, createSession: create, chats, getHost, emit: (...args) => events.emit(...args) });
-  return { specops, github, store, events, terminals, chats, tunnels, cleanup, exercises, inventory, health, create, worktrees, flashQueue, flashDecide, archiveWorktree, diffRequest, previewSitrep, launchSitrep, action, deleteSession, interruptFaults, resetFault, renameSession, loopBreaker, uploadClipboardImage, devUrls, openDevUrl, saveSettings, previewOpOrder, enrollOpOrder, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
+  const centcom = createCentcom({
+    directory: centcomDirectory || (process.env.AGENTC2_DATA_DIR || process.env.AGENT_HQ_DATA_DIR ? path.join(directory, 'centcom') : path.join(home, '.agentc2', 'centcom')),
+    service: {
+      inventory,
+      health,
+      create,
+      action,
+      renameSession,
+      setSessionPinned,
+      searchHistory,
+      terminalPreviews,
+      previewSitrep,
+      launchSitrep,
+      runRemote,
+      getHost,
+      flashQueue,
+      flashDecide,
+      interruptFaults,
+      resetFault,
+      specops,
+      exercises,
+      loopBreaker,
+      store,
+      saveSettings,
+    },
+    chats,
+    emit: (...args) => events.emit(...args),
+  });
+  events.on('inventory:updated', (snapshot) => centcom.observe(snapshot));
+  return { centcom, specops, github, store, events, terminals, chats, tunnels, cleanup, exercises, inventory, health, create, worktrees, flashQueue, flashDecide, archiveWorktree, diffRequest, previewSitrep, launchSitrep, action, deleteSession, interruptFaults, resetFault, renameSession, loopBreaker, uploadClipboardImage, devUrls, openDevUrl, saveSettings, previewOpOrder, enrollOpOrder, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
 }
 module.exports = { createService };

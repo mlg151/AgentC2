@@ -8,6 +8,9 @@ const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.Modu
 const moduleLike = { exports: {} };
 new Function('module', 'exports', 'require', compiled)(moduleLike, moduleLike.exports, require);
 const { fleetReadiness, elapsedClock } = moduleLike.exports;
+const cjsReadiness = require('../electron/readiness.cjs');
+assert.equal(typeof cjsReadiness.fleetReadiness, 'function');
+assert.equal(typeof cjsReadiness.elapsedClock, 'function');
 const now = Date.parse('2026-10-21T18:00:00Z');
 const key = 'default/tmux:hq-aaaaaaaaaaaa';
 const unit = { key, hostId: 'default', provider: 'claude', kind: 'managed', title: 'Active QA', state: 'live', events: [{ id: '1', kind: 'working', at: '2026-10-21T17:59:30Z' }], telemetry: { status: 'reported', sampledAt: '2026-10-21T17:59:30Z', costUsd: 1.2, totalTokens: 500 } };

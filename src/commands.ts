@@ -14,6 +14,7 @@ export const commandDefinitions = [
   { id: 'deny', label: 'Deny current Flash Traffic request', binding: 'Alt+N', chord: '' },
   { id: 'jumpRequest', label: 'Jump to the current permission request', binding: 'Alt+G', chord: '' },
   { id: 'diff', label: 'Toggle worktree diff', binding: 'Alt+D', chord: 'd' },
+  { id: 'centcom', label: 'CENTCOM Fleet Command', binding: '', chord: 'c' },
   { id: 'exercise', label: 'Joint Exercise', binding: '', chord: 'b' },
   { id: 'handoff', label: 'SitRep handoff', binding: '', chord: 'r' },
   { id: 'faultStop', label: 'Interrupt faulted managed units', binding: '', chord: 'x' },

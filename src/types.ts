@@ -125,8 +125,121 @@ export interface DiffFile { id: string; path: string; staged: boolean; unstaged:
 export interface DiffHunk { id: string; text: string; actionable: boolean }
 export interface DiffDetail { revision: string; staged: DiffHunk[]; unstaged: DiffHunk[]; summary: string; binary: boolean; large: boolean }
 
+export type CentcomAuthority = 'gated' | 'autonomous';
+
+export interface CentcomTriggers {
+  onSpecopsHalt: boolean;
+  onLoopFault: boolean;
+  onFlashTraffic: boolean;
+  onUnitFailed: boolean;
+  cooldownSeconds: number;
+  maxAutoTurnsPerHour: number;
+}
+
+export interface CentcomConfig {
+  version: 1;
+  hostId: string;
+  provider: Exclude<Provider, 'terminal'>;
+  model: string;
+  authority: CentcomAuthority;
+  triggers: CentcomTriggers;
+  maxDirectivesPerTurn: number;
+  maxBudgetUsd: number | null;
+}
+
+export type CentcomDirectiveKind =
+  | 'unit.create'
+  | 'unit.resume'
+  | 'unit.send'
+  | 'unit.steer'
+  | 'unit.interrupt'
+  | 'unit.stop'
+  | 'unit.rename'
+  | 'unit.pin'
+  | 'sitrep.handoff'
+  | 'specops.launch'
+  | 'specops.control'
+  | 'exercise.create'
+  | 'exercise.control'
+  | 'flash.decide'
+  | 'chat.respond'
+  | 'fault.interrupt'
+  | 'fault.reset';
+
+export interface CentcomDirective {
+  id: string;
+  turnId: string;
+  kind: CentcomDirectiveKind;
+  summary: string;
+  rationale: string;
+  preconditions?: Record<string, unknown>;
+  params: Record<string, unknown>;
+  state: 'pending' | 'executing' | 'completed' | 'denied' | 'failed' | 'uncertain';
+  trigger: string;
+  createdAt: number;
+  resolvedAt: number | null;
+  result?: unknown;
+  error?: string;
+}
+
+export interface CentcomAutomationSuggestion {
+  id: string;
+  turnId: string;
+  kind: 'specops_workflow' | 'oporder' | 'preset' | 'centcom_trigger';
+  title: string;
+  rationale: string;
+  evidence: string[];
+  payload: Record<string, unknown>;
+  state: 'proposed' | 'applied' | 'dismissed';
+  createdAt: number;
+  appliedAt: number | null;
+  error?: string;
+}
+
+export interface CentcomAuditEntry {
+  id: string;
+  kind: CentcomDirectiveKind;
+  summary: string;
+  outcome: 'completed' | 'denied' | 'failed';
+  at: number;
+  trigger: string;
+  error?: string;
+}
+
+export interface CentcomState {
+  config: CentcomConfig;
+  session: {
+    name: string;
+    chatSessionId: string;
+    hostId: string;
+    provider: Exclude<Provider, 'terminal'>;
+    model: string;
+    state: string;
+  } | null;
+  status: 'idle' | 'starting' | 'running' | 'halted' | 'awaiting_approval' | 'paused';
+  error: string;
+  costUsd: number;
+  costKnown: boolean;
+  paused?: boolean;
+  autoTurnsLastHour: number;
+  directives: CentcomDirective[];
+  automations: CentcomAutomationSuggestion[];
+  auditLog: CentcomAuditEntry[];
+}
+
 export interface AppUpdate { status: 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'ready' | 'installing' | 'error'; version: string; target: string | null; percent: number | null; error: string; source: boolean }
 export interface AgentHQApi {
+  centcomState(): Promise<CentcomState>;
+  configureCentcom(config: CentcomConfig): Promise<CentcomState>;
+  startCentcom(prompt?: string): Promise<CentcomState>;
+  submitCentcom(text: string): Promise<CentcomState>;
+  interruptCentcom(): Promise<CentcomState>;
+  pauseCentcom(paused: boolean): Promise<CentcomState>;
+  resetCentcomSession(): Promise<CentcomState>;
+  decideCentcomDirective(id: string, decision: 'approve' | 'deny'): Promise<CentcomState>;
+  decideAllCentcomDirectives(decision: 'approve' | 'deny'): Promise<CentcomState>;
+  applyCentcomAutomation(id: string, decision: 'apply' | 'dismiss'): Promise<CentcomState>;
+  onCentcomState(callback: (state: CentcomState) => void): () => void;
   checkForUpdates(): Promise<AppUpdate>;
   updateState(): Promise<AppUpdate>;
   downloadUpdate(): Promise<AppUpdate>;

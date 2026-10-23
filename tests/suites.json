@@ -1,6 +1,11 @@
 {
   "suites": [
     {
+      "id": "centcom",
+      "file": "tests/centcom.cjs",
+      "group": "core"
+    },
+    {
       "id": "specops",
       "file": "tests/specops.cjs",
       "group": "core"
@@ -278,6 +283,11 @@
     {
       "id": "specops.ui.e2e",
       "file": "tests/specops.ui.e2e.cjs",
+      "group": "linux-ui"
+    },
+    {
+      "id": "centcom.ui.e2e",
+      "file": "tests/centcom.ui.e2e.cjs",
       "group": "linux-ui"
     },
     {

@@ -6,6 +6,7 @@ import { CreateDialog } from './components/CreateDialog';
 import { SettingsDialog } from './components/SettingsDialog';
 import { SitRepDialog } from './components/SitRepDialog';
 import { SpecopsDialog } from './components/SpecopsDialog';
+import { CentcomDialog } from './components/CentcomDialog';
 import { ExerciseDialog } from './components/ExerciseDialog';
 import { FlashTraffic } from './components/FlashTraffic';
 import { SessionCleanupDialog } from './components/SessionCleanupDialog';
@@ -20,7 +21,7 @@ import { useCommandKeys } from './useCommandKeys';
 import { HostMonitor } from './components/HostMonitor';
 import { fleetReadiness } from './readiness';
 import { assignCallsigns, closeWorkspaceTab, emptyMetadata, isManagedSession, openInPane, projectFor, situationFor, unitState, updateSituation } from './workspace';
-import type { AttentionItem, CreateInput, FlashRequest, Inventory, Session, Settings, SituationWorkspace, Workspace } from './types';
+import type { AttentionItem, CentcomState, CreateInput, FlashRequest, Inventory, Session, Settings, SituationWorkspace, Workspace } from './types';
 
 const emptyWorkspace: Workspace = { tabs: [], selectedKey: null, splitKey: null, metadata: {} };
 function applyPin(workspace: Workspace, key: string, pinned: boolean): Workspace {
@@ -50,6 +51,8 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [sitrepSource, setSitrepSource] = useState<Session | null>(null);
   const [showSpecops, setShowSpecops] = useState(false);
+  const [showCentcom, setShowCentcom] = useState(false);
+  const [centcomState, setCentcomState] = useState<CentcomState | null>(null);
   const [showExercises, setShowExercises] = useState(false);
   const [flashRequests, setFlashRequests] = useState<FlashRequest[]>([]);
   const [flashSelectedId, setFlashSelectedId] = useState('');
@@ -77,6 +80,7 @@ export default function App() {
   const situation = situationFor(workspace);
   const unread = attention.filter((a) => !a.acknowledged);
   const readiness = useMemo(() => fleetReadiness(inventory, flashRequests), [inventory, flashRequests]);
+  const centcomPendingCount = useMemo(() => (centcomState?.directives || []).filter((d) => d.state === 'pending').length, [centcomState]);
 
   const acceptInventory = useCallback((next: Inventory) => {
     setInventory(next); setAttention(next.attention);
@@ -135,6 +139,13 @@ export default function App() {
     void poll();
     const timer = setInterval(() => void poll(), 5000);
     return () => { current = false; clearInterval(timer); };
+  }, []);
+  useEffect(() => {
+    if (!window.agentHQ) return;
+    let active = true;
+    void window.agentHQ.centcomState().then((s) => { if (active) setCentcomState(s); }).catch(() => {});
+    const off = window.agentHQ.onCentcomState((s) => { if (active) setCentcomState(s); });
+    return () => { active = false; off(); };
   }, []);
   useEffect(() => {
     if (choseInitial.current || !managedSessions.length || !initialized.current) return;
@@ -278,6 +289,7 @@ export default function App() {
     deny: { run: () => { void decideFlash('deny'); }, available: Boolean(flashSelected?.state === 'pending' && flashSelected.connected && !flashBusy), reason: 'No connected verified permission request' },
     jumpRequest: { run: jumpFlash, available: Boolean(flashSelected), reason: 'No verified permission request' },
     diff: { run: () => { if (selected) toggleDiff(selected.key); }, available: Boolean(selected?.worktreeOperation && selected.kind === 'managed'), reason: 'Select an owned worktree unit' },
+    centcom: { run: () => setShowCentcom((value) => !value) },
     exercise: { run: () => setShowExercises(true) },
     handoff: { run: () => { if (selected) setSitrepSource(selected); }, available: Boolean(selected?.worktreeOperation && selected.kind === 'managed' && !selected.stale), reason: 'Select a connected owned worktree unit' },
     faultStop: { run: () => { void window.agentHQ?.interruptFaults().then((results) => { setFaultResult(results.map((item) => `${item.sessionKey}: ${item.status}${item.result ? ` (${item.result})` : ''}`).join('\n')); return refresh(); }).catch((cause) => setFaultResult(String(cause))); }, available: Boolean(inventory?.faults?.some((item) => ['review', 'failed', 'unknown'].includes(item.status))), reason: 'No eligible confirmed faults' },
@@ -290,7 +302,7 @@ export default function App() {
 
   return <div className={`app-shell situation-room${situation.rosterCollapsed || situation.zen ? ' roster-hidden' : ''}${situation.zen ? ' is-zen' : ''}${situation.ligatures ? ' font-ligatures' : ''}`}>
     {(inventory?.missions || []).filter((r) => r.state === 'halted').length ? <button className="specops-escalation" onClick={() => setShowSpecops(true)}>Immediate Flash Traffic · [!HALT] {(inventory?.missions || []).filter((r) => r.state === 'halted').length} SPECOPS missions require arbitration</button> : null}
-    <SituationHeader onSpecops={() => setShowSpecops(true)} inventory={inventory} readiness={readiness} missionStartedAt={situation.missionStartedAt} hosts={settings?.hosts || []} hostFilter={hostFilter} onHostFilter={setHostFilter} onSearch={() => setShowSwitcher(true)} onSettings={() => setShowSettings(true)} onNew={() => setDialog(null)} collapsed={situation.rosterCollapsed || situation.zen} onToggleRoster={() => changeSituation({ rosterCollapsed: !situation.rosterCollapsed, zen: false })} />
+    <SituationHeader onCentcom={() => setShowCentcom(true)} centcomPendingCount={centcomPendingCount} onSpecops={() => setShowSpecops(true)} inventory={inventory} readiness={readiness} missionStartedAt={situation.missionStartedAt} hosts={settings?.hosts || []} hostFilter={hostFilter} onHostFilter={setHostFilter} onSearch={() => setShowSwitcher(true)} onSettings={() => setShowSettings(true)} onNew={() => setDialog(null)} collapsed={situation.rosterCollapsed || situation.zen} onToggleRoster={() => changeSituation({ rosterCollapsed: !situation.rosterCollapsed, zen: false })} />
     {inventory?.missions?.some((r) => !['completed', 'cancelled'].includes(r.state)) ? <nav className="specops-progress" aria-label="SPECOPS stage progress">{inventory.missions.filter((r) => !['completed', 'cancelled'].includes(r.state)).map((r) => <button key={r.id} onClick={() => setShowSpecops(true)}><strong>{r.repo}</strong> {r.workflow.stages.map((s) => s.id === r.stage ? `[*${s.id}*]` : `[${s.id}]`).join(' → ')}</button>)}</nav> : null}
     <div className="workspace" inert={showOverwatch}>
       <SessionList sessions={scoped} selectedKey={workspace.selectedKey} onSelect={openSession} providerFilter={providerFilter} onProviderFilter={setProviderFilter} stateFilter={stateFilter} onStateFilter={setStateFilter} onRefresh={() => void refresh()} onNew={() => setDialog(null)} loading={loading} metadata={workspace.metadata} pinning={pinning} onPin={(session) => void togglePin(session)} situation={situation} onSituation={changeSituation} attention={attention} projects={projects} projectFilter={projectFilter} onProjectFilter={setProjectFilter} pinnedOnly={pinnedOnly} onPinnedOnly={() => setPinnedOnly((value) => !value)} onInbox={() => setInbox((value) => !value)} onCleanup={() => setCleanupTarget(null)} onSettings={() => setShowSettings(true)} />
@@ -316,6 +328,7 @@ export default function App() {
     {settings && showSettings ? <SettingsDialog onSpecops={() => { setShowSettings(false); setShowSpecops(true); }} settings={settings} onSave={saveSettings} onExternalSettings={(updated) => { setSettings(updated); void refresh(); }} onClose={closeSettings} /> : null}
     {settings && sitrepSource ? <SitRepDialog source={sitrepSource} settings={settings} initialSummary={workspace.metadata[sitrepSource.key]?.notes || ''} onLaunched={async (name, hostId) => { if (!window.agentHQ) throw new Error('Desktop bridge unavailable'); for (let attempt = 0; attempt < 6; attempt++) { const next = await window.agentHQ.inventory(); acceptInventory(next); const unit = next.sessions.find((item) => item.id === name && item.hostId === hostId); if (unit) { openSession(unit); return; } await new Promise((resolve) => setTimeout(resolve, 350)); } throw new Error('Recipient launched but has not appeared in inventory; refresh to find it.'); }} onClose={() => setSitrepSource(null)} /> : null}
     {settings && showSpecops ? <SpecopsDialog settings={settings} onClose={() => setShowSpecops(false)} /> : null}
+    {settings && showCentcom ? <CentcomDialog settings={settings} onClose={() => setShowCentcom(false)} /> : null}
     {settings && showExercises ? <ExerciseDialog settings={settings} hostId={hostFilter === 'all' ? settings.hosts.find((host) => host.enabled)?.id || '' : hostFilter} onLaunched={() => void refresh()} onClose={() => setShowExercises(false)} /> : null}
     {showFlash ? <FlashTraffic requests={flashPending} selectedId={flashSelectedId} busy={flashBusy} error={flashError} onSelect={setFlashSelectedId} onDecide={(decision) => void decideFlash(decision)} onJump={jumpFlash} onClose={() => setShowFlash(false)} /> : null}
     {settings && cleanupTarget !== undefined ? <SessionCleanupDialog settings={settings} target={cleanupTarget} onSave={saveSettings} onClose={closeCleanup} /> : null}
