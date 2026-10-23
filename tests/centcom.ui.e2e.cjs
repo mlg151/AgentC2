@@ -39,7 +39,7 @@ const { Store } = require('../electron/config.cjs');
         session: null,
         status: 'idle',
         costUsd: 1.25,
-        costKnown: true,
+        costKnown: false,
         directives: [
           {
             id: 'd-1',
@@ -67,6 +67,8 @@ const { Store } = require('../electron/config.cjs');
             createdAt: Date.now() - 30000,
             appliedAt: null,
           },
+          { id: 'a-2', turnId: 'turn-2', kind: 'oporder', title: 'Uncertain enrollment', rationale: 'Readback could not confirm persistence', payload: {}, evidence: [], state: 'uncertain', error: 'OpOrder enrollment readback failed', createdAt: Date.now(), appliedAt: null },
+          { id: 'a-3', turnId: 'turn-3', kind: 'preset', title: 'Verified saved preset', rationale: 'Readback observed the saved artifact', payload: {}, evidence: [], state: 'applied', result: { artifact: { id: 'saved-fixture' }, revision: 'a'.repeat(64) }, createdAt: Date.now(), appliedAt: Date.now() },
         ],
         auditLog: [],
       })
@@ -95,6 +97,7 @@ const { Store } = require('../electron/config.cjs');
     // Open CENTCOM Console
     await centcomBtn.click();
     await page.getByText('CENTCOM COMMAND CONSOLE').waitFor();
+    await page.getByText('KNOWN SPEND: $1.25 · INCOMPLETE').waitFor();
 
     // Verify tabs
     await page.getByRole('button', { name: 'Command Deck' }).waitFor();
@@ -115,11 +118,27 @@ const { Store } = require('../electron/config.cjs');
     await page.getByRole('button', { name: /^Automations/ }).click();
     await page.getByText('Node 22 Unit Test Preset').waitFor();
     await page.getByRole('button', { name: 'Apply Configuration' }).waitFor();
+    const uncertain = page.locator('.centcom-automation-card.uncertain');
+    await uncertain.getByText('UNCERTAIN', { exact: true }).waitFor();
+    assert.equal(await uncertain.getByRole('button', { name: 'Apply Configuration' }).count(), 0);
+    await uncertain.getByText('The change may have been saved.', { exact: false }).waitFor();
+    await page.getByText('Saved artifact and revision', { exact: true }).click();
+    await page.getByText('saved-fixture', { exact: false }).waitFor();
+    await page.screenshot({ path: path.join(screenshotDir, 'centcom-automation-outcomes.png') });
 
     // Switch to Configuration tab and verify authority mode
     await page.getByRole('button', { name: 'Configuration & ROE' }).click();
     await page.getByText('Gated C2 (Recommended)').waitFor();
     await page.getByText('Autonomous C2').waitFor();
+    const fallback = page.getByLabel('Fallback status interval (seconds)', { exact: false });
+    assert.equal(await fallback.inputValue(), '600');
+    await fallback.fill('0');
+    await page.getByLabel('Provider turn deadline (seconds)', { exact: true }).fill('1200');
+    await page.getByRole('button', { name: 'Save Configuration', exact: true }).click();
+    await page.waitForFunction(async () => (await window.agentHQ.centcomState()).config.triggers.fallbackSeconds === 0);
+    const persisted = JSON.parse(fs.readFileSync(path.join(directory, 'centcom/centcom.json')));
+    assert.equal(persisted.config.triggers.fallbackSeconds, 0);
+    assert.equal(persisted.config.turnDeadlineSeconds, 1200);
 
     // Responsive check at 960x800
     await page.setViewportSize({ width: 960, height: 800 });

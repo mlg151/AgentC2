@@ -212,6 +212,7 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
     resolveHost: (hostId) => getHost(hostId).id,
     emit: (clientId, event, value) => events.emit('client', clientId, event, value),
     onEvents: (record, chatEvents) => {
+      events.emit('commander:chat-evidence', record, chatEvents);
       const name = record.session.managedName;
       if (!TMUX_NAME.test(name || '')) return;
       for (const event of chatEvents) {
@@ -726,6 +727,7 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
     emit: (...args) => events.emit(...args),
   });
   routeCommanderCommands(chats, centcom);
+  events.on('commander:chat-evidence', (record, chatEvents) => { void centcom.observeChat(record, chatEvents).catch((error) => console.error('CENTCOM chat observation failed:', error.message)); });
   events.on('inventory:updated', (snapshot) => { void centcom.observe(snapshot)?.catch((error) => console.error('CENTCOM observation failed:', error.message)); });
   return { centcom, specops, github, store, events, terminals, chats, tunnels, cleanup, exercises, inventory, health, create, worktrees, flashQueue, flashDecide, archiveWorktree, diffRequest, previewSitrep, launchSitrep, action, deleteSession, interruptFaults, resetFault, renameSession, loopBreaker, uploadClipboardImage, devUrls, openDevUrl, saveSettings, previewOpOrder, enrollOpOrder, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
 }

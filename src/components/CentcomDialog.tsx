@@ -80,8 +80,8 @@ export function CentcomDialog({ settings, onClose }: { settings: Settings; onClo
               {state?.config.authority === 'autonomous' ? <ShieldAlert size={13} /> : <Shield size={13} />}
               {state?.config.authority === 'autonomous' ? 'AUTONOMOUS C2' : 'GATED C2'}
             </span>
-            <span className="centcom-badge spend">
-              SPEND: ${state?.costUsd?.toFixed(2) || '0.00'}
+            <span className="centcom-badge spend" title={state?.costKnown === false ? 'Some provider costs are unknown. The budget stops at the known spend ceiling; actual spend may be higher.' : 'Reported provider spend'}>
+              {state?.costKnown === false ? 'KNOWN SPEND: ' : 'SPEND: '}${state?.costUsd?.toFixed(2) || '0.00'}{state?.costKnown === false ? ' · INCOMPLETE' : ''}
             </span>
           </div>
         </header>
@@ -372,6 +372,8 @@ export function CentcomDialog({ settings, onClose }: { settings: Settings; onClo
                     <pre>{JSON.stringify(a.payload, null, 2)}</pre>
                   </details>
                   {a.error ? <p role="alert" className="form-error">{a.error}</p> : null}
+                  {a.state === 'uncertain' ? <p className="field-note">The change may have been saved. Inspect the saved configuration before proposing it again.</p> : null}
+                  {a.result ? <details><summary>Saved artifact and revision</summary><pre>{JSON.stringify(a.result, null, 2)}</pre></details> : null}
                   <small>Created: {new Date(a.createdAt).toLocaleString()}</small>
                 </article>
               ))}
@@ -516,10 +518,27 @@ export function CentcomDialog({ settings, onClose }: { settings: Settings; onClo
                 />
                 Auto-wake on non-zero unit process exits
               </label>
+              <label className="checkbox-label">
+                <input type="checkbox" checked={configDraft.triggers.onUnitCompleted !== false} onChange={(e) => setConfigDraft({ ...configDraft, triggers: { ...configDraft.triggers, onUnitCompleted: e.target.checked } })} />
+                Auto-wake on unit completion
+              </label>
+              <label className="checkbox-label">
+                <input type="checkbox" checked={configDraft.triggers.onDependencyChange !== false} onChange={(e) => setConfigDraft({ ...configDraft, triggers: { ...configDraft.triggers, onDependencyChange: e.target.checked } })} />
+                Auto-wake on mission stage and dependency changes
+              </label>
             </div>
 
             <h4>Circuit Breakers & Safeguards</h4>
             <div className="form-grid">
+              <label>
+                Fallback status interval (seconds)
+                <input type="number" min="0" max="86400" step="60" value={configDraft.triggers.fallbackSeconds ?? 600} onChange={(e) => setConfigDraft({ ...configDraft, triggers: { ...configDraft.triggers, fallbackSeconds: Number(e.target.value) } })} />
+                <small>0 disables polling; otherwise use at least 600 seconds. Events wake CENTCOM first.</small>
+              </label>
+              <label>
+                Provider turn deadline (seconds)
+                <input type="number" min="1" max="86400" value={configDraft.turnDeadlineSeconds ?? 600} onChange={(e) => setConfigDraft({ ...configDraft, turnDeadlineSeconds: Number(e.target.value) } )} />
+              </label>
               <label>
                 Trigger Cooldown (seconds)
                 <input

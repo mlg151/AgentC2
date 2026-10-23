@@ -1,13 +1,16 @@
 // Metadata and executable handlers live together. Both envelope dialects use
 // this registry, so doctrine cannot advertise an unimplemented dispatch branch.
-function createOperations({ service: s, client, control, resolve, fleet, applyAutomation }) {
+function createOperations({ service: s, client, control, resolve, fleet, applyAutomation, readOutcomes, manifest }) {
   const registry = new Map();
   const add = (operation, classification, description, parameters, target, handler, dependencies = [], aliases = [], unavailable = '') => {
-    registry.set(operation, { operation, classification, description, parameters, target, handler, dependencies, aliases, unavailable });
+    const reviewRequired = ['configuration.save', 'specops.configure', 'oporder.enroll', 'automation.apply'].includes(operation);
+    registry.set(operation, { operation, classification, description, parameters, target, handler, dependencies, aliases, unavailable, reviewRequired });
   };
   const call = (path) => path.split('.').reduce((v, k) => v?.[k], s);
   const unit = (operation, description, parameters, handler, dependencies = [], aliases = []) => add(operation, 'action', description, parameters, 'session', handler, dependencies, aliases);
   const controlled = (u, fn) => control(u, fn);
+  add('capabilities.read', 'query', 'Read the versioned implemented contract, authority, and effective limits.', {}, 'none', () => manifest());
+  add('outcomes.read', 'query', 'Read durable directive, automation, approval, audit, query, and diagnostic outcomes by cursor. Project acceptance is separate from command delivery.', { after: 'number?', limit: 'number?', collection: 'string?', clientRequestId: 'string?', serverId: 'string?' }, 'none', (p) => readOutcomes(p));
   add('fleet.inspect', 'query', 'Inspect the connected active managed fleet.', {}, 'none', async () => (await fleet()).inventory);
   add('unit.inspect', 'query', 'Read an active unit transcript tail.', { sessionKey: 'string' }, 'session', async (_p, u) => (await s.terminalPreviews([u.key]))[0], ['terminalPreviews'], ['inspect_unit']);
   add('unit.search', 'query', 'Search transcripts of selected active units only.', { query: 'string', keys: 'array?' }, 'sessions', (p, units) => s.searchHistory(p.query, units.map((u) => u.key)), ['searchHistory'], ['search_history']);
@@ -90,7 +93,9 @@ function createOperations({ service: s, client, control, resolve, fleet, applyAu
     return [...registry.values()].map(({ handler, dependencies, unavailable, ...entry }) => {
       const needsSession = ['session', 'sessions', 'sitrep', 'mission', 'exercise', 'contestant'].includes(entry.target);
       const reason = availability(registry.get(entry.operation)) || (context && needsSession && !context.sessions.length ? 'No connected active managed sessions are currently eligible' : '');
-      return { ...entry, parameters: { ...(entry.target === 'session' ? { sessionKey: 'string?', key: 'string?', name: 'string?', hostId: 'string?', chatSessionId: 'string?' } : {}), ...entry.parameters }, available: !reason, unavailableReason: reason || null };
+      const parameters = { ...(entry.target === 'session' ? { sessionKey: 'string?', key: 'string?', name: 'string?', hostId: 'string?', chatSessionId: 'string?' } : {}), ...entry.parameters };
+      const properties = Object.fromEntries(Object.entries(parameters).map(([key, type]) => [key, { type: type === 'nullable' ? ['string', 'null'] : type.replace('?', '') }]));
+      return { ...entry, parameters, inputSchema: { type: 'object', properties, required: Object.keys(parameters).filter((key) => !parameters[key].endsWith('?')), additionalProperties: false }, available: !reason, unavailableReason: reason || null };
     });
   }
   function definition(operation) {
@@ -123,6 +128,8 @@ function createOperations({ service: s, client, control, resolve, fleet, applyAu
     const target = await resolve(entry, input, preconditions);
     check();
     const result = await entry.handler(input, target);
+    // Historical outcomes remain inspectable after a target exits the fleet.
+    if (['outcomes.read', 'capabilities.read'].includes(entry.operation)) return result;
     if (classification === 'action') return result; // Audit retains the real receipt, even if the unit leaves the fleet.
     return (await fleet()).clean(result) ?? { unavailable: 'Result belongs to an excluded session' };
   }

@@ -240,6 +240,7 @@ Follow-up text.`;
     },
     saveSettings: async (updated) => {
       serviceActions.push({ type: 'saveSettings', settings: updated });
+      mockService.store.data.settings = updated;
     },
   };
 

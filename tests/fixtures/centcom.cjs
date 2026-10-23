@@ -19,7 +19,7 @@ async function until(predicate) {
   throw new Error('Fixture condition timed out');
 }
 
-function fixture(directory) {
+function fixture(directory, options = {}) {
   let engine, counter = 100, gate, receiptGate;
   const sessions = [unit(1), unit(2, { state: 'waiting_for_input', chatState: 'waiting' }),
     unit(3, { state: 'exited', chatState: 'stopped' }), unit(4), unit(5, { stale: true }),
@@ -96,7 +96,7 @@ function fixture(directory) {
   };
   const facade = commanderFacade({ chats, terminals, ...service });
   const start = () => {
-    engine = createCentcom({ directory, service: facade, chats, emit() {} });
+    engine = createCentcom({ directory, service: facade, chats, emit() {}, ...options });
     routeCommanderCommands(chats, engine);
     return engine;
   };

@@ -132,6 +132,9 @@ export interface CentcomTriggers {
   onLoopFault: boolean;
   onFlashTraffic: boolean;
   onUnitFailed: boolean;
+  onUnitCompleted?: boolean;
+  onDependencyChange?: boolean;
+  fallbackSeconds?: number;
   cooldownSeconds: number;
   maxAutoTurnsPerHour: number;
 }
@@ -145,6 +148,7 @@ export interface CentcomConfig {
   triggers: CentcomTriggers;
   maxDirectivesPerTurn: number;
   maxBudgetUsd: number | null;
+  turnDeadlineSeconds?: number;
 }
 
 export type CentcomDirectiveKind =
@@ -175,6 +179,7 @@ export interface CentcomOperationRequest {
 
 export interface CentcomDirective {
   id: string;
+  clientRequestId?: string | null;
   turnId: string;
   kind: CentcomDirectiveKind;
   summary: string;
@@ -191,13 +196,15 @@ export interface CentcomDirective {
 
 export interface CentcomAutomationSuggestion {
   id: string;
+  clientRequestId?: string | null;
+  result?: { artifact: unknown; revision: string; enrollment?: unknown };
   turnId: string;
   kind: 'specops_workflow' | 'oporder' | 'preset' | 'centcom_trigger';
   title: string;
   rationale: string;
   evidence: string[];
   payload: Record<string, unknown>;
-  state: 'proposed' | 'applied' | 'dismissed';
+  state: 'proposed' | 'applying' | 'applied' | 'dismissed' | 'uncertain';
   createdAt: number;
   appliedAt: number | null;
   error?: string;

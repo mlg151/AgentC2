@@ -12,7 +12,7 @@ const { fixture, unit, envelope, action, query, desktop, phone, tick, until } = 
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agentc2-centcom-operations-'));
 const fixtures = [];
-function make(name) { const f = fixture(path.join(directory, name)); fixtures.push(f); return f; }
+function make(name, options) { const f = fixture(path.join(directory, name), options); fixtures.push(f); return f; }
 const command = (sessionId, text = 'Assess fixture') => ({ protocolVersion: 1, commandId: crypto.randomUUID(), sessionId, operation: 'send', payload: { text } });
 async function settle(f) { await until(() => !['running', 'starting'].includes(f.engine.state().status)); await tick(); }
 
@@ -44,6 +44,7 @@ async function visibility() {
   assert.equal(snapshot.capabilities.find((c) => c.operation === 'unit.send').parameters.sessionKey, 'string?');
   assert.ok(snapshot.capabilities.some((c) => c.operation === 'history.discover' && !c.available && c.unavailableReason));
   assert.ok(f.syncs[0].files['AGENTS.md'].includes('unit.delete'));
+  assert.ok(f.syncs[0].files['AGENTS.md'].length <= 20000, 'Doctrine must fit the production chat create instruction limit');
 
   f.responses.push(envelope({ queries: [query('fleet.inspect'), query('unit.search', { query: 'fixture' }), query('unit.inspect', { sessionKey: f.sessions[2].key }), query('history.discover'), query('exercise.inspect', { id: 'exercise', contestantId: eligible[0].id })] }));
   await f.engine.submit('Inspect');
@@ -260,7 +261,8 @@ async function authorityAndAlerts() {
   try {
     const now = clock(); Date.now = () => now + 61000;
     await f.engine.observe(await f.service.inventory());
-    assert.equal(f.engine.state().autoTurnsLastHour, turns + 1, 'Queued excluded reference must be discarded before waking');
+    assert.equal(f.engine.state().autoTurnsLastHour, turns + 2, 'The stale fault is discarded, but the newly observed completion must wake CENTCOM');
+    assert.match(f.submitted.at(-1).payload.text, /unit_transition/);
   } finally { Date.now = clock; }
   const alerts = make('flash-and-failure-alerts');
   await alerts.engine.start();
@@ -287,13 +289,13 @@ async function catalogCoverage() {
   const registry = createOperations({ service: f.service, client: { id: 'centcom-commander' },
     control: (u, fn) => f.service.commanderControl({ id: 'centcom-commander' }, u, fn),
     resolve: async (entry) => entry.target === 'sessions' ? [f.sessions[0]] : f.sessions[0], fleet,
-    applyAutomation: async () => ({ applied: true }),
+    applyAutomation: async () => ({ applied: true }), readOutcomes: () => f.engine.outcomes(), manifest: () => f.engine.manifest(),
   });
   const catalog = registry.catalog();
   for (const entry of catalog) {
     const definition = registry.definition(entry.operation);
     assert.ok(typeof definition.handler === 'function' || entry.unavailableReason, entry.operation);
-    assert.equal(entry.classification, /^(unit\.(inspect|search)|fleet\.|flash.list|specops\.(definition|inspect)|exercise\.(list|inspect|preview)|worktree.list|diff\.(files|detail)|sitrep.inspect|configuration.inspect|oporder.preview|github\.(readiness|issue|issues|pr)|devurl.list|history.discover)/.test(entry.operation) ? 'query' : 'action', entry.operation);
+    assert.equal(entry.classification, /^(capabilities.read|outcomes.read|unit\.(inspect|search)|fleet\.|flash.list|specops\.(definition|inspect)|exercise\.(list|inspect|preview)|worktree.list|diff\.(files|detail)|sitrep.inspect|configuration.inspect|oporder.preview|github\.(readiness|issue|issues|pr)|devurl.list|history.discover)/.test(entry.operation) ? 'query' : 'action', entry.operation);
     if (!entry.available) { await assert.rejects(registry.execute(entry.operation, {}, entry.classification), /Unavailable operation/); continue; }
     const p = {};
     for (const [key, type] of Object.entries(definition.parameters)) {
@@ -362,9 +364,165 @@ async function migration() {
   assert.equal(f.calls.filter((c) => c.operation === 'create').length, 1);
 }
 
+async function contractOutcomes() {
+  const f = make('contract-outcomes');
+  await f.engine.start();
+  const request = action('unit.pin', { sessionKey: f.sessions[0].key, pinned: true }, { id: 'pin-worker' });
+  f.responses.push(envelope({ queries: [{ ...query('fleet.inspect'), id: 'inspect-fleet' }], directives: [request] }));
+  await f.engine.submit('Mixed envelope');
+  const [staged] = f.engine.state().directives;
+  assert.equal(staged.state, 'pending');
+  assert.equal(staged.clientRequestId, request.id);
+  assert.equal(f.calls.filter((c) => c.operation === 'unit.pin').length, 0);
+  f.responses.push(envelope({ directives: [request, { ...request, params: { operation: 'unit.pin', input: { sessionKey: f.sessions[0].key, pinned: false } } }] }));
+  await f.engine.submit('Retry same ID and conflict');
+  assert.equal(f.engine.state().directives.length, 1);
+  assert.ok(f.engine.outcomes({ collection: 'diagnostic' }).entries.some((r) => r.code === 'duplicate_request'));
+  assert.ok(f.engine.outcomes({ collection: 'diagnostic' }).entries.some((r) => r.code === 'request_id_conflict'));
+  await f.engine.decideDirective(staged.id, 'deny');
+  assert.match(f.submitted.at(-1).payload.text, /denied/);
+  const denied = f.engine.outcomes({ clientRequestId: request.id }).entries;
+  assert.ok(denied.some((r) => r.record?.state === 'denied'));
+  const firstPage = f.engine.outcomes({ limit: 1 });
+  const secondPage = f.engine.outcomes({ after: firstPage.cursor, limit: 1 });
+  assert.ok(secondPage.cursor > firstPage.cursor);
+  assert.throws(() => f.engine.outcomes({ limit: 1000 }), /Invalid outcome/);
+
+  f.responses.push('```agentc2-c2\n{bad JSON}\n```');
+  await f.engine.submit('Malformed envelope');
+  assert.match(f.submitted.at(-1).payload.text, /malformed_envelope/);
+  f.responses.push(envelope({ queries: Array.from({ length: 7 }, (_, i) => ({ ...query('fleet.inspect'), id: `q${i}` })), automations: [{ id: 'bad-auto', kind: 'specops', payload: {} }], directives: [null] }));
+  await f.engine.submit('Explicit invalid and excess requests');
+  const diagnostics = f.engine.outcomes({ collection: 'diagnostic', limit: 50 }).entries;
+  for (const code of ['invalid_request', 'invalid_automation', 'over_limit']) assert.ok(diagnostics.some((r) => r.code === code), code);
+  assert.ok(diagnostics.some((r) => r.code === 'over_limit' && r.clientRequestId === 'q6'));
+
+  for (let i = 0; i < 4; i++) f.responses.push(envelope({ queries: [{ ...query('fleet.inspect'), id: `hop-${i}` }] }));
+  await f.engine.submit('Exhaust query hops');
+  assert.ok(f.engine.outcomes({ collection: 'diagnostic', limit: 50 }).entries.some((r) => r.code === 'hop_limit' && r.clientRequestId === 'hop-3'));
+  const outcomes = f.engine.outcomes({ clientRequestId: request.id });
+  f.engine.dispose(); f.start();
+  assert.deepEqual(f.engine.outcomes({ clientRequestId: request.id }), outcomes);
+  f.responses.push(envelope({ directives: [request] }));
+  await f.engine.submit('Retry after restart');
+  assert.equal(f.engine.state().directives.length, 1);
+}
+
+async function reviewedAutomationReadback() {
+  const f = make('automation-readback');
+  await f.engine.configure({ ...f.engine.state().config, authority: 'autonomous' });
+  await f.engine.start();
+  f.responses.push(envelope({ directives: [action('configuration.save', { settings: { presets: [] } }, { id: 'permanent-config' })] }));
+  await f.engine.submit('Propose permanent change');
+  assert.equal(f.engine.state().directives[0].state, 'pending');
+  assert.ok(!f.calls.some((c) => c.operation === 'configuration.save'));
+  f.responses.push(envelope({ automations: [{ id: 'preset-1', kind: 'preset', title: 'Reusable preset', rationale: 'Observed repeated launch arguments', evidence: ['observed actions'], payload: { id: 'fixture-preset', title: 'Fixture' } }] }));
+  await f.engine.submit('Save draft');
+  const [auto] = f.engine.state().automations;
+  assert.throws(() => f.engine.applyAutomation(auto.id, 'yes'), /Invalid automation decision/);
+  assert.ok(!f.calls.some((c) => c.operation === 'configuration.save'));
+  // A persistence adapter that returns without saving must never claim applied.
+  await f.engine.applyAutomation(auto.id, 'apply');
+  assert.equal(f.engine.state().automations[0].state, 'uncertain');
+  assert.match(f.engine.state().automations[0].error, /readback/);
+  f.service.saveSettings = async (settings) => { f.state.settings = settings; return settings; };
+  f.responses.push(envelope({ automations: [{ id: 'preset-2', kind: 'preset', title: 'Saved preset', rationale: 'Verified repetitive task', payload: { id: 'saved-preset', title: 'Saved' } }] }));
+  await f.engine.submit('Save a second draft');
+  await f.engine.applyAutomation(f.engine.state().automations[0].id, 'apply');
+  const saved = f.engine.state().automations[0];
+  assert.equal(saved.state, 'applied');
+  assert.equal(saved.result.artifact.id, 'saved-preset');
+  assert.match(saved.result.revision, /^[a-f0-9]{64}$/);
+  assert.ok(f.engine.outcomes({ collection: 'automation', clientRequestId: 'preset-2' }).entries.some((r) => r.record?.state === 'applied'));
+}
+
+async function unknownSpend() {
+  const f = make('unknown-spend');
+  const remote = f.chats.remote;
+  f.chats.remote = async (...args) => {
+    const result = await remote(...args);
+    if (args[1].action === 'history') for (const ev of result.events) if (ev.type === 'usage.updated') ev.data.costUsd = null;
+    return result;
+  };
+  await f.engine.start();
+  assert.equal(f.engine.state().costKnown, false);
+  assert.equal(f.engine.state().costUsd, 0);
+  assert.equal(f.engine.manifest().spend.coverage, 'incomplete');
+  assert.match(f.engine.manifest().spend.budgetPolicy, /unknown spend is not zero/);
+  f.chats.remote = remote;
+  await f.engine.submit('Known cost after unknown cost');
+  assert.equal(f.engine.state().costKnown, false);
+  assert.equal(f.engine.state().costUsd, 0.01);
+}
+
+async function durableWakeups() {
+  let now = Date.now();
+  const callbacks = new Map(); let timerId = 0;
+  const timers = { now: () => now, setTimeout(fn, delay) { const id = ++timerId; callbacks.set(id, { fn, due: now + delay }); return id; }, clearTimeout(id) { callbacks.delete(id); } };
+  const advance = async (ms) => {
+    now += ms;
+    for (const [id, timer] of [...callbacks]) if (timer.due <= now) { callbacks.delete(id); timer.fn(); }
+    await tick();
+  };
+  const f = make('durable-wakeups', { timers });
+  await f.engine.start();
+  const release = f.gateReceipt();
+  const active = f.engine.submit('Busy assessment');
+  await until(() => f.engine.state().status === 'running');
+  f.flash.push({ id: 'during-turn', name: f.sessions[0].id, hostId: 'alpha', connected: true, state: 'pending' });
+  await f.engine.observe(await f.service.inventory());
+  const persisted = JSON.parse(fs.readFileSync(path.join(directory, 'durable-wakeups/centcom.json')));
+  assert.ok(persisted.pendingAlerts.some((r) => r.id === 'during-turn'));
+  release(); await active; await advance(0);
+  await until(() => f.engine.state().autoTurnsLastHour === 1); await settle(f);
+  f.flash.push({ id: 'last-event', name: f.sessions[1].id, hostId: 'alpha', connected: true, state: 'pending' });
+  await f.engine.observe(await f.service.inventory());
+  assert.equal(f.engine.state().autoTurnsLastHour, 1);
+  f.engine.dispose(); f.start(); // Cooldown and event survive restart.
+  await advance(60001);
+  await until(() => f.engine.state().autoTurnsLastHour === 2); await settle(f);
+  await f.engine.observe(await f.service.inventory());
+  await advance(60001); await tick();
+  assert.equal(f.engine.state().autoTurnsLastHour, 2, 'Replayed requests must not wake again');
+  // Completion of an observed unit can wake even after it leaves active control.
+  f.sessions[0].state = 'exited';
+  await f.engine.observe(await f.service.inventory());
+  assert.equal(f.engine.state().autoTurnsLastHour, 3);
+  assert.match(f.submitted.at(-1).payload.text, /taskAcceptance/);
+  await advance(600001);
+  await until(() => f.engine.state().autoTurnsLastHour === 4); await settle(f);
+  assert.match(f.submitted.at(-1).payload.text, /Scheduled status check/);
+  await f.engine.configure({ ...f.engine.state().config, triggers: { ...f.engine.state().config.triggers, fallbackSeconds: 0 } });
+  await advance(600001); await tick();
+  assert.equal(f.engine.state().autoTurnsLastHour, 4);
+  const worker = { hostId: 'alpha', sessionId: f.sessions[1].chatSessionId };
+  const question = { sequence: 42, type: 'question.requested', turnId: 'worker-turn', data: { requestId: 'question-42', text: 'Need a choice', token: 'private-value' } };
+  await f.engine.observeChat(worker, [question]); await advance(0);
+  await until(() => f.engine.state().autoTurnsLastHour === 5); await settle(f);
+  assert.match(f.submitted.at(-1).payload.text, /question-42/);
+  assert.ok(!f.submitted.at(-1).payload.text.includes('private-value'));
+  await f.engine.observeChat(worker, [question]);
+  await f.engine.observeChat({ hostId: 'alpha', sessionId: f.engine.state().session.chatSessionId }, [{ ...question, sequence: 43 }]);
+  await advance(60001); await tick();
+  assert.equal(f.engine.state().autoTurnsLastHour, 5, 'Replay and commander events cannot recursively wake CENTCOM');
+  f.missions.push({ id: 'linked-mission', hostId: 'alpha', state: 'running', stage: 'build', visits: [{ name: f.sessions[1].id }], dependencies: ['build-artifact'] });
+  await f.engine.observe(await f.service.inventory());
+  f.missions[0].stage = 'verify';
+  f.missions[0].dependencies = [];
+  await f.engine.observe(await f.service.inventory());
+  assert.equal(f.engine.state().autoTurnsLastHour, 6);
+  assert.match(f.submitted.at(-1).payload.text, /dependency/);
+  // A complete turn between inventory polls may be idle in both snapshots.
+  await advance(60001);
+  f.state.attention.push({ id: 'between-polls', sessionKey: f.sessions[1].key, kind: 'completed', confidence: 'confirmed', acknowledged: false });
+  await f.engine.observe(await f.service.inventory());
+  assert.equal(f.engine.state().autoTurnsLastHour, 7);
+  assert.match(f.submitted.at(-1).payload.text, /between-polls/);
+}
+
 (async () => {
   try {
-    for (const test of [visibility, targetValidation, consoleIntegration, cancellation, authorityAndAlerts, catalogCoverage, terminalControl, migration]) { console.log('RUN', test.name); await test(); }
+    for (const test of [visibility, targetValidation, consoleIntegration, cancellation, authorityAndAlerts, catalogCoverage, terminalControl, migration, contractOutcomes, reviewedAutomationReadback, unknownSpend, durableWakeups]) { console.log('RUN', test.name); await test(); }
     console.log('PASS CENTCOM active boundary, nested evidence, fresh targets, catalog handlers, control restoration, console receipts/deduplication, cancellation, authority, alerts, and migration');
   } finally { for (const f of fixtures) f.dispose(); fs.rmSync(directory, { recursive: true, force: true }); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });
