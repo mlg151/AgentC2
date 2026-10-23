@@ -7,12 +7,16 @@ const inventory = require('../tests/suites.json');
 function validate(base = root, data = inventory) {
   const files = fs.readdirSync(path.join(base, 'tests'), { recursive: true })
     .map((file) => `tests/${file.replaceAll('\\', '/')}`)
-    .filter((file) => /\.(cjs|mjs|js|py|ts)$/.test(file) && !/^tests\/(fixtures|helpers)\//.test(file));
+    .filter((file) => /\.([cm]?[jt]sx?|py|sh|ps1)$/.test(file) && !/^tests\/(fixtures|helpers)\//.test(file));
   const groups = new Set(['core', 'desktop', 'packaged', 'updater', 'windows', 'linux-python', 'linux-web', 'linux-ui', 'linux-chat', 'cleanup']);
   const ids = new Set();
+  const commands = new Set();
   const registered = new Set([...Object.keys(data.nested), ...Object.keys(data.optional)]);
   for (const suite of data.suites) {
     if (!suite.id || ids.has(suite.id) || !groups.has(suite.group) || !files.includes(suite.file)) throw Error(`Invalid suite: ${JSON.stringify(suite)}`);
+    const command = JSON.stringify([suite.file, suite.args || [], suite.env || {}]);
+    if (commands.has(command) || data.nested[suite.file] || data.optional[suite.file]) throw Error(`Duplicate suite registration: ${suite.file}`);
+    commands.add(command);
     ids.add(suite.id); registered.add(suite.file);
   }
   for (const [file, parents] of Object.entries(data.nested)) {

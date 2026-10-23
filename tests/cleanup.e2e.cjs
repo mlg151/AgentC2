@@ -62,7 +62,8 @@ async function launch() {
   page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
   assert.equal(await page.title(), 'AgentC2');
   await page.getByRole('textbox', { name: 'Search sessions', exact: true }).waitFor();
-  await page.locator('.session-row').filter({ hasText: marker }).first().waitFor({ timeout: 60000 });
+  // Saved conversations are available in tabs/cleanup, not the managed-unit roster.
+  await poll(async () => (await page.evaluate(() => window.agentHQ.inventory())).sessions.some((session) => session.title.includes(marker)), 'Disposable cleanup histories were not indexed');
 }
 (async () => {
   try {
@@ -70,7 +71,7 @@ async function launch() {
     const store = new Store(directory);
     store.save('workspace', { tabs: [key(0), key(1)], selectedKey: key(0), splitKey: null, metadata: { [key(0)]: { pinned: true, project: 'Cleanup QA', notes: 'First fixture' }, [key(1)]: { pinned: false, project: 'Cleanup QA', notes: 'Preserve failed history' } } });
     await launch();
-    await page.getByRole('button', { name: 'Delete history', exact: true }).click();
+    await page.getByRole('region', { name: `Session ${marker} 0`, exact: true }).getByRole('button', { name: 'Delete history', exact: true }).click();
     await page.getByRole('button', { name: 'Preview selected history', exact: true }).click();
     await page.getByText('Pinned history is protected', { exact: false }).waitFor();
     assert.equal(await page.getByLabel(`Delete history ${marker} 0`, { exact: true }).isEnabled(), false);
@@ -102,8 +103,7 @@ async function launch() {
     await page.getByRole('region', { name: 'Cleanup results', exact: true }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: path.join(os.tmpdir(), 'agentc2-cleanup-results.png') });
     await page.getByRole('button', { name: 'Close session cleanup', exact: true }).click();
-    await page.locator('.session-row').filter({ hasText: marker + ' 1' }).click();
-    await page.getByRole('button', { name: 'Delete history', exact: true }).click();
+    await page.getByRole('region', { name: `Session ${marker} 1`, exact: true }).getByRole('button', { name: 'Delete history', exact: true }).click();
     await page.getByRole('button', { name: 'Preview selected history', exact: true }).click();
     await page.getByLabel('Confirm permanent history deletion', { exact: true }).check();
     await page.getByRole('button', { name: 'Delete selected histories', exact: true }).click();

@@ -348,9 +348,9 @@
     ]
   },
   "optional": {
-    "tests/launch-modes.cjs": "Live provider CLI/account or paid model evaluation; explicit opt-in only.",
-    "tests/claude-gated.cjs": "Live provider CLI/account or paid model evaluation; explicit opt-in only.",
-    "tests/chat-live.py": "Live provider CLI/account or paid model evaluation; explicit opt-in only.",
-    "tests/antigravity-sdk-evaluation.py": "Live provider CLI/account or paid model evaluation; explicit opt-in only."
+    "tests/launch-modes.cjs": "Opt-in SSH host with installed provider CLIs; verifies real launch and resume flags.",
+    "tests/claude-gated.cjs": "Opt-in installed Claude CLI boundary probe against a local model fixture; no paid calls.",
+    "tests/chat-live.py": "Opt-in installed-provider smoke using host credentials and real provider turns.",
+    "tests/antigravity-sdk-evaluation.py": "Optional historical SDK evaluation against a loopback fixture; requires a separately installed pinned SDK. Production SDK coverage runs under chat-runtime."
   }
 }

@@ -182,6 +182,7 @@ jobs:
 
   quality-gate:
     name: Quality gate
+    timeout-minutes: 5
     if: always()
     needs: [desktop, linux-ssh, linux-cleanup]
     runs-on: ubuntu-22.04
