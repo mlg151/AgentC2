@@ -26,6 +26,7 @@ const inputs = {
   'capabilities.read': [{ operation: 'unit.inspect', schema: 'input' }, { operation: 'unit.send', schema: 'output' }, { automationKind: 'specops_workflow' }],
   'capabilities.support': [{ operation: 'unit.send', hostId: host, provider: 'codex', transport: 'chat' }],
   'outcomes.read': [{ clientRequestId: 'request-from-prior-envelope', after: 0, limit: 20 }],
+  'history.read': [{ view: 'actions', handoffsOnly: true, limit: 20 }, { view: 'patterns', operation: 'unit.send', limit: 10 }],
   'fleet.inspect': [{}], 'units.list': [{ limit: 20 }], 'unit.inspect': [{ sessionKey }], 'hosts.inspect': [{ hostId: host }],
   'context.read': [{ section: 'definitions', limit: 20 }], 'admission.check': [{ hostId: host, cwd: repository }],
   'artifact.read': [{ hostId: host, operationId, path: 'report.txt', offset: 0, limit: 4000 }],

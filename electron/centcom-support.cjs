@@ -1,7 +1,7 @@
 const { page } = require('./centcom-evidence.cjs');
 const { redact } = require('./centcom-contract.cjs');
 const PROVIDERS = ['codex', 'claude', 'antigravity', 'opencode', 'terminal'];
-const LOCAL = new Set(['capabilities.read', 'capabilities.support', 'outcomes.read', 'configuration.inspect', 'configuration.save', 'specops.definition', 'specops.configure', 'automation.validate', 'automation.preview', 'automation.read', 'automation.apply', 'context.read', 'units.list', 'fleet.inspect', 'exercise.list']);
+const LOCAL = new Set(['capabilities.read', 'capabilities.support', 'outcomes.read', 'history.read', 'configuration.inspect', 'configuration.save', 'specops.definition', 'specops.configure', 'automation.validate', 'automation.preview', 'automation.read', 'automation.apply', 'context.read', 'units.list', 'fleet.inspect', 'exercise.list']);
 const NATIVE = new Set(['unit.send', 'unit.steer', 'unit.interrupt', 'unit.stop', 'unit.delete', 'chat.respond']);
 const LAUNCH = new Set(['unit.create', 'specops.launch', 'exercise.create', 'sitrep.handoff']);
 

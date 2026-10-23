@@ -296,14 +296,14 @@ async function catalogCoverage() {
     control: (u, fn) => f.service.commanderControl({ id: 'centcom-commander' }, u, fn),
     resolve: async (entry) => entry.target === 'sessions' ? [f.sessions[0]] : f.sessions[0], fleet,
     evidence: createEvidence({ service: f.service, isCommander: () => false, activeKeys: async () => (await fleet()).keys }),
-    applyAutomation: async () => ({ applied: true }), readOutcomes: () => f.engine.outcomes(), manifest: () => f.engine.manifest(),
+    applyAutomation: async () => ({ applied: true }), readOutcomes: () => f.engine.outcomes(), readHistory: () => ({ entries: [], cursor: 0, hasMore: false }), manifest: () => f.engine.manifest(),
     automations: { validate: () => ({}), preview: () => ({}), read: () => ({}) },
   });
   const catalog = registry.catalog();
   for (const entry of catalog) {
     const definition = registry.definition(entry.operation);
     assert.ok(typeof definition.handler === 'function' || entry.unavailableReason, entry.operation);
-    assert.equal(entry.classification, /^(automation\.(validate|preview|read)|units.list|hosts.inspect|context.read|admission.check|artifact.read|capabilities\.(read|support)|outcomes.read|unit\.(inspect|search)|fleet\.|flash.list|specops\.(definition|inspect)|exercise\.(list|inspect|preview)|worktree.list|diff\.(files|detail)|sitrep.inspect|configuration.inspect|oporder.preview|github\.(readiness|issue|issues|pr)|devurl.list|history.discover)/.test(entry.operation) ? 'query' : 'action', entry.operation);
+    assert.equal(entry.classification, /^(automation\.(validate|preview|read)|units.list|hosts.inspect|context.read|admission.check|artifact.read|capabilities\.(read|support)|outcomes.read|history.read|unit\.(inspect|search)|fleet\.|flash.list|specops\.(definition|inspect)|exercise\.(list|inspect|preview)|worktree.list|diff\.(files|detail)|sitrep.inspect|configuration.inspect|oporder.preview|github\.(readiness|issue|issues|pr)|devurl.list|history.discover)/.test(entry.operation) ? 'query' : 'action', entry.operation);
     if (!entry.available) { await assert.rejects(registry.execute(entry.operation, {}, entry.classification), /Unavailable operation/); continue; }
     const p = {};
     for (const [key, type] of Object.entries(definition.parameters)) {

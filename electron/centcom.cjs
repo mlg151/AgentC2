@@ -13,6 +13,7 @@ const { automationSchema } = require('./centcom-schema.cjs');
 const { automationOutputSchema } = require('./centcom-output.cjs');
 const { automationExamples } = require('./centcom-examples.cjs');
 const { renderDoctrine } = require('./centcom-doctrine.cjs');
+const { summarizeAction, readHistory } = require('./centcom-history.cjs');
 const { ENVELOPE_VERSION, LIMITS, AUTOMATION_KINDS, fingerprint, redact, bounded, parseCentcomEnvelope } = require('./centcom-contract.cjs');
 const CONTEXT_REVISION = 2;
 
@@ -285,6 +286,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
         const directive = collection === 'audit' ? state.directives.find((d) => d.id === record.id) : null;
         recordOutcome({ collection, serverId: record.id, clientRequestId: record.clientRequestId || directive?.clientRequestId || null,
           turnId: record.turnId || directive?.turnId || null, kind: record.kind,
+          ...(collection === 'directive' ? { action: summarizeAction(record) } : {}),
           ...(['directive', 'audit'].includes(collection) ? { facts: actionFacts(directive || record) } : {}), record });
       }
     }
@@ -755,7 +757,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
 
   const evidence = createEvidence({ service, isCommander, activeKeys: async (inventory) => (await fleet(inventory)).keys });
   const automations = createAutomations({ service, state, validateConfig, persist: writeState, stateFile });
-  const operations = createOperations({ evidence, automations: { ...automations, read: (id) => automations.read(state.automations.find((a) => a.id === id)) }, readOutcomes, manifest: capabilityManifest, service, client,
+  const operations = createOperations({ evidence, readHistory: (input) => readHistory(state, input), automations: { ...automations, read: (id) => automations.read(state.automations.find((a) => a.id === id)) }, readOutcomes, manifest: capabilityManifest, service, client,
     beforeMutation: async () => { await bindings.assert(mutationContext.getStore()?.directive); },
     control: (unit, fn) => service.commanderControl(client, unit, async (handle, controlling) => {
     try {
@@ -812,6 +814,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
   async function bindDirective(directive) {
     const request = operationRequest(directive, 'action');
     const entry = operations.validate(request.operation, request.input, 'action');
+    directive.canonicalOperation = entry.operation;
     if (entry.operation === 'unit.create' && !request.input.hostId) request.input.hostId = state.config.hostId;
     directive.reviewRequired = entry.reviewRequired;
     directive.admission = await launchAdmission(request);

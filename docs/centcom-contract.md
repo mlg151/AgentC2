@@ -96,6 +96,35 @@ receipt alone leaves the latter two unverified. Use unit inspection/journal
 evidence and read-only artifact queries to assess the result; a command receipt
 never upgrades project acceptance automatically.
 
+`history.read` provides a redacted index of retained CENTCOM actions and handoffs.
+It accepts `after`, `through`, `limit` (maximum 50), `operation`, `hostId`,
+`sessionKey`, `handoffsOnly`, and `view` (`actions` or `patterns`). Copy `through`
+from the first response to keep subsequent pages on the same outcome snapshot.
+Each action includes its latest dispatch state at that snapshot, durable source
+outcome/request IDs, reviewed target identities, scope, and separate completion
+facts. Completed handoffs retain the source preview/revision and returned
+recipient identity even after the preview expires or a unit exits. Descriptions,
+objectives, summaries, and next steps remain commander-supplied, unverified claims.
+Prompts, native answers, configuration contents, patches, and test logs are omitted.
+Pages fit the persisted query-result budget; clipped display fields are labeled
+`displayTruncated`, and oversized indexes retain correlation and a partial marker.
+Grouping uses a digest of the full scope, so clipped paths cannot merge identities.
+
+Pattern reads count distinct completed server requests with the same canonical
+operation and exact reviewed identity/scope. Pending, denied, failed, uncertain,
+legacy/unbound, and truncated-target records do not establish repetition. Source
+outcome IDs support inspection; lists beyond ten sources explicitly truncate.
+The observed fact is repeated adapter completion, not identical tasks or project
+acceptance. Reusable-workflow suitability and title-based suggestions are
+hypotheses. Titles never determine grouping. Read the cited outcomes and task
+acceptance evidence before proposing a permanent automation.
+
+This view shares the 2,000-outcome retention window. It does not claim complete
+lifetime history, other desktop actions, or that a preview completed a handoff.
+`retainedFrom`, `truncated`, and `unknownMetadata` expose gaps, including older
+records without a compact action index. Reads remain available after targets exit
+without granting control or discovering their saved transcripts.
+
 ## Approval and persistence
 
 Gated C2 stages mutations. Autonomous C2 may execute operational directives up
@@ -242,8 +271,7 @@ work or remaining budget.
 
 ## Remaining implementation and completion gates
 
-The issue checklist is authoritative. Work still includes complete per-kind
-output schemas and host/provider support, linked mission evidence and complete
-launch admission coverage,
+The issue checklist is authoritative. Work still includes actual-adapter verification for every advertised operation,
+linked mission evidence and complete launch admission coverage,
 and an isolated production-bridge round trip with artifact verification. Current
 fixture coverage must not be presented as native-provider or live-host proof.
