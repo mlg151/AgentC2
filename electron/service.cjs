@@ -19,6 +19,7 @@ const { LoopBreaker } = require('./loop-breaker.cjs');
 const { createSpecops } = require('./specops.cjs');
 const { createCentcom } = require('./centcom.cjs');
 const { Chats } = require('./chat.cjs');
+const { commanderFacade, routeCommanderCommands } = require('./commander.cjs');
 
 function createService({ directory, home, specopsDirectory, centcomDirectory }) {
   const events = new EventEmitter();
@@ -476,8 +477,9 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
     if (!['interrupt', 'stop'].includes(action) || !TMUX_NAME.test(name)) throw new Error('Invalid session name');
     const unit = hostCache.get(host.id)?.find((item) => item.id === name);
     if (unit?.transport === 'chat') {
-      const record = chats.assertSessionOwner(client, unit.chatSessionId, host.id);
-      const handle = [...record.handles].find((id) => chats.handles.get(id)?.client.id === client.id);
+      const record = chats.sessions.get(`${host.id}/${unit.chatSessionId}`);
+      const handle = [...(record?.handles || [])].find((id) => chats.handles.get(id)?.client.id === client.id);
+      if (!handle) throw new Error('Open the chat and take control before changing this session');
       return chats.submit(client, handle, { protocolVersion: 1, commandId: crypto.randomUUID(), operation: action, sessionId: unit.chatSessionId, payload: {} });
     }
     terminals.assertSessionOwner(client, name, host.id);
@@ -486,8 +488,8 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
     if (action === 'stop') attention.resolveRequests(pending.filter((item) => item.name === name).map((item) => item.id));
     return result;
   }
-  async function deleteSession(client, key) {
-    if (client.closed || client.id !== 'desktop' || typeof key !== 'string' || !/^[A-Za-z0-9_-]{1,80}\/tmux:hq-[a-f0-9]{12}$/.test(key)) throw new Error('Invalid managed session deletion');
+  async function deleteSession(client, key, commander = false) {
+    if (client.closed || (client.id !== 'desktop' && !(commander && client.id === 'centcom-commander')) || typeof key !== 'string' || !/^[A-Za-z0-9_-]{1,80}\/tmux:hq-[a-f0-9]{12}$/.test(key)) throw new Error('Invalid managed session deletion');
     if (deletionFlights.has(key) || renameFlights.has(key)) throw new Error('Session deletion or renaming is already in progress');
     deletionFlights.add(key);
     let release;
@@ -693,8 +695,11 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
   const github = (input) => runRemote({ ...input, action: 'github' }, getHost(input?.hostId).id);
   const specops = createSpecops({ directory: specopsDirectory || path.join(directory, 'specops'), runRemote, createSession: create, chats, getHost, emit: (...args) => events.emit(...args) });
   const centcom = createCentcom({
-    directory: centcomDirectory || (process.env.AGENTC2_DATA_DIR || process.env.AGENT_HQ_DATA_DIR ? path.join(directory, 'centcom') : path.join(home, '.agentc2', 'centcom')),
-    service: {
+    directory: centcomDirectory || path.join(directory, 'centcom'),
+    service: commanderFacade({
+      chats, terminals, deleteSession, interruptFault, acknowledge, worktrees, archiveWorktree, diffRequest,
+      github, devUrls, openDevUrl, previewOpOrder, enrollOpOrder,
+      sitrepSource: (id) => sitrepPreviews.get(id),
       inventory,
       health,
       create,
@@ -716,11 +721,12 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
       loopBreaker,
       store,
       saveSettings,
-    },
+    }),
     chats,
     emit: (...args) => events.emit(...args),
   });
-  events.on('inventory:updated', (snapshot) => centcom.observe(snapshot));
+  routeCommanderCommands(chats, centcom);
+  events.on('inventory:updated', (snapshot) => { void centcom.observe(snapshot)?.catch((error) => console.error('CENTCOM observation failed:', error.message)); });
   return { centcom, specops, github, store, events, terminals, chats, tunnels, cleanup, exercises, inventory, health, create, worktrees, flashQueue, flashDecide, archiveWorktree, diffRequest, previewSitrep, launchSitrep, action, deleteSession, interruptFaults, resetFault, renameSession, loopBreaker, uploadClipboardImage, devUrls, openDevUrl, saveSettings, previewOpOrder, enrollOpOrder, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
 }
 module.exports = { createService };

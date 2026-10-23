@@ -100,22 +100,22 @@ Follow-up text.`;
   };
 
   const inventorySessions = [
-    { key: 'host-1/tmux:hq-active01', hostId: 'host-1', name: 'hq-active01', state: 'live', kind: 'managed', title: 'Task Worker' },
-    { key: 'host-1/tmux:hq-exited02', hostId: 'host-1', name: 'hq-exited02', state: 'exited', kind: 'managed', title: 'Exited Worker' },
+    { key: 'host-1/tmux:hq-000000000001', hostId: 'host-1', name: 'hq-000000000001', state: 'live', kind: 'managed', managed: true, title: 'Task Worker' },
+    { key: 'host-1/tmux:hq-000000000002', hostId: 'host-1', name: 'hq-000000000002', state: 'exited', kind: 'managed', managed: true, title: 'Exited Worker' },
   ];
   // A single terminal line can exceed the remote workspace's UTF-8 byte limit.
   inventorySessions[0].outputTail = 'old output\n' + '😀'.repeat(300000) + '\nlatest evidence';
 
   let specopsMissions = [
-    { id: 'specops-1', repo: 'mlg151/AgentC2', workflow: { name: 'Patch Release' }, stage: 'plan_review', state: 'halted', error: 'Watch officer review required' },
+    { id: 'specops-1', repo: 'mlg151/AgentC2', workflow: { name: 'Patch Release' }, hostId: 'host-1', visits: [{ name: 'hq-000000000001' }], stage: 'plan_review', state: 'halted', error: 'Watch officer review required' },
   ];
 
   let flashRequests = [
-    { id: 'flash-1', hostId: 'host-1', hostName: 'Primary Host', name: 'hq-active01', tool: 'Bash', createdAt: Math.floor(Date.now() / 1000), state: 'pending', connected: true },
+    { id: 'flash-1', hostId: 'host-1', hostName: 'Primary Host', name: 'hq-000000000001', tool: 'Bash', createdAt: Math.floor(Date.now() / 1000), state: 'pending', connected: true },
   ];
 
   let faults = [
-    { sessionKey: 'host-1/tmux:hq-active01', status: 'review', detail: 'loop detected', label: 'Loop fault' },
+    { sessionKey: 'host-1/tmux:hq-000000000001', status: 'review', detail: 'loop detected', label: 'Loop fault' },
   ];
 
   const chatEvents = new Map();
@@ -215,7 +215,7 @@ Follow-up text.`;
       },
     },
     exercises: {
-      list: () => [],
+      list: () => [{ id: 'ex-1', hostId: 'host-1', contestants: [{ id: 'cont-1', name: 'hq-000000000001' }] }],
       inspect: (id, contestantId, verify) => {
         serviceActions.push({ type: 'exerciseInspect', id, contestantId, verify });
         assert.equal(verify, false, 'Centcom must strictly pass verify: false to inspect');
@@ -227,12 +227,13 @@ Follow-up text.`;
     },
     interruptFaults: async (client) => {
       serviceActions.push({ type: 'interruptFaults' });
-      return [{ sessionKey: 'host-1/tmux:hq-active01', status: 'interrupted' }];
+      return [{ sessionKey: 'host-1/tmux:hq-000000000001', status: 'interrupted' }];
     },
     resetFault: async (sessionKey) => {
       serviceActions.push({ type: 'resetFault', sessionKey });
       faults = faults.filter((f) => f.sessionKey !== sessionKey);
     },
+    commanderControl: async (_client, _unit, fn) => fn('fixture-control'),
     action: async (client, action, name, hostId) => {
       serviceActions.push({ type: 'sessionAction', action, name, hostId });
       return { ok: true };
@@ -261,7 +262,7 @@ Follow-up text.`;
   assert.match(started.session.name, /^hq-centcom-/);
   assert.equal(remoteCalls[0].action, 'centcom_sync', 'Must perform remote sync to ~/.cache/agentc2/centcom');
   const initialSituation = JSON.parse(remoteCalls[0].files['SITUATION.json']);
-  assert.equal(initialSituation.units.length, inventorySessions.length);
+  assert.equal(initialSituation.units.length, 1);
   assert.ok(initialSituation.truncation.outputTailsOmitted > 0);
   assert.equal(initialSituation.truncation.omitted.units, 0);
   assert.ok(inventorySessions[0].outputTail.endsWith('latest evidence'), 'Snapshot reduction must not mutate inventory');
@@ -292,15 +293,15 @@ Follow-up text.`;
       "kind": "unit.stop",
       "summary": "Stop live worker",
       "rationale": "Rebalancing tasks",
-      "params": { "name": "hq-active01", "hostId": "host-1" },
-      "preconditions": { "sessionKey": "host-1/tmux:hq-active01", "state": "live" }
+      "params": { "name": "hq-000000000001", "hostId": "host-1" },
+      "preconditions": { "sessionKey": "host-1/tmux:hq-000000000001", "state": "live" }
     },
     {
       "kind": "unit.stop",
       "summary": "Stop dead worker",
       "rationale": "Cleanup",
-      "params": { "name": "hq-exited02", "hostId": "host-1" },
-      "preconditions": { "sessionKey": "host-1/tmux:hq-exited02", "state": "live" }
+      "params": { "name": "hq-000000000002", "hostId": "host-1" },
+      "preconditions": { "sessionKey": "host-1/tmux:hq-000000000002", "state": "live" }
     },
     {
       "kind": "flash.decide",
@@ -351,14 +352,14 @@ Follow-up text.`;
   const afterDLive = await centcom.decideDirective(dLive.id, 'approve');
   const dLiveUpdated = afterDLive.directives.find((item) => item.id === dLive.id);
   assert.equal(dLiveUpdated.state, 'completed');
-  assert.ok(serviceActions.some((a) => a.type === 'sessionAction' && a.action === 'stop' && a.name === 'hq-active01'));
+  assert.ok(serviceActions.some((a) => a.type === 'sessionAction' && a.action === 'stop' && a.name === 'hq-000000000001'));
   assert.ok(afterDLive.auditLog.some((a) => a.id === dLive.id && a.outcome === 'completed'));
 
   // Approve dDead -> fails precondition at execution time and marks failed
   const afterDDead = await centcom.decideDirective(dDead.id, 'approve');
   const dDeadUpdated = afterDDead.directives.find((item) => item.id === dDead.id);
   assert.equal(dDeadUpdated.state, 'failed');
-  assert.match(dDeadUpdated.error, /Precondition failed.*session is exited, expected live/);
+  assert.match(dDeadUpdated.error, /Precondition failed.*eligible connected active/);
   assert.ok(afterDDead.auditLog.some((a) => a.id === dDead.id && a.outcome === 'failed'));
 
   // Deny dFlash -> marked denied in audit log without executing
@@ -405,7 +406,7 @@ Follow-up text.`;
   // B. Valid specops:halted triggers auto-wake turn
   const beforeTurns = centcom.state().autoTurnsLastHour;
   await centcom.observe({
-    missions: specopsMissions,
+    ...(await mockService.inventory()), faults: [],
   });
   const afterTurns = centcom.state().autoTurnsLastHour;
   assert.equal(afterTurns, beforeTurns + 1, 'Auto-wake must increment autoTurnsLastHour');
@@ -506,7 +507,7 @@ Follow-up text.`;
       "kind": "unit.stop",
       "summary": "Stop active unit automatically",
       "rationale": "Circuit breaker exceeded",
-      "params": { "name": "hq-active01", "hostId": "host-1" }
+      "params": { "name": "hq-000000000001", "hostId": "host-1" }
     }
   ]
 }
@@ -541,7 +542,7 @@ Follow-up text.`;
     directory: largeDirectory,
     service: {
       ...mockService,
-      inventory: async () => ({ hosts: [], sessions: largeSessions }),
+      inventory: async () => ({ hosts: [{ id: 'host-1', connected: true }], sessions: largeSessions }),
       specops: { ...mockService.specops, list: () => largeMissions },
       runRemote: async (payload) => {
         if (rejectSync) throw new Error('Fixture workspace unavailable');
@@ -561,10 +562,9 @@ Follow-up text.`;
     const content = sync.files['SITUATION.json'];
     assert.ok(Buffer.byteLength(content, 'utf8') <= 1_000_000);
     const snapshot = JSON.parse(content);
-    assert.equal(snapshot.truncation.totals.units, largeSessions.length);
-    assert.ok(snapshot.truncation.omitted.units > 0);
-    assert.equal(snapshot.units.length + snapshot.truncation.omitted.units, largeSessions.length);
-    assert.ok(snapshot.units.some((unit) => unit.key === inventorySessions[0].key), 'Live unit must survive history reduction');
+    assert.equal(snapshot.units.length, 1, 'Saved history must be excluded before bounding');
+    assert.ok(snapshot.units.some((unit) => unit.key === inventorySessions[0].key));
+    if (snapshot.truncation) assert.equal(snapshot.truncation.totals.units, 1);
   }
   const refreshedSituation = JSON.parse(largeSyncs.at(-1).files['SITUATION.json']);
   assert.equal(refreshedSituation.truncation.totals.specops, 1);

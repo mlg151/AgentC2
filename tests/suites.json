@@ -11,6 +11,11 @@
       "group": "core"
     },
     {
+      "id": "centcom-operations",
+      "file": "tests/centcom-operations.cjs",
+      "group": "core"
+    },
+    {
       "id": "specops",
       "file": "tests/specops.cjs",
       "group": "core"

@@ -98,7 +98,7 @@ app.whenReady().then(async () => {
   try { buildInfo = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'dist', 'build-info.json'), 'utf8')); } catch { /* Source archive without build metadata. */ }
   if (!app.isPackaged && process.env.NODE_ENV !== 'development' && !process.argv.includes('--no-source-update') && require('./source-updater.cjs').resumeSourceUpdate({ directory: path.join(directory, 'source-updates'), revision: buildInfo.revision, app })) return;
   try {
-    service = createService({ directory, home: app.getPath('home'), specopsDirectory: process.env.AGENTC2_DATA_DIR || process.env.AGENT_HQ_DATA_DIR ? undefined : path.join(app.getPath('home'), '.agentc2', 'specops') });
+    service = createService({ directory, home: app.getPath('home'), specopsDirectory: process.env.AGENTC2_DATA_DIR || process.env.AGENT_HQ_DATA_DIR ? undefined : path.join(app.getPath('home'), '.agentc2', 'specops'), centcomDirectory: process.env.AGENTC2_DATA_DIR || process.env.AGENT_HQ_DATA_DIR ? undefined : path.join(app.getPath('home'), '.agentc2', 'centcom') });
     gateway = new Gateway({ directory, assets: path.join(__dirname, '..', 'dist'), service });
     service.events.on('client', (clientId, event, value) => {
       if (clientId !== 'desktop') return;

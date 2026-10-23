@@ -164,7 +164,14 @@ export type CentcomDirectiveKind =
   | 'flash.decide'
   | 'chat.respond'
   | 'fault.interrupt'
-  | 'fault.reset';
+  | 'fault.reset'
+  | 'agentc2.query'
+  | 'agentc2.action';
+
+export interface CentcomOperationRequest {
+  operation: string;
+  input: Record<string, unknown>;
+}
 
 export interface CentcomDirective {
   id: string;
@@ -200,7 +207,8 @@ export interface CentcomAuditEntry {
   id: string;
   kind: CentcomDirectiveKind;
   summary: string;
-  outcome: 'completed' | 'denied' | 'failed';
+  outcome: 'completed' | 'denied' | 'failed' | 'uncertain';
+  result?: unknown;
   at: number;
   trigger: string;
   error?: string;

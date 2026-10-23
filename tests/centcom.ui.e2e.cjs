@@ -81,8 +81,11 @@ const { Store } = require('../electron/config.cjs');
     const page = await app.firstWindow();
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
+    page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
     await page.setViewportSize({ width: 1440, height: 1000 });
     assert.match(await page.title(), /AgentC2/);
+    assert.ok(page.url().startsWith('file:'));
+    assert.equal(await page.locator('vite-error-overlay').count(), 0);
 
     // Verify CENTCOM button exists in header
     const centcomBtn = page.locator('button.centcom-btn');
@@ -99,7 +102,7 @@ const { Store } = require('../electron/config.cjs');
     await page.getByRole('button', { name: /^Automations/ }).waitFor();
     await page.getByRole('button', { name: 'Configuration & ROE' }).waitFor();
 
-    const screenshotDir = path.resolve(__dirname, '../docs/screenshots');
+    const screenshotDir = process.env.AGENTC2_QA_SCREENSHOT_DIR || process.env.AGENTC2_SUITE_ARTIFACTS || path.join(os.tmpdir(), 'agentc2-centcom-screenshots');
     fs.mkdirSync(screenshotDir, { recursive: true });
     await page.screenshot({ path: path.join(screenshotDir, 'centcom-console.png') });
 

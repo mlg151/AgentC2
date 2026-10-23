@@ -157,11 +157,12 @@ class Chats {
     return flight;
   }
 
-  take(client, id) {
+  take(client, id, captureOwner) {
     const { record } = this.get(client, id);
     return this.exclusive(record, () => {
       this.get(client, id);
       if (record.connection !== 'connected') throw new Error('Chat is reconnecting');
+      captureOwner?.(record.owner);
       record.owner = client;
       this.publish(record);
       return this.state(client, id);
@@ -180,10 +181,22 @@ class Chats {
     if (command.operation === 'create' || command.sessionId !== record.sessionId) throw new Error('Command does not target this chat view');
     return this.exclusive(record, async () => {
       this.get(client, id);
-      if (record.owner?.id !== client.id) throw new Error('Take control before changing this chat');
       if (record.connection !== 'connected') throw new Error('Chat is reconnecting; commands are not queued');
-      return this.request(record.hostId, 'command', { command });
-    });
+      const canRoute = record.owner?.id === client.id ||
+        (record.owner?.id === 'centcom-commander' && record.commanderPreviousOwner?.id === client.id);
+      const routed = canRoute ? this.commandRouter?.(client, id, command, record) : null;
+      if (record.owner?.id !== client.id && !routed) throw new Error('Take control before changing this chat');
+      // Release the ownership queue before the commander acquires its temporary
+      // control handle. The routed promise resolves to the real worker receipt.
+      if (routed) return { routed };
+      try { return await this.request(record.hostId, 'command', { command }); }
+      catch (error) {
+        // An SSH failure after dispatch cannot prove that the worker rejected
+        // the command. Keep its identity so callers can inspect the receipt.
+        Object.assign(error, { uncertain: true, commandId: command.commandId, sessionId: command.sessionId });
+        throw error;
+      }
+    }).then((result) => result?.routed || result);
   }
 
   receipt(client, id, commandId) {
