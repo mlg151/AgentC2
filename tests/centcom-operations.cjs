@@ -169,6 +169,10 @@ async function consoleIntegration() {
   assert.equal(result.directives.find((r) => r.id === uncertain.id).state, 'uncertain');
   assert.equal(result.directives.find((r) => r.id === uncertain.id).result.state, 'unknown');
   assert.equal(result.auditLog.find((r) => r.id === uncertain.id).outcome, 'uncertain');
+  const receiptOutcome = f.engine.outcomes({ collection: 'directive', serverId: uncertain.id }).entries.at(-1);
+  assert.equal(receiptOutcome.facts.submission, 'unknown');
+  assert.equal(receiptOutcome.facts.providerTurnCompletion, 'unverified');
+  assert.equal(receiptOutcome.facts.projectAcceptance, 'unverified');
   assert.equal(f.chats.state(phone, worker).controller.id, phone.id);
   f.service.chatCommand = original;
 
@@ -390,6 +394,9 @@ async function contractOutcomes() {
   assert.match(f.submitted.at(-1).payload.text, /denied/);
   const denied = f.engine.outcomes({ clientRequestId: request.id }).entries;
   assert.ok(denied.some((r) => r.record?.state === 'denied'));
+  const approval = f.engine.outcomes({ collection: 'approval', clientRequestId: request.id }).entries;
+  assert.equal(approval.at(-1).status, 'denied');
+  assert.equal(approval.at(-1).serverId, staged.id);
   const firstPage = f.engine.outcomes({ limit: 1 });
   const secondPage = f.engine.outcomes({ after: firstPage.cursor, limit: 1 });
   assert.ok(secondPage.cursor > firstPage.cursor);
@@ -403,6 +410,26 @@ async function contractOutcomes() {
   const diagnostics = f.engine.outcomes({ collection: 'diagnostic', limit: 50 }).entries;
   for (const code of ['invalid_request', 'invalid_automation', 'over_limit']) assert.ok(diagnostics.some((r) => r.code === code), code);
   assert.ok(diagnostics.some((r) => r.code === 'over_limit' && r.clientRequestId === 'q6'));
+  for (const entry of diagnostics) {
+    assert.match(entry.outcomeId, /^[a-f0-9-]{36}$/);
+    assert.match(entry.serverId, /^[a-f0-9-]{36}$/);
+    assert.ok(entry.status);
+  }
+  const diagnosticIds = diagnostics.map((r) => r.outcomeId);
+  assert.equal(new Set(diagnosticIds).size, diagnosticIds.length);
+  const successfulQuery = f.engine.outcomes({ collection: 'query', clientRequestId: 'inspect-fleet' }).entries;
+  assert.equal(successfulQuery.at(-1).status, 'ok');
+  assert.equal(successfulQuery[0].status, 'running');
+  assert.equal(successfulQuery[0].serverId, successfulQuery.at(-1).serverId);
+  assert.ok(successfulQuery.at(-1).turnId);
+
+  f.responses.push(envelope({ queries: [{ ...query('history.discover'), id: 'unsupported-query' }, { ...query('invented.operation'), id: 'unknown-query' },
+    { id: 'ambiguous-kind', kind: 'fleet.inspect', type: 'history.discover' }], directives: [action('unit.resume', {}, { id: 'unsupported-directive' })] }));
+  await f.engine.submit('Unsupported and ambiguous requests');
+  assert.equal(f.engine.outcomes({ clientRequestId: 'unsupported-query' }).entries.at(-1).code, 'unsupported_operation');
+  assert.equal(f.engine.outcomes({ clientRequestId: 'unknown-query' }).entries.at(-1).code, 'unknown_operation');
+  assert.equal(f.engine.outcomes({ clientRequestId: 'ambiguous-kind' }).entries.at(-1).code, 'invalid_request');
+  assert.ok(f.engine.outcomes({ clientRequestId: 'unsupported-directive' }).entries.some((r) => r.code === 'unsupported_operation'));
 
   for (let i = 0; i < 4; i++) f.responses.push(envelope({ queries: [{ ...query('fleet.inspect'), id: `hop-${i}` }] }));
   await f.engine.submit('Exhaust query hops');
@@ -410,9 +437,62 @@ async function contractOutcomes() {
   const outcomes = f.engine.outcomes({ clientRequestId: request.id });
   f.engine.dispose(); f.start();
   assert.deepEqual(f.engine.outcomes({ clientRequestId: request.id }), outcomes);
+  assert.deepEqual(f.engine.outcomes({ collection: 'query', clientRequestId: 'inspect-fleet' }).entries, successfulQuery);
   f.responses.push(envelope({ directives: [request] }));
   await f.engine.submit('Retry after restart');
-  assert.equal(f.engine.state().directives.length, 1);
+  assert.equal(f.engine.state().directives.filter((d) => d.clientRequestId === request.id).length, 1);
+}
+
+async function boundedOutcomeHistory() {
+  const f = make('bounded-outcomes');
+  await f.engine.start();
+  f.service.setSessionPinned = async () => ({ text: 'x'.repeat(60000), password: 'do-not-persist-in-history' });
+  const drafts = await f.propose(Array.from({ length: 12 }, (_, i) => action('unit.pin', { sessionKey: f.sessions[0].key, pinned: true }, { id: `large-${i}` })));
+  await f.engine.decideAllDirectives('approve');
+  let page = f.engine.outcomes({ collection: 'directive', limit: 50 });
+  const observed = [];
+  do {
+    assert.ok(Buffer.byteLength(JSON.stringify(page)) < 64000);
+    observed.push(...page.entries);
+    if (!page.hasMore) break;
+    page = f.engine.outcomes({ collection: 'directive', limit: 50, after: page.cursor });
+  } while (true);
+  for (const draft of drafts) {
+    const final = observed.filter((e) => e.serverId === draft.id).at(-1);
+    assert.equal(final.status, 'completed', 'Status must survive a result larger than the record limit');
+    assert.equal(final.facts.projectAcceptance, 'unverified');
+    assert.equal(final.record.truncated, true);
+  }
+  assert.ok(!JSON.stringify(observed).includes('do-not-persist-in-history'));
+  const assessment = f.submitted.at(-1).payload.text;
+  const receipts = JSON.parse(assessment.match(/<agentc2-c2-results>\n([\s\S]*?)\n<\/agentc2-c2-results>/)[1]);
+  assert.equal(receipts.length, 12);
+  assert.ok(receipts.every((r) => r.status === 'completed' && r.clientRequestId && r.serverId));
+
+  f.responses.push(envelope({ queries: [{ ...query('outcomes.read', { collection: 'directive', limit: 50 }), id: 'read-large-history' }] }));
+  await f.engine.submit('Read large results');
+  const read = f.engine.outcomes({ collection: 'query', clientRequestId: 'read-large-history' }).entries.at(-1);
+  assert.equal(read.status, 'ok');
+  assert.ok(read.result.entries.length);
+  assert.ok(read.result.entries.every((e) => e.status && e.serverId && e.outcomeId));
+  assert.equal(read.result.hasMore, true);
+  assert.equal(read.result.cursor, read.result.entries.at(-1).sequence);
+  assert.ok(Buffer.byteLength(JSON.stringify(read.result)) < 12000);
+
+  f.engine.dispose();
+  const file = path.join(directory, 'bounded-outcomes/centcom.json');
+  const saved = JSON.parse(fs.readFileSync(file));
+  const last = { ...read, outcomeId: crypto.randomUUID(), serverId: crypto.randomUUID(), clientRequestId: 'crashed-query', status: 'running', sequence: ++saved.outcomeSequence };
+  delete last.result;
+  saved.outcomes.push(last);
+  fs.writeFileSync(file, JSON.stringify(saved));
+  f.start();
+  const recovered = f.engine.outcomes({ clientRequestId: 'crashed-query' });
+  assert.equal(recovered.entries.at(-1).status, 'uncertain');
+  assert.equal(recovered.entries.at(-1).code, 'query_interrupted');
+  assert.equal(recovered.entries.at(-1).serverId, last.serverId);
+  f.engine.dispose(); f.start();
+  assert.deepEqual(f.engine.outcomes({ clientRequestId: 'crashed-query' }), recovered);
 }
 
 async function reviewedAutomationReadback() {
@@ -530,7 +610,7 @@ async function durableWakeups() {
 
 (async () => {
   try {
-    for (const test of [visibility, targetValidation, consoleIntegration, cancellation, authorityAndAlerts, catalogCoverage, terminalControl, migration, contractOutcomes, reviewedAutomationReadback, unknownSpend, durableWakeups]) { console.log('RUN', test.name); await test(); }
+    for (const test of [visibility, targetValidation, consoleIntegration, cancellation, authorityAndAlerts, catalogCoverage, terminalControl, migration, contractOutcomes, boundedOutcomeHistory, reviewedAutomationReadback, unknownSpend, durableWakeups]) { console.log('RUN', test.name); await test(); }
     console.log('PASS CENTCOM active boundary, nested evidence, fresh targets, catalog handlers, control restoration, console receipts/deduplication, cancellation, authority, alerts, and migration');
   } finally { for (const f of fixtures) f.dispose(); fs.rmSync(directory, { recursive: true, force: true }); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

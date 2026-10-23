@@ -221,11 +221,49 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
       d.error = 'Application restarted during directive execution; recheck target before retrying.';
     }
   }
+  // Assign legacy journal rows stable identities before the migration is saved.
+  for (const entry of state.outcomes) {
+    entry.outcomeId ||= crypto.randomUUID();
+    entry.serverId ||= crypto.randomUUID();
+    entry.status ||= entry.record?.state || entry.record?.outcome || entry.code || entry.phase || 'observed';
+  }
+  const interruptedQueries = new Map();
+  for (const entry of state.outcomes) {
+    if (entry.collection === 'query' || entry.requestCollection === 'queries') interruptedQueries.set(entry.serverId, entry);
+  }
+  for (const entry of interruptedQueries.values()) if (entry.status === 'running') {
+    diagnostic({ code: 'query_interrupted', collection: 'queries', serverId: entry.serverId, clientRequestId: entry.clientRequestId,
+      turnId: entry.turnId, kind: entry.kind, status: 'uncertain', message: 'Application restarted before query completion was persisted. Read-only queries may be submitted again.' });
+  }
+
+  function actionFacts(record) {
+    const result = record.result;
+    return { submission: result?.state || result?.delivery || ({ pending: 'not_submitted', denied: 'not_submitted', executing: 'dispatching', completed: 'completed' })[record.state] || 'unknown',
+      commandId: result?.commandId || null, sessionId: result?.sessionId || null, providerTurnId: result?.result?.turnId || null,
+      providerTurnCompletion: 'unverified', projectAcceptance: 'unverified' };
+  }
+  function boundOutcomePage(page, maxBytes) {
+    const result = { ...page, entries: [] };
+    for (const entry of page.entries) {
+      const item = { ...entry, record: bounded(entry.record, 2000), result: bounded(entry.result, 2000) };
+      if (result.entries.length && Buffer.byteLength(JSON.stringify({ ...result, entries: [...result.entries, item] })) > maxBytes - 1000) break;
+      result.entries.push(item);
+    }
+    if (result.entries.length < page.entries.length) {
+      result.cursor = result.entries.at(-1)?.sequence || page.after || 0;
+      result.hasMore = true;
+      result.partial = true;
+    }
+    return result;
+  }
 
   function recordOutcome(value) {
     const safe = Object.fromEntries(Object.entries(redact(value)).map(([key, item]) => [key,
-      typeof item === 'string' && item.length > 4000 ? item.slice(0, 4000) + ' [truncated]' : item && typeof item === 'object' ? bounded(item, 16000) : item]));
-    const entry = { ...JSON.parse(JSON.stringify(safe)), sequence: ++state.outcomeSequence, recordedAt: Date.now() };
+      typeof item === 'string' && item.length > 4000 ? item.slice(0, 4000) + ' [truncated]' : key === 'result' && Array.isArray(item?.entries) && Number.isSafeInteger(item.cursor) ? boundOutcomePage(item, 12000)
+        : item && typeof item === 'object' ? bounded(item, 16000) : item]));
+    const entry = { ...JSON.parse(JSON.stringify(safe)), outcomeId: crypto.randomUUID(), serverId: value.serverId || crypto.randomUUID(),
+      status: value.status || value.record?.state || value.record?.outcome || value.code || value.phase || 'observed',
+      sequence: ++state.outcomeSequence, recordedAt: Date.now() };
     state.outcomes.push(entry);
     // Cursor gaps are explicit when the retention window has moved.
     if (state.outcomes.length > 2000) state.outcomes.splice(0, state.outcomes.length - 2000);
@@ -238,24 +276,35 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
         const version = fingerprint(record);
         if (state.outcomeVersions[key] === version) continue;
         state.outcomeVersions[key] = version;
-        recordOutcome({ collection, serverId: record.id, clientRequestId: record.clientRequestId || null, record });
+        const directive = collection === 'audit' ? state.directives.find((d) => d.id === record.id) : null;
+        recordOutcome({ collection, serverId: record.id, clientRequestId: record.clientRequestId || directive?.clientRequestId || null,
+          turnId: record.turnId || directive?.turnId || null, kind: record.kind,
+          ...(['directive', 'audit'].includes(collection) ? { facts: actionFacts(directive || record) } : {}), record });
       }
     }
   }
   function readOutcomes({ after = 0, limit = 20, collection, clientRequestId, serverId } = {}) {
     if (!Number.isSafeInteger(after) || after < 0 || !Number.isInteger(limit) || limit < 1 || limit > LIMITS.pageSize) throw new Error('Invalid outcome cursor or limit');
-    if (collection && !['directive', 'automation', 'audit', 'diagnostic', 'query', 'provider'].includes(collection)) throw new Error('Invalid outcome collection');
+    if (collection && !['directive', 'automation', 'approval', 'audit', 'diagnostic', 'query', 'provider'].includes(collection)) throw new Error('Invalid outcome collection');
     const matches = state.outcomes.filter((r) => r.sequence > after && (!collection || r.collection === collection) && (!clientRequestId || r.clientRequestId === clientRequestId) && (!serverId || r.serverId === serverId));
     const entries = [];
     for (const entry of matches.slice(0, limit)) {
-      if (entries.length && Buffer.byteLength(JSON.stringify([...entries, entry])) > LIMITS.resultBytes) break;
-      entries.push({ ...entry, record: entry.record ? bounded(entry.record, 12000) : undefined, result: entry.result ? bounded(entry.result, 12000) : undefined });
+      const item = { ...entry, record: entry.record ? bounded(entry.record, 12000) : undefined,
+        result: Array.isArray(entry.result?.entries) ? boundOutcomePage(entry.result, 12000) : entry.result ? bounded(entry.result, 12000) : undefined };
+      if (entries.length && Buffer.byteLength(JSON.stringify([...entries, item])) > LIMITS.resultBytes - 1000) break;
+      entries.push(item);
     }
     return { entries, cursor: entries.at(-1)?.sequence || after, hasMore: matches.length > entries.length, retainedFrom: state.outcomes[0]?.sequence || 1, truncated: after < (state.outcomes[0]?.sequence || 1) - 1 };
   }
   function diagnostic(value) {
     const { collection: requestCollection, ...details } = value;
     return recordOutcome({ ...details, requestCollection, collection: 'diagnostic' });
+  }
+  function recordApproval(record, decision, targetCollection = 'directive') {
+    recordOutcome({ collection: 'approval', targetCollection, serverId: record.id, clientRequestId: record.clientRequestId || null,
+      turnId: record.turnId, kind: record.kind, status: ({ approve: 'approved', deny: 'denied', apply: 'approved', dismiss: 'dismissed' })[decision],
+      decision, actor: 'watch_officer', bindingHash: record.binding?.evidenceHash || record.preview?.revision || null });
+    writeState();
   }
   function duplicateRequest(collection, request) {
     if (!request.id) return null; // Legacy requests without IDs cannot be retried safely.
@@ -499,9 +548,9 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
         // Parse completion-correlated agentc2-c2 envelope
         const envelope = parseCentcomEnvelope(finalAssistantText);
         if (envelope?.error) {
-          diagnostic({ code: 'malformed_envelope', message: envelope.error, turnId });
+          const result = diagnostic({ code: 'malformed_envelope', message: envelope.error, turnId });
           writeState();
-          if (queryHop < LIMITS.queryHops) { queryHop++; nextPrompt = JSON.stringify({ diagnostics: [{ code: 'malformed_envelope', message: envelope.error }] }); continue; }
+          if (queryHop < LIMITS.queryHops) { queryHop++; nextPrompt = JSON.stringify({ diagnostics: [result] }); continue; }
           break;
         }
         if (!envelope) {
@@ -509,6 +558,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
           break;
         }
 
+        const outcomeCursor = state.outcomeSequence;
         const actionResults = [];
         for (const item of envelope.diagnostics) actionResults.push(diagnostic({ ...item, turnId }));
         // Persist proposals before any continuation; permanent changes are reviewed.
@@ -549,9 +599,9 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
             resolvedAt: null,
           };
 
-          try { await bindDirective(directiveRecord); } catch (error) { directiveRecord.validationError = error.message; }
+          try { await bindDirective(directiveRecord); } catch (error) { directiveRecord.validationError = error.message; directiveRecord.validationCode = error.code || 'invalid_directive'; }
           rememberRequest('directive', d, directiveRecord.id);
-          if (directiveRecord.validationError) actionResults.push(diagnostic({ code: 'invalid_directive', serverId: directiveRecord.id, clientRequestId: d.id || null, message: directiveRecord.validationError, turnId }));
+          if (directiveRecord.validationError) actionResults.push(diagnostic({ code: directiveRecord.validationCode, serverId: directiveRecord.id, clientRequestId: d.id || null, message: directiveRecord.validationError, turnId }));
           check();
           if (state.config.authority === 'autonomous' && !directiveRecord.reviewRequired) {
             // Autonomous C2: execute immediately within directive limits
@@ -606,22 +656,25 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
         // Handle queries (bounded multi-hop)
         if (envelope.queries.length && queryHop < 3) {
           queryHop++;
-          const queryResults = [];
           for (const q of envelope.queries) {
             check();
             const qKind = q.kind || q.type;
+            const correlation = { serverId: crypto.randomUUID(), clientRequestId: q.id || null, kind: qKind, turnId };
+            recordOutcome({ ...correlation, collection: 'query', status: 'running' });
+            writeState();
             try {
               const res = await executeQuery(q, check);
-              queryResults.push(recordOutcome({ collection: 'query', clientRequestId: q.id || null, kind: qKind, status: 'ok', result: bounded(res) }));
+              recordOutcome({ ...correlation, collection: 'query', status: 'ok', result: bounded(res) });
             } catch (err) {
-              queryResults.push(diagnostic({ clientRequestId: q.id || null, kind: qKind, code: 'query_error', error: err.message }));
+              diagnostic({ ...correlation, collection: 'queries', code: err.code || 'query_error', status: 'failed', error: err.message });
             }
+            writeState();
           }
           nextPrompt = [
             '<agentc2-c2-results>',
-            JSON.stringify(bounded([...actionResults, ...queryResults], 120000)),
+            JSON.stringify(readOutcomes({ after: outcomeCursor, limit: LIMITS.pageSize })),
             '</agentc2-c2-results>',
-            'Based on these query results, provide your final assessment and directives.',
+            'Based on these query results, provide your final assessment and directives. If hasMore, continue outcomes.read from cursor.',
           ].join('\n');
           continue; // Run next query hop
         }
@@ -632,7 +685,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
         }
         if (actionResults.length && queryHop < 3) {
           queryHop++;
-          nextPrompt = '<agentc2-c2-results>\n' + JSON.stringify(bounded(actionResults, 120000)) + '\n</agentc2-c2-results>\nAssess these action receipts. Delivery does not prove task completion.';
+          nextPrompt = '<agentc2-c2-results>\n' + JSON.stringify(readOutcomes({ after: outcomeCursor, limit: LIMITS.pageSize })) + '\n</agentc2-c2-results>\nAssess these action receipts. Delivery does not prove task completion. If hasMore, continue outcomes.read from cursor.';
           continue;
         }
         break; // Hop loop completed
@@ -955,7 +1008,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
   async function assessActionResults(records) {
     for (const d of records) {
       const fresh = approvalResults.get(d.turnId) || [];
-      fresh.push({ id: d.id, status: d.state, result: d.result, error: d.error });
+      fresh.push({ serverId: d.id, clientRequestId: d.clientRequestId || null, status: d.state, facts: actionFacts(d), result: bounded(d.result, 2000), error: bounded(d.error, 1000) });
       approvalResults.set(d.turnId, fresh);
     }
     for (const turnId of new Set(records.map((d) => d.turnId))) {
@@ -1020,6 +1073,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
       if (!d || d.state !== 'pending') throw new Error('Directive not found or already resolved');
       return enqueue(async () => {
         if (d.state !== 'pending') throw new Error('Directive already resolved');
+        recordApproval(d, decision);
         if (decision === 'deny') {
           d.state = 'denied';
           d.resolvedAt = Date.now();
@@ -1054,6 +1108,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
         // Snapshot pending set to avoid race conditions with incoming directives
         const snapshotPending = state.directives.filter((d) => d.state === 'pending');
         for (const d of snapshotPending) {
+          recordApproval(d, decision);
           if (decision === 'deny') {
             d.state = 'denied';
             d.resolvedAt = Date.now();
@@ -1089,6 +1144,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
       if (!auto || auto.state !== 'proposed') throw new Error('Automation proposal not found or already resolved');
       return enqueue(async () => {
         if (auto.state !== 'proposed') throw new Error('Automation proposal already resolved');
+        recordApproval(auto, decision, 'automation');
         if (decision === 'dismiss') {
           auto.state = 'dismissed';
           writeState();

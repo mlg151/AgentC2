@@ -52,6 +52,7 @@ function parseCentcomEnvelope(rawText) {
         return;
       }
       if (!object(request) || typeof (request.kind || request.type) !== 'string' ||
+          (request.kind !== undefined && request.type !== undefined && request.kind !== request.type) ||
           (request.id !== undefined && (typeof request.id !== 'string' || !request.id || request.id.includes('\0') || request.id.length > 200)) ||
           (request.params !== undefined && !object(request.params)) ||
           (request.preconditions !== undefined && !object(request.preconditions))) {

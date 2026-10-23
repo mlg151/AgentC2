@@ -26,17 +26,37 @@ entries, unknown operations, and collection limits produce diagnostics.
 
 `outcomes.read` accepts optional `after`, `limit`, `collection`,
 `clientRequestId`, and `serverId` filters. Collections are `directive`,
-`automation`, `audit`, `query`, `provider`, and `diagnostic`. The default page contains up
+`automation`, `approval`, `audit`, `query`, `provider`, and `diagnostic`. The default page contains up
 to 20 entries; the maximum is 50. Cursors are monotonically increasing and
 survive restart. The latest 2,000 outcomes are retained; `retainedFrom` and
 `truncated` report an expired cursor. Results are bounded and redact common
 credential fields and credential text. Oversized records return a truncation
-marker and preview. Narrow a query when a result is partial.
+marker and preview. Status, correlation IDs, and completion facts remain outside
+the truncated detail. Narrow a query when a result is partial. Even when reading
+outcomes through an envelope, a partial page retains structured entries and a
+cursor pointing to the last included entry; continue while `hasMore` is true.
+
+Each journal row has an `outcomeId`; `serverId` identifies the request across
+state changes and `clientRequestId` preserves the submitted ID when present.
+Queries persist a `running` row before dispatch, followed by a successful result
+or a correlated diagnostic. An interrupted query becomes explicitly uncertain
+on restart. A repeated read query receives a new server ID because its evidence
+may have changed. Directive and automation retries retain their original IDs.
+Malformed envelopes have no safely parsed client ID, but their diagnostics have
+durable IDs and appear in the correction prompt. Unknown operations, unsupported
+operations, conflicting kind/type aliases, invalid fields, and excess collection
+entries all receive diagnostics. Approval/denial and automation apply/dismiss
+decisions persist separately with the Watch Officer actor and reviewed binding.
 
 The snapshot carries recent outcomes. Query/action continuations and approval
 or denial assessments also receive outcomes. Command delivery, provider turn
 completion, and project acceptance are different facts: a completed C2 action
 does not verify the requested project artifact or its acceptance criteria.
+Directive and audit entries expose `facts.submission`, command/session/turn IDs
+when available, `providerTurnCompletion`, and `projectAcceptance`. An adapter
+receipt alone leaves the latter two unverified. Use unit inspection/journal
+evidence and read-only artifact queries to assess the result; a command receipt
+never upgrades project acceptance automatically.
 
 ## Approval and persistence
 

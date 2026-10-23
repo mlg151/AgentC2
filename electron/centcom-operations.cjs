@@ -114,9 +114,9 @@ function createOperations({ service: s, client, control, resolve, fleet, applyAu
   }
   function validate(operation, input, classification) {
     const entry = definition(operation);
-    if (!entry) throw new Error(`Unknown operation: ${operation}`);
+    if (!entry) throw Object.assign(new Error(`Unknown operation: ${operation}`), { code: 'unknown_operation' });
     const reason = availability(entry);
-    if (reason) throw new Error(`Unavailable operation ${operation}: ${reason}`);
+    if (reason) throw Object.assign(new Error(`Unavailable operation ${operation}: ${reason}`), { code: 'unsupported_operation' });
     if (entry.classification !== classification) throw new Error(`${operation} is an ${entry.classification}; use agentc2.${entry.classification}`);
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error(`Malformed input for ${operation}`);
     const targetFields = ['sessionKey', 'key', 'name', 'hostId', 'chatSessionId'];
