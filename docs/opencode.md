@@ -2,7 +2,7 @@
 
 AgentC2 supports OpenCode on local and SSH hosts, including Windows through WSL. Install `opencode` on the execution host and sign in there with `opencode auth login`. Credentials stay on that host. The standard `~/.opencode/bin` installer path is discovered even when the desktop or SSH connection lacks an interactive shell PATH.
 
-Choose the OpenCode preset in **New session**. Existing installations can add a preset with provider **OpenCode** and launch command `opencode`, or choose **Provider default** and select OpenCode. The phone uses presets saved on the desktop.
+Choose the OpenCode preset in **New session**. On upgrade, existing installations receive this preset once if they do not already have an OpenCode preset. Custom presets are preserved, and removing the added preset is respected on subsequent restarts. If all 100 preset slots are occupied, migration waits until a slot is available. You can also choose **Provider default** and select OpenCode. The phone uses presets saved on the desktop.
 
 ## Structured chat
 
