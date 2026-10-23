@@ -71,7 +71,7 @@ function fixture(directory, options = {}) {
     store: { data: state },
     inventory: async () => ({ hosts, sessions, attention: state.attention, faults, missions, conflicts: [] }),
     getHost: (id) => ({ id }),
-    runRemote: async (payload) => { syncs.push(payload); return { path: '/tmp/centcom-fixture' }; },
+    runRemote: async (payload) => { if (payload.action === 'launch_paths') return { cwd: payload.cwd || '/home/fixture', paths: payload.paths }; if (payload.action === 'artifact_read') return { path: payload.path, revision: 'a'.repeat(64), sizeBytes: 17, text: 'Artifact evidence' }; syncs.push(payload); return { path: '/tmp/centcom-fixture' }; },
     create: async (input) => { const created = unit(++counter); sessions.push(created); calls.push({ operation: 'create', args: [input] }); return { ...created, name: created.id }; },
     flashQueue: async () => flash,
     loopBreaker: { faults: () => faults },

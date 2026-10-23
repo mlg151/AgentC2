@@ -4,6 +4,7 @@ const path = require('node:path');
 const { fleetReadiness } = require('./readiness.cjs');
 const { activeFleet, commanderIdentity } = require('./centcom-fleet.cjs');
 const { createOperations } = require('./centcom-operations.cjs');
+const { createEvidence } = require('./centcom-evidence.cjs');
 const { LIMITS, AUTOMATION_KINDS, object, fingerprint, redact, bounded, parseCentcomEnvelope } = require('./centcom-contract.cjs');
 const CONTEXT_REVISION = 2;
 
@@ -367,7 +368,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
       '4. To execute C2 actions, output `directives`.',
       '5. To propose persistent automations (SPECOPS workflows, OpOrders, presets), output `automations`.',
       '',
-      'Only connected, live/waiting managed units in SITUATION.json are eligible targets. Never guess identities or resume inactive history.',
+      'Only connected, live/waiting managed units are eligible action targets. units.list and unit.inspect can inspect external or saved records without granting control. Never guess identities or resume inactive history.',
       'Desktop navigation, clipboard, remote-access administration, and app updates are outside operational control.',
       'Use agentc2.query or agentc2.action with params: { operation, input }. Queries cannot modify state or run tests.',
       'Terminal input delivery, provider turn completion, and project acceptance are distinct facts. Project acceptance remains unverified until artifact/test evidence is inspected.',
@@ -416,14 +417,14 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
       telemetry: s.telemetry,
       outputTail: s.outputTail ? s.outputTail.split('\n').slice(-20).join('\n') : '',
     }));
-    const evidence = f.clean({
+    const evidence = redact(f.clean({
       capturedAt: new Date().toISOString(),
       defcon: readiness.level, defconLabel: readiness.label, defconReasons: readiness.reasons,
       theaters: (f.inventory.hosts || []).map((h) => ({ id: h.id, name: h.name, connected: h.connected })),
       units, specops, exercises, faults, attention: f.inventory.attention || [],
       flash, flashCount: flash.filter((r) => r.state === 'pending').length,
-    });
-    return boundSituationSnapshot({ ...evidence, capabilities: operations.catalog(f), contract: capabilityManifest(f), outcomes: readOutcomes({ after: Math.max(0, state.outcomeSequence - 10), limit: 10 }) });
+    }));
+    return boundSituationSnapshot({ ...evidence, hostEvidence: bounded(await operations.execute('hosts.inspect', {}, 'query'), 24000), inspection: { operation: 'units.list', scope: 'Includes external and saved records; mutation eligibility is separate' }, capabilities: operations.catalog(f), contract: capabilityManifest(f), outcomes: readOutcomes({ after: Math.max(0, state.outcomeSequence - 10), limit: 10 }) });
   }
 
   async function executeTurn(userPrompt, source = 'user', initialHop = 0, consoleCommand = null, logicalTurnId = null) {
@@ -475,7 +476,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
           ...(snapshot.truncation ? ['SITUATION.json is partial. Read its truncation totals and omitted counts before assessing the fleet.'] : []),
           `</UNTRUSTED_FLEET_EVIDENCE>`,
           '',
-          (await fleet()).clean(nextPrompt),
+          redact(nextPrompt),
         ].join('\n');
 
         // Keep one temporary commander view per provider turn, and release it
@@ -735,6 +736,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
   }
 
   async function resolveTarget(entry, p, pre = {}) {
+    if (entry.target === 'none' && !pre.sessionKey) return null;
     const f = await fleet();
     const resolveOne = (input, conditions = {}) => {
       const refs = [input.sessionKey, input.key, conditions.sessionKey].filter(Boolean);
@@ -793,7 +795,8 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
     return null;
   }
 
-  const operations = createOperations({ readOutcomes, manifest: () => capabilityManifest(), service, client, control: (unit, fn) => service.commanderControl(client, unit, async (handle) => {
+  const evidence = createEvidence({ service, isCommander, activeKeys: async (inventory) => (await fleet(inventory)).keys });
+  const operations = createOperations({ evidence, readOutcomes, manifest: () => capabilityManifest(), service, client, control: (unit, fn) => service.commanderControl(client, unit, async (handle) => {
     const current = (await fleet()).find(unit.key);
     if (!current || current.chatSessionId !== unit.chatSessionId || (current.id || current.name) !== (unit.id || unit.name)) throw new Error('Target left the active fleet while acquiring control');
     if (activeTurnAbort?.signal.aborted || disposed) throw new Error('CENTCOM turn interrupted by Watch Officer');
@@ -805,10 +808,24 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
       operations: operations.catalog(context), automationKinds: AUTOMATION_KINDS,
       approval: { permanentChanges: 'watch_officer', nativePermissions: 'separate_from_c2', uncertain: 'inspect_before_retry' } };
   }
+  async function launchAdmission(request) {
+    const p = request.input;
+    if (request.operation === 'unit.create') return evidence.admission(p);
+    if (['specops.launch', 'exercise.create'].includes(request.operation)) return evidence.admission({ hostId: p.hostId, worktree: { repository: p.repository } });
+    if (request.operation === 'sitrep.handoff') {
+      const preview = service.sitrepSource(p.id);
+      if (!preview) throw new Error('SitRep preview is unavailable');
+      return evidence.admission({ hostId: preview.targetHostId, worktree: { operationId: p.operationId, repository: preview.repository } });
+    }
+    return null;
+  }
   async function bindDirective(directive) {
     const request = operationRequest(directive, 'action');
     const entry = operations.validate(request.operation, request.input, 'action');
     directive.reviewRequired = entry.reviewRequired;
+    directive.admission = await launchAdmission(request);
+    if (directive.admission?.status === 'blocked') throw new Error('Launch admission blocked: ' + directive.admission.blockers.join('; '));
+    if (directive.admission?.status === 'unknown') directive.reviewRequired = true;
     const target = await resolveTarget(entry, request.input, directive.preconditions);
     if (Array.isArray(target)) directive.preconditions = { ...directive.preconditions, identities: target.map((u) => ({ key: u.key, hostId: u.hostId, name: u.id || u.name, chatSessionId: u.chatSessionId })) };
     if (target && !Array.isArray(target)) directive.preconditions = { ...directive.preconditions, sessionKey: target.key, identity: { hostId: target.hostId, name: target.id || target.name, chatSessionId: target.chatSessionId } };
@@ -820,6 +837,9 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
   async function executeDirective(directive, check) {
     if (directive.validationError) throw new Error(directive.validationError);
     const r = operationRequest(directive, 'action');
+    const admission = await launchAdmission(r);
+    if (admission?.status === 'blocked' || (admission?.status === 'unknown' && !directive.approvedAt)) throw new Error('Launch admission requires review: ' + [...admission.blockers, ...admission.unknowns].join('; '));
+    if (admission) directive.admission = admission;
     return operations.execute(r.operation, r.input, 'action', directive.preconditions, check);
   }
 
@@ -1093,6 +1113,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
           state.auditLog.unshift({ id: d.id, kind: d.kind, summary: d.summary, outcome: 'denied', at: Date.now(), trigger: 'user' });
         } else {
           d.state = 'executing';
+          d.approvedAt = Date.now();
           writeState();
           try {
             const result = await executeDirective(d);
@@ -1126,6 +1147,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
             state.auditLog.unshift({ id: d.id, kind: d.kind, summary: d.summary, outcome: 'denied', at: Date.now(), trigger: 'user' });
           } else {
             d.state = 'executing';
+            d.approvedAt = Date.now();
             writeState();
             try {
               const result = await executeDirective(d);

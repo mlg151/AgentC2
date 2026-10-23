@@ -15,6 +15,8 @@ export interface Session {
   cwd: string;
   updatedAt: string | null;
   startedAt?: string | null;
+  processId?: string | null;
+  processRole?: 'terminal_wrapper' | 'unmanaged_agent' | 'unknown';
   events?: { id: string; kind: string; at: string; source?: string }[];
   state: string;
   kind: 'managed' | 'external-tmux' | 'unmanaged' | 'conversation' | 'background';
@@ -53,6 +55,7 @@ export interface SpecopsRun { canResume: boolean; canRetry: boolean; id: string;
 export interface GithubResult { [key: string]: unknown }
 
 export interface Inventory {
+  capturedAt?: string;
   missions?: SpecopsRun[];
   hosts: { id: string; name: string; target: string; user?: string; connected: boolean; error?: string }[];
   sessions: Session[];
@@ -65,7 +68,8 @@ export interface FaultRecord { sessionKey: string; id: string; at: string; label
 export interface HostConfig { id: string; kind?: 'ssh' | 'local'; name: string; target: string; port: number; enabled: boolean; autoForward?: boolean }
 export type RoeProfile = 'full' | 'gated' | 'provider-default';
 export interface DevUrl { url: string; hostId: string; port: number; status: 'available' | 'opening' | 'ready' | 'failed'; localUrl: string | null; error: string | null }
-export interface HostHealth { hostId: string; name: string; connected: boolean; cpuPercent?: number | null; memoryTotal?: number; memoryUsed?: number; disks?: { path: string; total: number; used: number; free: number }[]; sampledAt?: number; sshRoundTripMs?: number; activeChannels?: number; gpu?: { status: 'reported' | 'unknown' | 'unsupported'; sampledAt: number | null; devices: { name: string; memoryTotal: number; memoryUsed: number }[] }; error?: string }
+export interface HostResourceConstraints { status: 'reported' | 'unknown' | 'unsupported'; version?: number | null; reason?: string | null; memoryLimitBytes?: number | null; memoryHeadroomBytes?: number | null; memoryLimitStatus?: 'limited' | 'unlimited' | 'unknown'; cpuLimitCores?: number | null; cpuLimitStatus?: 'limited' | 'unlimited' | 'unknown'; pressure?: Record<string, Record<string, Record<string, number>> | null>; groupPressure?: Record<string, Record<string, Record<string, number>> | null> | null }
+export interface HostHealth { resources?: HostResourceConstraints; hostId: string; name: string; connected: boolean; cpuPercent?: number | null; memoryTotal?: number; memoryUsed?: number; disks?: { path: string; total: number; used: number; free: number }[]; sampledAt?: number; sshRoundTripMs?: number; activeChannels?: number; gpu?: { status: 'reported' | 'unknown' | 'unsupported'; sampledAt: number | null; devices: { name: string; memoryTotal: number; memoryUsed: number }[] }; error?: string }
 export interface LaunchPreset { id: string; name: string; provider: Provider; command: string; args: string; cwd: string; instructions: string; fullPermissions: boolean; roeProfile?: RoeProfile | ''; attentionHooks: boolean; hostId: string; loopBreaker?: { enabled: boolean; autoInterrupt: boolean; threshold: number; windowMinutes: number; cooldownMinutes: number } }
 export interface OpOrderMcp { name: string; transport: 'stdio' | 'http'; providers: Exclude<Provider, 'terminal'>[]; command: string; args: string[]; url: string; env: string[]; headers: Record<string, string> }
 export interface OpOrder { version: 1; id: string; hostId: string; repository: string; enabled: boolean; instructions: string; overrides: { codex: string; claude: string; antigravity: string }; mcp: OpOrderMcp[] }

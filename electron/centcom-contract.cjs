@@ -15,6 +15,7 @@ function redact(v) {
   if (object(v)) return Object.fromEntries(Object.entries(v).map(([k, value]) => [k, /password|secret|token|credential|privatekey|authorization/i.test(k) && !/tokens|tokenCount/i.test(k) ? '[REDACTED]' : redact(value)]));
   if (typeof v !== 'string') return v;
   return v.replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g, '[REDACTED PRIVATE KEY]')
+    .replace(/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-(?:proj-)?[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16})\b/g, '[REDACTED TOKEN]')
     .replace(/\b(Bearer\s+|(?:password|api[_-]?key|token|secret)\s*[:=]\s*)[^\s,;]+/gi, '$1[REDACTED]');
 }
 function bounded(value, maxBytes = LIMITS.resultBytes) {

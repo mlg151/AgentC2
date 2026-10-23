@@ -76,7 +76,7 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
         cpuSamples.set(host.id, sample);
         if (sample.gpu) gpuProbedAt.set(host.id, receivedAt);
         const activeChannels = [...terminals.sessions.values()].filter((record) => record.hostId === host.id && !record.disposed && record.connection === 'connected').reduce((count, record) => count + record.handles.size, 0);
-        const reading = { hostId: host.id, name: host.name, connected: true, cpuPercent, memoryTotal: sample.memoryTotal, memoryUsed: sample.memoryUsed, disks: sample.disks, sampledAt: receivedAt, sshRoundTripMs: roundTripMs, activeChannels, gpu: sample.gpu || healthCache.get(host.id)?.gpu || { status: 'unknown', sampledAt: null, devices: [] } };
+        const reading = { hostId: host.id, name: host.name, connected: true, cpuPercent, memoryTotal: sample.memoryTotal, memoryUsed: sample.memoryUsed, resources: sample.resources || { status: 'unknown', reason: 'Helper did not report resource constraints' }, disks: sample.disks, sampledAt: receivedAt, sshRoundTripMs: roundTripMs, activeChannels, gpu: sample.gpu || healthCache.get(host.id)?.gpu || { status: 'unknown', sampledAt: null, devices: [] } };
         healthCache.set(host.id, reading);
         return reading;
       });
@@ -127,7 +127,7 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
         if (mission) session.specops = { id: mission.id, state: mission.state, breadcrumb: mission.workflow.stages.map((s) => s.id === mission.stage ? `[*${s.id}*]` : `[${s.id}]`).join(' → ') };
       }
       const missionSummaries = missions.map(({ id, hostId, repo, state, stage, error, workflow, costUsd, costKnown, canResume, canRetry }) => ({ id, hostId, repo, state, stage, error, workflow, costUsd, costKnown, canResume, canRetry, visits: [] }));
-      const snapshot = { missions: missionSummaries, hosts: statuses, sessions, attention: store.data.attention, faults: loopBreaker.faults() };
+      const snapshot = { capturedAt: new Date().toISOString(), missions: missionSummaries, hosts: statuses, sessions, attention: store.data.attention, faults: loopBreaker.faults() };
       snapshot.conflicts = [...opOrderConflicts.values()];
       events.emit('inventory:updated', snapshot);
       return snapshot;
@@ -701,6 +701,7 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
       chats, terminals, deleteSession, interruptFault, acknowledge, worktrees, archiveWorktree, diffRequest,
       github, devUrls, openDevUrl, previewOpOrder, enrollOpOrder,
       sitrepSource: (id) => sitrepPreviews.get(id),
+      commanderHandoffs: () => [...sitrepPreviews.entries()].map(([id, value]) => ({ id, ...value })),
       inventory,
       health,
       create,

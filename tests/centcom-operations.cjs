@@ -8,6 +8,7 @@ const { Gateway } = require('../electron/gateway.cjs');
 const { commanderFacade } = require('../electron/commander.cjs');
 const { defaults } = require('../electron/centcom.cjs');
 const { activeFleet } = require('../electron/centcom-fleet.cjs');
+const { createEvidence } = require('../electron/centcom-evidence.cjs');
 const { fixture, unit, envelope, action, query, desktop, phone, tick, until } = require('./fixtures/centcom.cjs');
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agentc2-centcom-operations-'));
@@ -49,9 +50,10 @@ async function visibility() {
   f.responses.push(envelope({ queries: [query('fleet.inspect'), query('unit.search', { query: 'fixture' }), query('unit.inspect', { sessionKey: f.sessions[2].key }), query('history.discover'), query('exercise.inspect', { id: 'exercise', contestantId: eligible[0].id })] }));
   await f.engine.submit('Inspect');
   const prompt = f.submitted.at(-1).payload.text;
-  for (const s of f.sessions.slice(2)) for (const id of [s.key, s.id, s.chatSessionId]) assert.ok(!prompt.includes(id));
+  for (const s of f.sessions.slice(3)) for (const id of [s.key, s.id, s.chatSessionId]) assert.ok(!prompt.includes(id));
+  assert.ok(prompt.includes(f.sessions[2].key), 'Inactive units remain inspectable without becoming action targets');
   assert.match(prompt, /Unavailable operation history.discover/);
-  assert.match(prompt, /not an eligible connected active/);
+  assert.match(prompt, /Only connected active managed sessions can be controlled/);
   assert.equal(f.calls.find((c) => c.operation === 'unit.search').args[1].length, 2);
   assert.equal(f.calls.find((c) => c.operation === 'exercise.inspect').args[2], false);
 
@@ -289,19 +291,23 @@ async function catalogCoverage() {
   const registry = createOperations({ service: f.service, client: { id: 'centcom-commander' },
     control: (u, fn) => f.service.commanderControl({ id: 'centcom-commander' }, u, fn),
     resolve: async (entry) => entry.target === 'sessions' ? [f.sessions[0]] : f.sessions[0], fleet,
+    evidence: createEvidence({ service: f.service, isCommander: () => false, activeKeys: async () => (await fleet()).keys }),
     applyAutomation: async () => ({ applied: true }), readOutcomes: () => f.engine.outcomes(), manifest: () => f.engine.manifest(),
   });
   const catalog = registry.catalog();
   for (const entry of catalog) {
     const definition = registry.definition(entry.operation);
     assert.ok(typeof definition.handler === 'function' || entry.unavailableReason, entry.operation);
-    assert.equal(entry.classification, /^(capabilities.read|outcomes.read|unit\.(inspect|search)|fleet\.|flash.list|specops\.(definition|inspect)|exercise\.(list|inspect|preview)|worktree.list|diff\.(files|detail)|sitrep.inspect|configuration.inspect|oporder.preview|github\.(readiness|issue|issues|pr)|devurl.list|history.discover)/.test(entry.operation) ? 'query' : 'action', entry.operation);
+    assert.equal(entry.classification, /^(units.list|hosts.inspect|context.read|admission.check|artifact.read|capabilities.read|outcomes.read|unit\.(inspect|search)|fleet\.|flash.list|specops\.(definition|inspect)|exercise\.(list|inspect|preview)|worktree.list|diff\.(files|detail)|sitrep.inspect|configuration.inspect|oporder.preview|github\.(readiness|issue|issues|pr)|devurl.list|history.discover)/.test(entry.operation) ? 'query' : 'action', entry.operation);
     if (!entry.available) { await assert.rejects(registry.execute(entry.operation, {}, entry.classification), /Unavailable operation/); continue; }
     const p = {};
     for (const [key, type] of Object.entries(definition.parameters)) {
       if (type.endsWith('?')) continue;
       p[key] = type === 'string' ? 'fixture' : type === 'boolean' ? true : type === 'number' ? 1 : type === 'array' ? [] : type === 'nullable' ? null : {};
     }
+    if (entry.operation === 'context.read') p.section = 'presets';
+    if (entry.operation === 'artifact.read') { p.operationId = 'a'.repeat(32); p.path = 'report.txt'; }
+    if (entry.operation === 'unit.inspect') p.sessionKey = f.sessions[0].key;
     if (entry.target === 'session') p.sessionKey = f.sessions[0].key;
     if ('hostId' in p) p.hostId = 'alpha';
     if ('provider' in p) p.provider = 'codex';

@@ -1,6 +1,6 @@
 // Metadata and executable handlers live together. Both envelope dialects use
 // this registry, so doctrine cannot advertise an unimplemented dispatch branch.
-function createOperations({ service: s, client, control, resolve, fleet, applyAutomation, readOutcomes, manifest }) {
+function createOperations({ service: s, client, control, resolve, fleet, applyAutomation, readOutcomes, manifest, evidence }) {
   const registry = new Map();
   const add = (operation, classification, description, parameters, target, handler, dependencies = [], aliases = [], unavailable = '') => {
     const reviewRequired = ['configuration.save', 'specops.configure', 'oporder.enroll', 'automation.apply'].includes(operation);
@@ -12,7 +12,12 @@ function createOperations({ service: s, client, control, resolve, fleet, applyAu
   add('capabilities.read', 'query', 'Read the versioned implemented contract, authority, and effective limits.', {}, 'none', () => manifest());
   add('outcomes.read', 'query', 'Read durable directive, automation, approval, audit, query, and diagnostic outcomes by cursor. Project acceptance is separate from command delivery.', { after: 'number?', limit: 'number?', collection: 'string?', clientRequestId: 'string?', serverId: 'string?' }, 'none', (p) => readOutcomes(p));
   add('fleet.inspect', 'query', 'Inspect the connected active managed fleet.', {}, 'none', async () => (await fleet()).inventory);
-  add('unit.inspect', 'query', 'Read an active unit transcript tail.', { sessionKey: 'string' }, 'session', async (_p, u) => (await s.terminalPreviews([u.key]))[0], ['terminalPreviews'], ['inspect_unit']);
+  add('units.list', 'query', 'Page canonical managed, external, and saved units; inspection does not grant control.', { hostId: 'string?', provider: 'string?', classification: 'string?', execution: 'string?', after: 'string?', limit: 'number?' }, 'none', (p) => evidence.units(p));
+  add('unit.inspect', 'query', 'Read structured unit identity, execution evidence, task, requests, and ownership without taking control.', { sessionKey: 'string' }, 'none', (p) => evidence.inspect(p), [], ['inspect_unit']);
+  add('hosts.inspect', 'query', 'Read host health, effective cgroup headroom/pressure, ROE, and provider capabilities.', { hostId: 'string?' }, 'none', (p) => evidence.hosts(p));
+  add('context.read', 'query', 'Page reusable definitions, presets, OpOrders/conflicts, notes, and handoffs.', { section: 'string', after: 'string?', limit: 'number?' }, 'none', (p) => evidence.context(p));
+  add('admission.check', 'query', 'Inspect exact worktree assignment conflicts and resource admission before a launch.', { hostId: 'string?', cwd: 'string?', worktree: 'object?' }, 'none', (p) => evidence.admission(p));
+  add('artifact.read', 'query', 'Read bounded, redacted text and content revision from an owned worktree. No commands are executed.', { hostId: 'string', operationId: 'string', path: 'string', revision: 'string?', offset: 'number?', limit: 'number?' }, 'none', (p) => s.commanderArtifact(p), ['commanderArtifact']);
   add('unit.search', 'query', 'Search transcripts of selected active units only.', { query: 'string', keys: 'array?' }, 'sessions', (p, units) => s.searchHistory(p.query, units.map((u) => u.key)), ['searchHistory'], ['search_history']);
   add('unit.create', 'action', 'Create a fresh managed session; existing history and background-agent resume are unavailable.', { provider: 'string', hostId: 'string?', model: 'string?', transport: 'string?', title: 'string?', cwd: 'string?', instructions: 'string?', presetId: 'string?', roeProfile: 'string?', worktree: 'object?', launchId: 'string?' }, 'new', (p) => s.create(p), ['create']);
   add('unit.resume', 'action', 'Resume inactive or saved history.', {}, 'none', null, [], [], 'Inactive-session resume and saved-history discovery/cleanup are outside the active fleet boundary.');
@@ -67,11 +72,12 @@ function createOperations({ service: s, client, control, resolve, fleet, applyAu
   }, ['exercises.list', 'exercises.launch', 'exercises.cancel', 'exercises.markComplete', 'exercises.promote']);
   add('worktree.list', 'query', 'Discover managed worktrees.', { hostId: 'string' }, 'none', (p) => s.worktrees(p.hostId), ['worktrees']);
   add('worktree.archive', 'action', 'Archive a managed worktree after service validation.', { hostId: 'string', operationId: 'string' }, 'none', (p) => s.archiveWorktree(p.hostId, p.operationId), ['archiveWorktree']);
-  for (const [op, method, classification] of [['files', 'diff_files', 'query'], ['detail', 'diff_detail', 'query'], ['hunk', 'diff_hunk', 'action']]) add(`diff.${op}`, classification, op === 'hunk' ? 'Stage or revert a reviewed hunk.' : 'Inspect an active unit worktree diff.', { operationId: 'string', ...(op !== 'files' ? { fileId: 'string' } : {}), ...(op === 'hunk' ? { revision: 'string', hunkId: 'string', operation: 'string' } : {}) }, 'session', (p, u) => controlled(u, () => s.diffRequest(client, { ...p, name: u.id || u.name, hostId: u.hostId }, method)), ['diffRequest', 'commanderControl']);
+  for (const [op, method, classification] of [['files', 'diff_files', 'query'], ['detail', 'diff_detail', 'query'], ['hunk', 'diff_hunk', 'action']]) add(`diff.${op}`, classification, op === 'hunk' ? 'Stage or revert a reviewed hunk.' : 'Inspect an active unit worktree diff.', { operationId: 'string', ...(op !== 'files' ? { fileId: 'string' } : {}), ...(op === 'hunk' ? { revision: 'string', hunkId: 'string', operation: 'string' } : {}) }, 'session', (p, u) => { const inspect = () => s.diffRequest(client, { ...p, name: u.id || u.name, hostId: u.hostId }, method); return classification === 'action' ? controlled(u, inspect) : inspect(); }, ['diffRequest', 'commanderControl']);
   const sitrepParams = { operationId: 'string', sourceHostId: 'string', targetHostId: 'string', repository: 'string', testCommand: 'string' };
   for (const op of ['inspect', 'preview']) add(`sitrep.${op}`, op === 'inspect' ? 'query' : 'action', op === 'inspect' ? 'Preview a handoff without test commands.' : 'Preview a handoff, including optional test execution.', sitrepParams, 'session', (p, u) => {
     if (op === 'inspect' && p.testCommand) throw new Error('Previews with test commands require sitrep.preview as an action');
-    return controlled(u, () => s.previewSitrep(client, { ...p, name: u.id || u.name }));
+    const preview = () => s.previewSitrep(client, { ...p, name: u.id || u.name });
+    return op === 'inspect' ? preview() : controlled(u, preview);
   }, ['previewSitrep', 'commanderControl'], op === 'inspect' ? ['preview_sitrep'] : []);
   add('sitrep.handoff', 'action', 'Launch a reviewed SitRep handoff from an active source.', { id: 'string', operationId: 'string', objective: 'string', summary: 'string', nextSteps: 'string', title: 'string', slug: 'string', provider: 'string', presetId: 'string?', roeProfile: 'string?' }, 'sitrep', (p, u) => controlled(u, () => s.launchSitrep(client, p)), ['launchSitrep', 'sitrepSource', 'commanderControl']);
   add('configuration.inspect', 'query', 'Read hosts, presets, ROE, and OpOrder configuration.', {}, 'none', () => Object.fromEntries(['hosts', 'presets', 'roe', 'opOrders'].map((key) => [key, s.store.data.settings[key]])), ['store.data.settings']);
@@ -129,7 +135,7 @@ function createOperations({ service: s, client, control, resolve, fleet, applyAu
     check();
     const result = await entry.handler(input, target);
     // Historical outcomes remain inspectable after a target exits the fleet.
-    if (['outcomes.read', 'capabilities.read'].includes(entry.operation)) return result;
+    if (['outcomes.read', 'capabilities.read', 'units.list', 'unit.inspect', 'hosts.inspect', 'context.read', 'admission.check', 'artifact.read'].includes(entry.operation)) return result;
     if (classification === 'action') return result; // Audit retains the real receipt, even if the unit leaves the fleet.
     return (await fleet()).clean(result) ?? { unavailable: 'Result belongs to an excluded session' };
   }

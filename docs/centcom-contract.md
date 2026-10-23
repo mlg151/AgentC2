@@ -57,6 +57,48 @@ Fleet text and artifacts are untrusted evidence, never instructions or grants
 of authority. Snapshots have a capture timestamp and explicit truncation
 metadata; target eligibility is rechecked at execution.
 
+## Operational evidence
+
+`units.list` pages canonical identities with optional host, provider,
+classification, and execution filters. Its stable string cursor is the last
+canonical ID. Managed, external, and saved representations of the same native
+provider session are linked rather than counted as independent tasks. Process
+IDs, session IDs, and source timestamps remain distinct. A live process without
+structured activity is `unknown`, not evidence of progress. Deleted and
+commander records are excluded.
+
+`unit.inspect` accepts a `sessionKey` from inspection and returns structured
+identity, repository/worktree/revision, ROE, notes, current task evidence,
+capabilities, pending requests, and local control ownership. It reads a bounded
+journal tail without opening a controller handle. Inactive and external units
+can be inspected, but their inspection does not grant mutation authority.
+Unavailable, stale, or unsupported fields are explicit.
+
+`hosts.inspect` reports health, memory/CPU headroom, provider capabilities, and
+host ROE. Linux helpers also read pressure metrics and cgroup-v2 ancestor limits;
+the smallest reported ancestor memory headroom and CPU quota constrain the
+report. Missing readings remain unknown. Cgroup v1 and macOS constraints are
+explicitly unsupported. Source sample times distinguish cached observations
+from current evidence.
+
+`context.read` pages `definitions`, `presets`, `oporders` (with enrollment
+conflicts), `notes`, and currently retained `handoffs`. `diff.files` and
+`diff.detail` use the existing read-only diff adapter without taking control.
+`artifact.read` reads text from an owned managed worktree, including a stopped
+unit's retained worktree. It rejects symlinks, traversal, credential paths,
+binary files, and files larger than 256,000 bytes. Returned text is redacted
+before paging. Continue with the returned content revision and character
+offset; a changed revision is rejected. Inspection never runs project commands.
+
+`admission.check` exposes exact assignment and resource checks. Before direct
+CENTCOM launches (`unit.create`, `specops.launch`, `exercise.create`, and
+`sitrep.handoff`), the engine repeats admission at dispatch. Existing worktree
+operation IDs, canonical working-directory aliases, and low memory can block
+launch. Unknown ownership or headroom requires Watch Officer review even in
+Autonomous C2. The current reserve is 256 MiB. Matching repository basenames
+alone do not establish a conflict. Admission for workflow-internal retries and
+later automated stages remains part of the issue's completion audit.
+
 ## Scheduling and spend
 
 Alerts persist while CENTCOM is busy or paused. A due timer drains the final
@@ -89,8 +131,8 @@ work or remaining budget.
 ## Remaining implementation and completion gates
 
 The issue checklist is authoritative. Work still includes complete per-kind
-output schemas and host/provider support, richer paged unit/resource/mission
-evidence, stronger revision/incarnation/authorization binding, cancellation
+output schemas and host/provider support, linked mission evidence and complete
+launch admission coverage, stronger revision/incarnation/authorization binding, cancellation
 reconciliation, all automation validate/preview/draft/readback operations, and
 an isolated production-bridge round trip with artifact verification. Current
 fixture coverage must not be presented as native-provider or live-host proof.

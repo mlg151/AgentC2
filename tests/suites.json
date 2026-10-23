@@ -16,6 +16,11 @@
       "group": "core"
     },
     {
+      "id": "centcom-evidence",
+      "file": "tests/centcom-evidence.cjs",
+      "group": "core"
+    },
+    {
       "id": "specops",
       "file": "tests/specops.cjs",
       "group": "core"
