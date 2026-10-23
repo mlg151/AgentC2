@@ -201,6 +201,23 @@ class Store {
       // Do not silently overwrite an unreadable user's configuration.
       const saved = JSON.parse(fs.readFileSync(this.file, 'utf8'));
       this.data = { ...this.data, settings: validateSettings(saved.settings), workspace: validateWorkspace(saved.workspace), attention: Array.isArray(saved.attention) ? saved.attention.slice(-500) : [], attentionCursors: saved.attentionCursors || {}, deletedSessions: Array.isArray(saved.deletedSessions) ? saved.deletedSessions.slice(-10000).map((key) => text(key, 300)) : [], cleanupState: validateCleanupState(saved.cleanupState || this.data.cleanupState), cachedUnits: validateCachedUnits(saved.cachedUnits || {}), exercises: Array.isArray(saved.exercises) ? saved.exercises.filter((item) => item?.version === 1 && /^[a-f0-9]{32}$/.test(item.id) && Array.isArray(item.contestants)).slice(0, 50) : [], flashResolved: Array.isArray(saved.flashResolved) ? saved.flashResolved.filter((id) => /^[a-f0-9]{32}$/.test(id)).slice(-1000) : [], loopState: saved.loopState && typeof saved.loopState === 'object' && !Array.isArray(saved.loopState) ? Object.fromEntries(Object.entries(saved.loopState).filter(([key, value]) => /^[A-Za-z0-9_-]{1,80}\/tmux:hq-[a-f0-9]{12}$/.test(key) && value && typeof value === 'object').slice(-500)) : {}, opOrderConflicts: saved.opOrderConflicts && typeof saved.opOrderConflicts === 'object' && !Array.isArray(saved.opOrderConflicts) ? Object.fromEntries(Object.entries(saved.opOrderConflicts).filter(([id, item]) => ID.test(id) && item?.id === id && ID.test(item.hostId || '') && typeof item.detail === 'string' && item.detail.length <= 300 && Number.isFinite(Date.parse(item.at || ''))).slice(-50)) : {} };
+      this.data.openCodePresetMigrated = saved.openCodePresetMigrated === true;
+      if (!this.data.openCodePresetMigrated) {
+        const presets = this.data.settings.presets;
+        const hasOpenCode = presets.some((preset) => preset.provider === 'opencode');
+        if (hasOpenCode || presets.length < 100) {
+          if (!hasOpenCode) {
+            const preset = defaults().presets.find((item) => item.provider === 'opencode');
+            const ids = new Set(presets.map((item) => item.id));
+            for (let suffix = 2; ids.has(preset.id); suffix++) preset.id = `opencode-${suffix}`;
+            this.data.settings = validateSettings({ ...this.data.settings, presets: [...presets, preset] });
+          }
+          // Persist once so removing the preset later remains a user choice.
+          this.update({ openCodePresetMigrated: true });
+        }
+      }
+    } else {
+      this.data.openCodePresetMigrated = true;
     }
   }
   save(key, value) {
