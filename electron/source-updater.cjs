@@ -29,7 +29,7 @@ function resumeSourceUpdate({ directory, revision, app }) {
 function run(file, args, cwd) {
   return new Promise((resolve, reject) => {
     // Only fixed npm commands use cmd.exe on Windows; no user-provided shell text.
-    const child = spawn(file, args, { cwd, shell: process.platform === 'win32' && file === 'npm', windowsHide: true, env: { ...process.env, NODE_ENV: 'development', ELECTRON_RUN_AS_NODE: undefined, GIT_TERMINAL_PROMPT: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(file, args, { cwd, shell: process.platform === 'win32' && file === 'npm', windowsHide: true, env: { ...process.env, NODE_ENV: 'production', ELECTRON_RUN_AS_NODE: undefined, GIT_TERMINAL_PROMPT: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';
     const collect = (data) => { output = (output + data.toString()).slice(-8000); };
     child.stdout.on('data', collect); child.stderr.on('data', collect);

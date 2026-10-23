@@ -8,6 +8,7 @@ const { createUpdates } = require('../electron/updates.cjs');
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'agentc2-source-update-'));
   const oldEnvironment = process.env.NODE_ENV;
   try {
+    assert.equal(await run(process.execPath, ['-p', 'process.env.NODE_ENV']), 'production', 'Source updates must produce production renderer assets');
     const repository = path.join(temporary, 'original');
     const directory = path.join(temporary, 'updates');
     await fs.mkdir(repository);
