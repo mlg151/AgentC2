@@ -141,11 +141,11 @@ export default function App() {
     return () => { current = false; clearInterval(timer); };
   }, []);
   useEffect(() => {
-    if (!window.agentHQ) return;
+    if (!window.agentHQ?.centcomState) return;
     let active = true;
     void window.agentHQ.centcomState().then((s) => { if (active) setCentcomState(s); }).catch(() => {});
-    const off = window.agentHQ.onCentcomState((s) => { if (active) setCentcomState(s); });
-    return () => { active = false; off(); };
+    const off = window.agentHQ.onCentcomState?.((s) => { if (active) setCentcomState(s); });
+    return () => { active = false; off?.(); };
   }, []);
   useEffect(() => {
     if (choseInitial.current || !managedSessions.length || !initialized.current) return;
@@ -289,7 +289,7 @@ export default function App() {
     deny: { run: () => { void decideFlash('deny'); }, available: Boolean(flashSelected?.state === 'pending' && flashSelected.connected && !flashBusy), reason: 'No connected verified permission request' },
     jumpRequest: { run: jumpFlash, available: Boolean(flashSelected), reason: 'No verified permission request' },
     diff: { run: () => { if (selected) toggleDiff(selected.key); }, available: Boolean(selected?.worktreeOperation && selected.kind === 'managed'), reason: 'Select an owned worktree unit' },
-    centcom: { run: () => setShowCentcom((value) => !value) },
+    centcom: { run: () => setShowCentcom((value) => !value), available: Boolean(window.agentHQ?.centcomState), reason: 'CENTCOM unavailable' },
     exercise: { run: () => setShowExercises(true) },
     handoff: { run: () => { if (selected) setSitrepSource(selected); }, available: Boolean(selected?.worktreeOperation && selected.kind === 'managed' && !selected.stale), reason: 'Select a connected owned worktree unit' },
     faultStop: { run: () => { void window.agentHQ?.interruptFaults().then((results) => { setFaultResult(results.map((item) => `${item.sessionKey}: ${item.status}${item.result ? ` (${item.result})` : ''}`).join('\n')); return refresh(); }).catch((cause) => setFaultResult(String(cause))); }, available: Boolean(inventory?.faults?.some((item) => ['review', 'failed', 'unknown'].includes(item.status))), reason: 'No eligible confirmed faults' },
@@ -302,7 +302,7 @@ export default function App() {
 
   return <div className={`app-shell situation-room${situation.rosterCollapsed || situation.zen ? ' roster-hidden' : ''}${situation.zen ? ' is-zen' : ''}${situation.ligatures ? ' font-ligatures' : ''}`}>
     {(inventory?.missions || []).filter((r) => r.state === 'halted').length ? <button className="specops-escalation" onClick={() => setShowSpecops(true)}>Immediate Flash Traffic · [!HALT] {(inventory?.missions || []).filter((r) => r.state === 'halted').length} SPECOPS missions require arbitration</button> : null}
-    <SituationHeader onCentcom={() => setShowCentcom(true)} centcomPendingCount={centcomPendingCount} onSpecops={() => setShowSpecops(true)} inventory={inventory} readiness={readiness} missionStartedAt={situation.missionStartedAt} hosts={settings?.hosts || []} hostFilter={hostFilter} onHostFilter={setHostFilter} onSearch={() => setShowSwitcher(true)} onSettings={() => setShowSettings(true)} onNew={() => setDialog(null)} collapsed={situation.rosterCollapsed || situation.zen} onToggleRoster={() => changeSituation({ rosterCollapsed: !situation.rosterCollapsed, zen: false })} />
+    <SituationHeader onCentcom={window.agentHQ?.centcomState ? () => setShowCentcom(true) : undefined} centcomPendingCount={centcomPendingCount} onSpecops={() => setShowSpecops(true)} inventory={inventory} readiness={readiness} missionStartedAt={situation.missionStartedAt} hosts={settings?.hosts || []} hostFilter={hostFilter} onHostFilter={setHostFilter} onSearch={() => setShowSwitcher(true)} onSettings={() => setShowSettings(true)} onNew={() => setDialog(null)} collapsed={situation.rosterCollapsed || situation.zen} onToggleRoster={() => changeSituation({ rosterCollapsed: !situation.rosterCollapsed, zen: false })} />
     {inventory?.missions?.some((r) => !['completed', 'cancelled'].includes(r.state)) ? <nav className="specops-progress" aria-label="SPECOPS stage progress">{inventory.missions.filter((r) => !['completed', 'cancelled'].includes(r.state)).map((r) => <button key={r.id} onClick={() => setShowSpecops(true)}><strong>{r.repo}</strong> {r.workflow.stages.map((s) => s.id === r.stage ? `[*${s.id}*]` : `[${s.id}]`).join(' → ')}</button>)}</nav> : null}
     <div className="workspace" inert={showOverwatch}>
       <SessionList sessions={scoped} selectedKey={workspace.selectedKey} onSelect={openSession} providerFilter={providerFilter} onProviderFilter={setProviderFilter} stateFilter={stateFilter} onStateFilter={setStateFilter} onRefresh={() => void refresh()} onNew={() => setDialog(null)} loading={loading} metadata={workspace.metadata} pinning={pinning} onPin={(session) => void togglePin(session)} situation={situation} onSituation={changeSituation} attention={attention} projects={projects} projectFilter={projectFilter} onProjectFilter={setProjectFilter} pinnedOnly={pinnedOnly} onPinnedOnly={() => setPinnedOnly((value) => !value)} onInbox={() => setInbox((value) => !value)} onCleanup={() => setCleanupTarget(null)} onSettings={() => setShowSettings(true)} />
