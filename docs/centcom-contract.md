@@ -46,6 +46,28 @@ to the configured per-turn limit. Permanent configuration changes through
 `automation.apply` still require Watch Officer approval in both modes.
 Native provider permissions remain separate from C2 authority.
 
+Each directive persists a reviewed binding for its canonical parameters,
+preconditions, host routes, C2 authority, ROE, and relevant preset. Managed unit
+bindings include process/start identity, chat/native session IDs, provider,
+working directory/worktree, native capabilities, and the current controller.
+Unknown incarnation evidence cannot authorize a mutation. Mission/exercise
+actions additionally bind stage, participants, and relevant revision evidence;
+native responses bind the exact pending request, turn, item, and request content.
+The approval card exposes a bounded, redacted view of this evidence.
+
+The engine compares bindings immediately before dispatch and again after taking
+temporary control. Competing chat/terminal controllers cannot take that control
+until dispatch settles. The service carries authorization across nested awaits
+and checks the reviewed route, ROE, and preset before launching a remote mutation.
+Configuration writes reject concurrent changes, and worktree archive checks the
+reviewed HEAD again in the remote helper. Changed evidence or parameters requires
+a fresh proposal. Legacy pending directives without a binding cannot execute.
+Preconditions accept `sessionKey`, `state`, `processId`, `startedAt`, `turnId`,
+`revision`, and `stage` only when applicable to the operation; unknown fields or
+invalid decisions are rejected. Adapter failures after dispatch are uncertain
+unless a guard proves no mutation started. Durable outcomes and request-ID
+deduplication keep these attempts inspectable without replaying them.
+
 `automation.validate` accepts `{kind, payload}` and uses the persistence
 adapter's configuration validator. `automation.preview` returns the normalized
 payload, before/after artifact, relevant configuration revision, and review
@@ -164,6 +186,6 @@ work or remaining budget.
 
 The issue checklist is authoritative. Work still includes complete per-kind
 output schemas and host/provider support, linked mission evidence and complete
-launch admission coverage, stronger revision/incarnation/authorization binding,
+launch admission coverage,
 and an isolated production-bridge round trip with artifact verification. Current
 fixture coverage must not be presented as native-provider or live-host proof.

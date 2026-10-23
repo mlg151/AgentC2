@@ -1,4 +1,5 @@
 const { validateSettings } = require('./config.cjs');
+const { fingerprint } = require('./centcom-contract.cjs');
 
 // Shared by the desktop service and isolated enrollment regressions.
 function createOpOrders({ store, getHost, runRemote, opOrderSynced, events }) {
@@ -13,7 +14,8 @@ function createOpOrders({ store, getHost, runRemote, opOrderSynced, events }) {
     getHost(order.hostId);
     return runRemote({ action: 'oporder_preview', order }, order.hostId);
   }
-  async function enrollOpOrder(input, revision) {
+  async function enrollOpOrder(input, revision, expectedSettingsRevision = fingerprint(store.data.settings)) {
+    if (expectedSettingsRevision !== fingerprint(store.data.settings)) throw Object.assign(new Error('OpOrder configuration changed before enrollment'), { beforeMutation: true });
     if (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision)) throw new Error('Preview this OpOrder before enrollment');
     const order = { ...validatedOpOrder(input), enabled: true };
     getHost(order.hostId);
@@ -27,6 +29,7 @@ function createOpOrders({ store, getHost, runRemote, opOrderSynced, events }) {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     if (!observed?.ready || observed.changes.some((change) => change.status !== 'unchanged')) throw new Error('OpOrder sync is not visible on the SSH host; review before enabling it');
+    if (expectedSettingsRevision !== fingerprint(store.data.settings)) throw new Error('OpOrder configuration changed during enrollment; inspect remote state before retrying');
     const settings = validateSettings({ ...store.data.settings, opOrders: [...(store.data.settings.opOrders || []).filter((item) => item.id !== order.id), order] });
     store.save('settings', settings);
     opOrderSynced.set(order.id, JSON.stringify(order));

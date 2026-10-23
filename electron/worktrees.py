@@ -73,7 +73,8 @@ def worktree_state(record, detailed=True):
         return {"exists": True, "active": active, "owned": True, "dirty": None, "merged": None}
     dirty = bool(worktree_git("-C", str(path), "status", "--porcelain=v1", "--untracked-files=all", timeout=10))
     merged = run(["git", "-C", record["repository"], "merge-base", "--is-ancestor", record["branch"], record["baseRef"]], timeout=10).returncode == 0
-    return {"exists": True, "active": active, "owned": True, "dirty": dirty, "merged": merged}
+    head = worktree_git("-C", str(path), "rev-parse", "HEAD", timeout=10).strip()
+    return {"exists": True, "active": active, "owned": True, "dirty": dirty, "merged": merged, "headCommit": head}
 
 
 def worktree_list(_payload=None):
@@ -223,6 +224,8 @@ def worktree_archive(payload):
     if Path(record["path"]) != expected:
         raise ValueError("Worktree ownership path changed")
     status = worktree_state(record)
+    if payload.get("expectedHeadCommit") is not None and status.get("headCommit") != payload["expectedHeadCommit"]:
+        raise ValueError("Reviewed worktree HEAD changed before archive")
     if not status["exists"] and not status["active"]:
         record["state"] = "archived"
         worktree_save(record)

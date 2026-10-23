@@ -1,6 +1,7 @@
 // Metadata and executable handlers live together. Both envelope dialects use
 // this registry, so doctrine cannot advertise an unimplemented dispatch branch.
-function createOperations({ service: s, client, control, resolve, fleet, applyAutomation, readOutcomes, manifest, evidence, automations }) {
+const { fingerprint } = require('./centcom-contract.cjs');
+function createOperations({ service: s, client, control, resolve, fleet, applyAutomation, readOutcomes, manifest, evidence, automations, beforeMutation = async () => {} }) {
   const registry = new Map();
   const add = (operation, classification, description, parameters, target, handler, dependencies = [], aliases = [], unavailable = '') => {
     const reviewRequired = ['configuration.save', 'specops.configure', 'oporder.enroll', 'automation.apply'].includes(operation);
@@ -83,7 +84,8 @@ function createOperations({ service: s, client, control, resolve, fleet, applyAu
   add('configuration.inspect', 'query', 'Read hosts, presets, ROE, and OpOrder configuration.', {}, 'none', () => Object.fromEntries(['hosts', 'presets', 'roe', 'opOrders'].map((key) => [key, s.store.data.settings[key]])), ['store.data.settings']);
   add('configuration.save', 'action', 'Validate and save hosts, presets, ROE, and OpOrders.', { settings: 'object' }, 'none', (p) => {
     if (Object.keys(p.settings).some((key) => !['hosts', 'presets', 'roe', 'opOrders'].includes(key))) throw new Error('Only hosts, presets, ROE, and OpOrders are available to CENTCOM configuration');
-    return s.saveSettings({ ...s.store.data.settings, ...p.settings });
+    const settings = s.store.data.settings;
+    return s.saveSettings({ ...settings, ...p.settings }, fingerprint(settings));
   }, ['saveSettings']);
   add('oporder.preview', 'query', 'Preview validated OpOrder enrollment.', { order: 'object' }, 'none', (p) => s.previewOpOrder(p.order), ['previewOpOrder']);
   add('oporder.enroll', 'action', 'Enroll a reviewed OpOrder revision.', { order: 'object', revision: 'string' }, 'none', (p) => s.enrollOpOrder(p.order, p.revision), ['enrollOpOrder']);
@@ -135,8 +137,16 @@ function createOperations({ service: s, client, control, resolve, fleet, applyAu
     const entry = validate(operation, input, classification);
     if (!preconditions || typeof preconditions !== 'object' || Array.isArray(preconditions)) throw new Error('Malformed operation preconditions');
     const target = await resolve(entry, input, preconditions);
+    if (classification === 'action') await beforeMutation(entry, input, target);
     check();
-    const result = await entry.handler(input, target);
+    let result;
+    try { result = await entry.handler(input, target); }
+    catch (error) {
+      // Once an adapter is entered, a generic failure cannot prove it made no
+      // change. Explicit pre-dispatch guard failures remain rejected actions.
+      if (classification === 'action' && !error.beforeMutation) error.uncertain = true;
+      throw error;
+    }
     // Historical outcomes remain inspectable after a target exits the fleet.
     if (['outcomes.read', 'capabilities.read', 'units.list', 'unit.inspect', 'hosts.inspect', 'context.read', 'admission.check', 'artifact.read', 'automation.validate', 'automation.preview', 'automation.read'].includes(entry.operation)) return result;
     if (classification === 'action') return result; // Audit retains the real receipt, even if the unit leaves the fleet.

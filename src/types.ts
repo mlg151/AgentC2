@@ -184,6 +184,7 @@ export interface CentcomOperationRequest {
 
 export interface CentcomDirective {
   id: string;
+  binding?: Record<string, unknown> | null;
   clientRequestId?: string | null;
   turnId: string;
   kind: CentcomDirectiveKind;

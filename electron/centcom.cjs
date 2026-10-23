@@ -7,6 +7,8 @@ const { createOperations } = require('./centcom-operations.cjs');
 const { createEvidence } = require('./centcom-evidence.cjs');
 const { createTurnLifecycle } = require('./centcom-turn.cjs');
 const { createAutomations } = require('./centcom-automations.cjs');
+const { createBindings, reviewSummary } = require('./centcom-bindings.cjs');
+const { mutationContext } = require('./centcom-dispatch.cjs');
 const { LIMITS, AUTOMATION_KINDS, fingerprint, redact, bounded, parseCentcomEnvelope } = require('./centcom-contract.cjs');
 const CONTEXT_REVISION = 2;
 
@@ -289,7 +291,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
       costKnown: state.costKnown !== false,
       paused: Boolean(state.paused),
       autoTurnsLastHour: (state.autoTurnsLastHour || []).filter((t) => Date.now() - t < 3600000).length,
-      directives: structuredClone(state.directives || []),
+      directives: structuredClone((state.directives || []).map((d) => ({ ...d, binding: reviewSummary(d.binding) }))),
       automations: structuredClone(state.automations || []),
       auditLog: structuredClone((state.auditLog || []).slice(0, 100)),
     };
@@ -539,8 +541,8 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
             kind: d.kind,
             summary: String(d.summary || d.kind).slice(0, 150),
             rationale: String(d.rationale || envelope.rationale || 'Commander directive').slice(0, 2000),
-            preconditions: d.preconditions || {},
-            params: d.params || {},
+            preconditions: structuredClone(d.preconditions || {}),
+            params: structuredClone(d.params || {}),
             state: 'pending',
             trigger: source,
             createdAt: Date.now(),
@@ -732,12 +734,21 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
 
   const evidence = createEvidence({ service, isCommander, activeKeys: async (inventory) => (await fleet(inventory)).keys });
   const automations = createAutomations({ service, state, validateConfig, persist: writeState, stateFile });
-  const operations = createOperations({ evidence, automations: { ...automations, read: (id) => automations.read(state.automations.find((a) => a.id === id)) }, readOutcomes, manifest: () => capabilityManifest(), service, client, control: (unit, fn) => service.commanderControl(client, unit, async (handle) => {
-    const current = (await fleet()).find(unit.key);
-    if (!current || current.chatSessionId !== unit.chatSessionId || (current.id || current.name) !== (unit.id || unit.name)) throw new Error('Target left the active fleet while acquiring control');
-    if (activeTurnAbort?.signal.aborted || disposed) throw new Error('CENTCOM turn interrupted by Watch Officer');
+  const operations = createOperations({ evidence, automations: { ...automations, read: (id) => automations.read(state.automations.find((a) => a.id === id)) }, readOutcomes, manifest: () => capabilityManifest(), service, client,
+    beforeMutation: async () => { await bindings.assert(mutationContext.getStore()?.directive); },
+    control: (unit, fn) => service.commanderControl(client, unit, async (handle, controlling) => {
+    try {
+      const current = (await fleet()).find(unit.key);
+      if (!current || current.chatSessionId !== unit.chatSessionId || (current.id || current.name) !== (unit.id || unit.name)) throw new Error('Target left the active fleet while acquiring control');
+      if (activeTurnAbort?.signal.aborted || disposed) throw new Error('CENTCOM turn interrupted by Watch Officer');
+      await bindings.assert(mutationContext.getStore()?.directive, controlling);
+    } catch (error) { error.beforeMutation = true; throw error; }
     return fn(handle);
   }), resolve: resolveTarget, fleet, applyAutomation: applyAutomationById });
+  const bindings = createBindings({ service, state, resolve: resolveTarget, request: (directive, classification) => {
+    const r = operationRequest(directive, classification);
+    return { ...r, entry: operations.validate(r.operation, r.input, classification) };
+  } });
   function capabilityManifest(context) {
     return { version: 1, authority: state.config.authority, limits: { ...LIMITS, maxDirectivesPerTurn: state.config.maxDirectivesPerTurn, maxBudgetUsd: state.config.maxBudgetUsd },
       spend: { knownUsd: state.costUsd, coverage: state.costKnown ? 'complete' : 'incomplete', budgetPolicy: 'Stop at known spend ceiling; unknown spend is not zero.' },
@@ -758,13 +769,12 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
   async function bindDirective(directive) {
     const request = operationRequest(directive, 'action');
     const entry = operations.validate(request.operation, request.input, 'action');
+    if (entry.operation === 'unit.create' && !request.input.hostId) request.input.hostId = state.config.hostId;
     directive.reviewRequired = entry.reviewRequired;
     directive.admission = await launchAdmission(request);
     if (directive.admission?.status === 'blocked') throw new Error('Launch admission blocked: ' + directive.admission.blockers.join('; '));
     if (directive.admission?.status === 'unknown') directive.reviewRequired = true;
-    const target = await resolveTarget(entry, request.input, directive.preconditions);
-    if (Array.isArray(target)) directive.preconditions = { ...directive.preconditions, identities: target.map((u) => ({ key: u.key, hostId: u.hostId, name: u.id || u.name, chatSessionId: u.chatSessionId })) };
-    if (target && !Array.isArray(target)) directive.preconditions = { ...directive.preconditions, sessionKey: target.key, identity: { hostId: target.hostId, name: target.id || target.name, chatSessionId: target.chatSessionId } };
+    directive.binding = await bindings.bind(directive, entry, request.input);
   }
   async function executeQuery(query, check) {
     const r = operationRequest(query, 'query');
@@ -776,7 +786,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
     const admission = await launchAdmission(r);
     if (admission?.status === 'blocked' || (admission?.status === 'unknown' && !directive.approvedAt)) throw new Error('Launch admission requires review: ' + [...admission.blockers, ...admission.unknowns].join('; '));
     if (admission) directive.admission = admission;
-    return operations.execute(r.operation, r.input, 'action', directive.preconditions, check);
+    return mutationContext.run({ directive, authority: () => ({ mode: state.config.authority, commander: state.session?.chatSessionId || null }) }, () => operations.execute(r.operation, r.input, 'action', directive.preconditions, check));
   }
 
   // Persist event references immediately, including events observed during a turn.

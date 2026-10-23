@@ -21,9 +21,12 @@ const { fixture, envelope, query } = require('./fixtures/centcom.cjs');
     const settings = settingsDefaults(); settings.hosts[0].id = 'alpha';
     store.save('settings', validateSettings(settings));
     const calls = [];
+    let changeSettingsDuringEnrollment = false;
     const runRemote = async (payload) => {
       calls.push(payload.action);
-      return JSON.parse(execFileSync('python3', [path.join(__dirname, 'fixtures/oporder-runner.py')], { input: JSON.stringify({ ...payload, fixtureHome: directory }), encoding: 'utf8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] }));
+      const result = JSON.parse(execFileSync('python3', [path.join(__dirname, 'fixtures/oporder-runner.py')], { input: JSON.stringify({ ...payload, fixtureHome: directory }), encoding: 'utf8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] }));
+      if (changeSettingsDuringEnrollment && payload.action === 'oporder_sync') store.save('settings', { ...store.data.settings, notifications: !store.data.settings.notifications });
+      return result;
     };
     const service = { store, ...createOpOrders({ store, runRemote, getHost: (id) => store.data.settings.hosts.find((h) => h.id === id), opOrderSynced: new Map(), events: new EventEmitter() }) };
     const state = { config: defaults() }, stateFile = path.join(directory, 'centcom.json');
@@ -69,6 +72,12 @@ const { fixture, envelope, query } = require('./fixtures/centcom.cjs');
       await f.engine.submit('Verify enrollment readback');
       assert.match(f.submitted.at(-1).payload.text, /"matchesDraft":true/);
     }
+    const racing = await automations.preview('oporder', { order: { ...order, instructions: 'Concurrent enrollment fixture' } });
+    const uncertain = { id: 'race', kind: 'oporder', payload: racing.payload, preview: racing, state: 'proposed' };
+    changeSettingsDuringEnrollment = true;
+    await assert.rejects(automations.apply(uncertain), /changed during enrollment/);
+    assert.equal(uncertain.state, 'uncertain');
+    assert.notEqual(store.data.settings.opOrders[0].instructions, racing.after.instructions);
     console.log('PASS production OpOrder preview/enrollment adapter, stale revision rejection, exact persisted readback, and conflict detection in an isolated repository');
   } finally { f?.dispose(); fs.rmSync(directory, { recursive: true, force: true }); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

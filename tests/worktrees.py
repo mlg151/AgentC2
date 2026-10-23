@@ -147,7 +147,11 @@ class Worktrees(unittest.TestCase):
             self.scope["worktree_archive"]({"operationId": record["operationId"]})
         self.assertTrue(path.exists() and unrelated.exists())
         self.git("merge", "--ff-only", record["branch"])
-        archived = self.scope["worktree_archive"]({"operationId": record["operationId"]})
+        current = self.scope["worktree_list"]()[0]["status"]["headCommit"]
+        with self.assertRaisesRegex(ValueError, "HEAD changed"):
+            self.scope["worktree_archive"]({"operationId": record["operationId"], "expectedHeadCommit": "a" * 40})
+        self.assertTrue(path.exists())
+        archived = self.scope["worktree_archive"]({"operationId": record["operationId"], "expectedHeadCommit": current})
         self.assertEqual(archived["state"], "archived")
         self.assertFalse(path.exists())
         self.assertTrue(unrelated.exists())

@@ -287,6 +287,7 @@ export function CentcomDialog({ settings, onClose }: { settings: Settings; onClo
                     <summary>Directive Parameters & Preconditions</summary>
                     <pre>{JSON.stringify({ params: d.params, preconditions: d.preconditions }, null, 2)}</pre>
                   </details>
+                  {d.binding ? <details><summary>Reviewed targets and authorization</summary><pre>{JSON.stringify(d.binding, null, 2)}</pre></details> : null}
                   {d.error ? <p role="alert" className="form-error">{d.error}</p> : null}
                   <small>
                     Trigger: {d.trigger} · Created: {new Date(d.createdAt).toLocaleTimeString()}

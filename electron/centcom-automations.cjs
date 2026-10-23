@@ -85,13 +85,13 @@ function createAutomations({ service, state, validateConfig, persist, stateFile 
     try {
       if (auto.kind === 'preset') {
         const settings = service.store.data.settings;
-        await service.saveSettings({ ...settings, presets: [...settings.presets.filter((p) => p.id !== auto.payload.id), auto.payload] });
+        await service.saveSettings({ ...settings, presets: [...settings.presets.filter((p) => p.id !== auto.payload.id), auto.payload] }, fingerprint(settings));
       } else if (auto.kind === 'specops_workflow') {
         const definition = service.specops.definition();
         await service.specops.configure(YAML.stringify({ profiles: definition.profiles, workflows: [...definition.workflows.filter((w) => w.id !== auto.payload.id), auto.payload] }));
       } else if (auto.kind === 'centcom_trigger') {
         state.config = validateConfig({ ...state.config, triggers: auto.payload }); persist();
-      } else await service.enrollOpOrder(auto.payload.order, auto.payload.revision);
+      } else await service.enrollOpOrder(auto.payload.order, auto.payload.revision, fingerprint(service.store.data.settings));
       const result = await read(auto);
       if (!result.matchesDraft) throw new Error('Saved automation readback does not match the reviewed artifact');
       const { id: _id, state: _state, ...saved } = result;

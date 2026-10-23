@@ -156,6 +156,7 @@ class Terminals {
 
   async take(client, id, captureOwner) {
     const { record } = this.get(client, id);
+    if (record.commanderAction && record.commanderAction.ownerId !== client.id) throw new Error('CENTCOM reviewed action owns this session until dispatch settles');
     if (record.exitCode !== null) throw new Error('Terminal has exited');
     if (record.connection !== 'connected') throw new Error('Terminal is reconnecting');
     captureOwner?.(record.owner);

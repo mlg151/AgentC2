@@ -53,6 +53,10 @@ const { createAutomations } = require('../electron/centcom-automations.cjs');
             summary: 'Halt stalled unit hq-task-91',
             rationale: 'Unit is unresponsive for >15 minutes',
             params: { name: 'hq-task-91', hostId: 'default' },
+            binding: { version: 1, requestHash: 'b'.repeat(64), evidenceHash: 'c'.repeat(64), evidence: {
+              targets: [{ identity: { key: 'default/tmux:hq-task-91', hostId: 'default', name: 'hq-task-91', processId: '491', startedAt: '2026-01-01T00:00:00.000Z' }, controller: 'desktop' }],
+              authority: { mode: 'gated', hosts: [{ id: 'default', name: 'Primary Theater' }] }, requestEvidence: null, operationEvidence: null,
+            } },
             state: 'pending',
             trigger: 'auto_wake',
             createdAt: Date.now() - 60000,
@@ -120,6 +124,9 @@ const { createAutomations } = require('../electron/centcom-automations.cjs');
     await page.getByRole('button', { name: /^Directives/ }).click();
     await page.getByText('Halt stalled unit hq-task-91').waitFor();
     await page.getByRole('button', { name: 'Approve & Execute' }).waitFor();
+    await page.getByText('Reviewed targets and authorization', { exact: true }).click();
+    await page.getByText('"processId": "491"', { exact: false }).waitFor();
+    await page.screenshot({ path: path.join(screenshotDir, 'centcom-approval-scope.png') });
 
     // Switch to Automations tab and verify suggestion
     await page.getByRole('button', { name: /^Automations/ }).click();

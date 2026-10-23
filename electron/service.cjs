@@ -19,6 +19,8 @@ const { LoopBreaker } = require('./loop-breaker.cjs');
 const { createSpecops } = require('./specops.cjs');
 const { createCentcom } = require('./centcom.cjs');
 const { createOpOrders } = require('./oporders.cjs');
+const { assertDispatchScope } = require('./centcom-dispatch.cjs');
+const { fingerprint } = require('./centcom-contract.cjs');
 const { Chats } = require('./chat.cjs');
 const { commanderFacade, routeCommanderCommands } = require('./commander.cjs');
 
@@ -159,6 +161,7 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
     if (payload.action === 'inventory' && !payload.sourceDigest) payload = { ...payload, sourceDigest: chatDigest, chatFiles, allowUpgrade: true };
     const host = getHost(hostId);
     if (host.kind === 'local') payload = await localPayload(payload);
+    payload = assertDispatchScope(getHost(hostId), payload, store.data.settings);
     return new Promise((resolve, reject) => {
       const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
       const embedded = encoded.length > 60000;
@@ -261,11 +264,12 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
     },
   });
 
-  async function saveSettings(input) {
+  async function saveSettings(input, expectedRevision) {
     if (deletionFlights.size || renameFlights.size) throw new Error('Wait for session deletion or renaming before changing settings');
     if (cleanup.isBusy()) throw new Error('Wait for history cleanup before changing settings');
     await inventoryFlight;
     await healthFlight;
+    if (expectedRevision && expectedRevision !== fingerprint(store.data.settings)) throw Object.assign(new Error('Configuration changed before persistence; review again'), { beforeMutation: true });
     if (terminals.opening.size) throw new Error('Wait for terminal connections before changing settings');
     const settings = validateSettings(input);
     for (const order of settings.opOrders) {

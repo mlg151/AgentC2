@@ -8,7 +8,7 @@ const desktop = { id: 'desktop', name: 'Desktop' };
 const phone = { id: 'phone', name: 'Companion' };
 const unit = (index, extra = {}) => {
   const name = 'hq-' + index.toString(16).padStart(12, '0');
-  return { id: name, name, key: `alpha/tmux:${name}`, hostId: 'alpha', managed: true, kind: 'managed', state: 'live', title: `Unit ${index}`, provider: 'codex', transport: 'chat', chatState: 'idle', chatSessionId: 'chat-' + index.toString(16).padStart(32, '0'), ...extra };
+  return { id: name, name, key: `alpha/tmux:${name}`, hostId: 'alpha', managed: true, kind: 'managed', state: 'live', title: `Unit ${index}`, provider: 'codex', processId: String(1000 + index), startedAt: '2026-01-01T00:00:00.000Z', transport: 'chat', chatState: 'idle', chatSessionId: 'chat-' + index.toString(16).padStart(32, '0'), ...extra };
 };
 const envelope = (content) => '```agentc2-c2\n' + JSON.stringify({ version: 1, rationale: 'Fixture assessment', ...content }) + '\n```';
 const action = (operation, input, extra = {}) => ({ kind: 'agentc2.action', summary: operation, params: { operation, input }, ...extra });

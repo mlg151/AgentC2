@@ -159,10 +159,12 @@ class Chats {
 
   take(client, id, captureOwner) {
     const { record } = this.get(client, id);
+    if (record.commanderAction && record.commanderAction.ownerId !== client.id) return Promise.reject(new Error('CENTCOM reviewed action owns this session until dispatch settles'));
     if (record.commanderTurn && record.commanderTurn.ownerId !== client.id) return Promise.reject(new Error('CENTCOM provider turn still owns this session; reconcile cancellation before taking control'));
     return this.exclusive(record, () => {
       this.get(client, id);
       if (record.connection !== 'connected') throw new Error('Chat is reconnecting');
+      if (record.commanderAction && record.commanderAction.ownerId !== client.id) throw new Error('CENTCOM reviewed action owns this session until dispatch settles');
       if (record.commanderTurn && record.commanderTurn.ownerId !== client.id) throw new Error('CENTCOM provider turn still owns this session; reconcile cancellation before taking control');
       captureOwner?.(record.owner);
       record.owner = client;

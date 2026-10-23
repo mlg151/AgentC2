@@ -13,9 +13,13 @@ function commanderFacade({ chats, terminals, action, deleteSession, interruptFau
         ? await chats.open(client, unit.chatSessionId, unit.hostId)
         : await terminals.open(client, unit.id || unit.name, unit.hostId, 120, 32);
       record = views.get(client, handle).record;
-      await views.take(client, handle, (owner) => { previous = owner; });
-      return await fn(handle);
+      await views.take(client, handle, (owner) => {
+        previous = owner;
+        record.commanderAction = { ownerId: client.id, previousControllerId: owner?.id || null };
+      });
+      return await fn(handle, { key: unit.key, previousControllerId: previous?.id || null });
     } finally {
+      if (record?.commanderAction?.ownerId === client.id) delete record.commanderAction;
       if (record && record.owner?.id === client.id && previous && !previous.closed &&
           [...record.handles].some((id) => views.handles.get(id)?.client.id === previous.id)) {
         record.owner = previous;

@@ -104,6 +104,7 @@ Follow-up text.`;
     { key: 'host-1/tmux:hq-000000000002', hostId: 'host-1', name: 'hq-000000000002', state: 'exited', kind: 'managed', managed: true, title: 'Exited Worker' },
   ];
   // A single terminal line can exceed the remote workspace's UTF-8 byte limit.
+  for (const unit of inventorySessions) Object.assign(unit, { processId: '1000', startedAt: '2026-01-01T00:00:00.000Z' });
   inventorySessions[0].outputTail = 'old output\n' + '😀'.repeat(300000) + '\nlatest evidence';
 
   let specopsMissions = [
@@ -239,6 +240,7 @@ Follow-up text.`;
       faults = faults.filter((f) => f.sessionKey !== sessionKey);
     },
     commanderControl: async (_client, _unit, fn) => fn('fixture-control'),
+    commanderInspection: async () => ({ ownership: { controller: null } }),
     action: async (client, action, name, hostId) => {
       serviceActions.push({ type: 'sessionAction', action, name, hostId });
       return { ok: true };
