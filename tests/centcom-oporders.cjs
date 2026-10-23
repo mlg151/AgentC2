@@ -1,4 +1,6 @@
 const assert = require('node:assert/strict');
+const { automationOutputSchema } = require('../electron/centcom-output.cjs');
+const { validate: validateSchema } = require('../electron/centcom-schema.cjs');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -68,6 +70,8 @@ const { fixture, envelope, query } = require('./fixtures/centcom.cjs');
       assert.deepEqual(JSON.parse(fs.readFileSync(store.file, 'utf8')), prior);
       await f.engine.applyAutomation(proposed.id, 'apply');
       assert.equal(f.engine.state().automations[0].state, 'applied');
+      const schema = automationOutputSchema('oporder');
+      validateSchema(schema, f.engine.state().automations[0], schema.$defs, 'enrolled.oporder');
       f.responses.push(envelope({ queries: [query('automation.read', { id: proposed.id })] }));
       await f.engine.submit('Verify enrollment readback');
       assert.match(f.submitted.at(-1).payload.text, /"matchesDraft":true/);

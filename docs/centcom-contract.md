@@ -12,8 +12,10 @@ The commander uses one `agentc2-c2` fenced JSON envelope, version 1. Queries use
 registry index, current C2 authority, effective limits, and review requirements.
 Read `capabilities.read` with `{ "operation": "unit.create" }` or
 `{ "automationKind": "specops_workflow" }` for the selected input schema and its
-referenced definitions. These individual responses fit the outcome read limit.
-The commander workspace's `CAPABILITIES.json` contains every input schema;
+referenced definitions. Add `"schema": "output"` for the successful adapter
+payload or automation lifecycle schema. These individual responses fit the
+outcome read limit; `definition` selects a named `$defs` definition if needed.
+The commander workspace's `CAPABILITIES.json` contains every input/output schema;
 it and the doctrine refresh alongside each situation snapshot.
 Launch doctrine is generated from the same registry and fits the provider's
 20,000-character instruction limit.
@@ -25,8 +27,22 @@ Unknown nested fields produce a diagnostic instead of silently changing a draft.
 The schema for SPECOPS YAML includes its content structure. Existing service
 validators additionally enforce live host/profile references, workflow graph
 rules, provider permissions, revision evidence, and persistence constraints.
-Output schemas, generated examples, and host/provider support discovery remain
-tracked by the open acceptance criteria in #69.
+Output contracts retain each adapter's actual return type, including native
+receipts, scalar metadata results, no-payload actions (`null`), configuration
+readback, and explicit partial-result markers. Upstream extension fields are
+bounded JSON and are not proof of project acceptance. Generated examples and
+the remaining adapter verification are still tracked in #69.
+
+`capabilities.support` requires `operation` and accepts `hostId`, `provider`,
+`transport`, `sessionKey`, `after`, and `limit`. It pages current support and
+eligibility with source timestamps and reasons. Native capability discovery is
+read-only and does not prepare runtimes or take control. An exact session query
+also inspects ownership and pending requests; saved/external inspection does not
+grant mutation eligibility. Supported protocol capability, unavailable targets,
+unsupported features, and unknown prerequisites are separate states. Terminal
+launch binaries/presets and repository/resource prerequisites remain unknown
+until the relevant inspection or dispatch validates them. Every mutation still
+requires current authority, applicable Watch Officer review, and fresh binding.
 
 Give each directive and automation a unique string `id`. The engine preserves
 that client ID alongside its durable server ID. Reusing an ID within the same

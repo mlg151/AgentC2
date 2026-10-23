@@ -303,7 +303,7 @@ async function catalogCoverage() {
   for (const entry of catalog) {
     const definition = registry.definition(entry.operation);
     assert.ok(typeof definition.handler === 'function' || entry.unavailableReason, entry.operation);
-    assert.equal(entry.classification, /^(automation\.(validate|preview|read)|units.list|hosts.inspect|context.read|admission.check|artifact.read|capabilities.read|outcomes.read|unit\.(inspect|search)|fleet\.|flash.list|specops\.(definition|inspect)|exercise\.(list|inspect|preview)|worktree.list|diff\.(files|detail)|sitrep.inspect|configuration.inspect|oporder.preview|github\.(readiness|issue|issues|pr)|devurl.list|history.discover)/.test(entry.operation) ? 'query' : 'action', entry.operation);
+    assert.equal(entry.classification, /^(automation\.(validate|preview|read)|units.list|hosts.inspect|context.read|admission.check|artifact.read|capabilities\.(read|support)|outcomes.read|unit\.(inspect|search)|fleet\.|flash.list|specops\.(definition|inspect)|exercise\.(list|inspect|preview)|worktree.list|diff\.(files|detail)|sitrep.inspect|configuration.inspect|oporder.preview|github\.(readiness|issue|issues|pr)|devurl.list|history.discover)/.test(entry.operation) ? 'query' : 'action', entry.operation);
     if (!entry.available) { await assert.rejects(registry.execute(entry.operation, {}, entry.classification), /Unavailable operation/); continue; }
     const p = {};
     for (const [key, type] of Object.entries(definition.parameters)) {
@@ -311,6 +311,7 @@ async function catalogCoverage() {
       p[key] = type === 'string' ? 'fixture' : type === 'boolean' ? true : type === 'number' ? 1 : type === 'array' ? [] : type === 'nullable' ? null : {};
     }
     if (entry.operation === 'context.read') p.section = 'presets';
+    if (entry.operation === 'capabilities.support') p.operation = 'unit.send';
     if (entry.operation === 'artifact.read') { p.operationId = 'a'.repeat(32); p.path = 'report.txt'; }
     if (entry.operation === 'unit.inspect') p.sessionKey = f.sessions[0].key;
     if (entry.target === 'session') p.sessionKey = f.sessions[0].key;

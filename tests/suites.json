@@ -21,6 +21,11 @@
       "group": "core"
     },
     {
+      "id": "centcom-support",
+      "file": "tests/centcom-support.cjs",
+      "group": "core"
+    },
+    {
       "id": "centcom-evidence",
       "file": "tests/centcom-evidence.cjs",
       "group": "core"

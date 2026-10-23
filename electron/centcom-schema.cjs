@@ -117,6 +117,8 @@ function operationInput(operation, parameters, target) {
   if (operation === 'units.list') patch({ provider, classification: choice('managed', 'external', 'saved'), execution: choice('executing', 'waiting', 'idle', 'stopped', 'failed', 'unknown'), limit: int(1, 50) });
   if (operation === 'context.read') patch({ section: choice('definitions', 'presets', 'oporders', 'notes', 'handoffs'), limit: int(1, 50) });
   if (operation === 'outcomes.read') patch({ collection: choice('directive', 'automation', 'approval', 'audit', 'diagnostic', 'query', 'provider'), after: int(0, Number.MAX_SAFE_INTEGER), limit: int(1, 50) });
+  if (operation === 'capabilities.support') patch({ provider: choice(...provider.enum, 'terminal'), transport: choice('chat', 'terminal'), limit: int(1, 50) });
+  if (operation === 'capabilities.read') patch({ schema: choice('input', 'output') });
   if (operation === 'artifact.read') patch({ operationId: workId, revision, offset: int(0, 256000), limit: int(1, 16000) });
   if (['automation.validate', 'automation.preview'].includes(operation)) schema.oneOf = Object.entries(automationPayloads).map(([kind, payload]) => ({ properties: { kind: { const: kind }, payload } }));
   if (operation.startsWith('github.')) {
@@ -149,4 +151,4 @@ function automationSchema(kind) {
   return bundled(obj({ id: str(200, 1), kind: { const: kind }, title: str(150, 1), rationale: str(2000, 1), evidence: arr(str(2000), 10), payload: automationPayloads[kind] }, ['kind', 'title', 'rationale', 'payload']));
 }
 
-module.exports = { defs, automationPayloads, operationInput, validate, bundled, automationSchema };
+module.exports = { defs, automationPayloads, operationInput, validate, bundled, automationSchema, str, choice, int, bool, arr, obj, ref, nullable };

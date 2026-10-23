@@ -7,6 +7,8 @@ const { createSpecops, templates } = require('../electron/specops.cjs');
 const { defaults, validateConfig } = require('../electron/centcom.cjs');
 const { createAutomations } = require('../electron/centcom-automations.cjs');
 const { fingerprint } = require('../electron/centcom-contract.cjs');
+const { automationOutputSchema } = require('../electron/centcom-output.cjs');
+const { validate: validateSchema } = require('../electron/centcom-schema.cjs');
 const { fixture, envelope, query } = require('./fixtures/centcom.cjs');
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agentc2-centcom-automations-'));
@@ -37,6 +39,8 @@ const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agentc2-centcom-automat
       assert.equal(draft.state, 'applied');
       assert.equal(draft.result.matchesDraft, true);
       assert.equal(draft.result.revision, fingerprint(preview.after));
+      const schema = automationOutputSchema(kind);
+      validateSchema(schema, draft, schema.$defs, `saved.${kind}`);
       const persisted = await automations.read(draft);
       assert.equal(persisted.matchesDraft, true);
       await assert.rejects(automations.apply(draft), /already resolved/);

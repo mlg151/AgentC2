@@ -10,6 +10,7 @@ const { createAutomations } = require('./centcom-automations.cjs');
 const { createBindings, reviewSummary } = require('./centcom-bindings.cjs');
 const { mutationContext } = require('./centcom-dispatch.cjs');
 const { automationSchema } = require('./centcom-schema.cjs');
+const { automationOutputSchema } = require('./centcom-output.cjs');
 const { LIMITS, AUTOMATION_KINDS, fingerprint, redact, bounded, parseCentcomEnvelope } = require('./centcom-contract.cjs');
 const CONTEXT_REVISION = 2;
 
@@ -246,12 +247,14 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
   function boundOutcomePage(page, maxBytes) {
     const result = { ...page, entries: [] };
     for (const entry of page.entries) {
-      const item = { ...entry, record: bounded(entry.record, 2000), result: bounded(entry.result, 2000) };
+      let item = { ...entry, ...(entry.record !== undefined ? { record: bounded(entry.record, 2000) } : {}), ...(entry.result !== undefined ? { result: bounded(entry.result, 2000) } : {}) };
+      if (Buffer.byteLength(JSON.stringify(item)) > 6000) item = { ...bounded(item, 6000), ...Object.fromEntries(
+        ['id', 'key', 'hostId', 'provider', 'transport', 'classification', 'execution', 'sequence', 'outcomeId', 'serverId', 'clientRequestId', 'status', 'collection'].filter((key) => entry[key] !== undefined).map((key) => [key, entry[key]])) };
       if (result.entries.length && Buffer.byteLength(JSON.stringify({ ...result, entries: [...result.entries, item] })) > maxBytes - 1000) break;
       result.entries.push(item);
     }
     if (result.entries.length < page.entries.length) {
-      result.cursor = result.entries.at(-1)?.sequence || page.after || 0;
+      result.cursor = typeof page.cursor === 'string' ? result.entries.at(-1)?.id || page.after || '' : result.entries.at(-1)?.sequence || page.after || 0;
       result.hasMore = true;
       result.partial = true;
     }
@@ -260,7 +263,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
 
   function recordOutcome(value) {
     const safe = Object.fromEntries(Object.entries(redact(value)).map(([key, item]) => [key,
-      typeof item === 'string' && item.length > 4000 ? item.slice(0, 4000) + ' [truncated]' : key === 'result' && Array.isArray(item?.entries) && Number.isSafeInteger(item.cursor) ? boundOutcomePage(item, 12000)
+      typeof item === 'string' && item.length > 4000 ? item.slice(0, 4000) + ' [truncated]' : key === 'result' && Array.isArray(item?.entries) && (Number.isSafeInteger(item.cursor) || typeof item.cursor === 'string') ? boundOutcomePage(item, 12000)
         : item && typeof item === 'object' ? bounded(item, 16000) : item]));
     const entry = { ...JSON.parse(JSON.stringify(safe)), outcomeId: crypto.randomUUID(), serverId: value.serverId || crypto.randomUUID(),
       status: value.status || value.record?.state || value.record?.outcome || value.code || value.phase || 'observed',
@@ -290,8 +293,8 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
     const matches = state.outcomes.filter((r) => r.sequence > after && (!collection || r.collection === collection) && (!clientRequestId || r.clientRequestId === clientRequestId) && (!serverId || r.serverId === serverId));
     const entries = [];
     for (const entry of matches.slice(0, limit)) {
-      const item = { ...entry, record: entry.record ? bounded(entry.record, 12000) : undefined,
-        result: Array.isArray(entry.result?.entries) ? boundOutcomePage(entry.result, 12000) : entry.result ? bounded(entry.result, 12000) : undefined };
+      const item = { ...entry, ...(entry.record !== undefined ? { record: bounded(entry.record, 12000) } : {}),
+        ...(entry.result !== undefined ? { result: Array.isArray(entry.result?.entries) ? boundOutcomePage(entry.result, 12000) : bounded(entry.result, 12000) } : {}) };
       if (entries.length && Buffer.byteLength(JSON.stringify([...entries, item])) > LIMITS.resultBytes - 1000) break;
       entries.push(item);
     }
@@ -442,7 +445,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
       'Prefer event-driven waits; do not emit waiting-only chatter. Title-based workflow suggestions are hypotheses; cite repeated action evidence from outcomes.read.',
       '## Executable capabilities (availability refreshes in SITUATION.json each turn)',
       JSON.stringify(operations.catalog().map(({ operation, classification, parameters, reviewRequired, available, unavailableReason }) => ({ operation, classification, parameters, reviewRequired, available, unavailableReason }))),
-      'Input schemas and current limits/authority are in CAPABILITIES.json. Use capabilities.read with operation or automationKind to retrieve one full input schema; an unfiltered read returns the index. Service validation also checks live references and revisions.',
+      'Input/output schemas and current limits/authority are in CAPABILITIES.json. Use capabilities.read with operation or automationKind and schema: input or output; an unfiltered read returns the index. Use capabilities.support for paged live host/provider/transport support and reasons; sessionKey selects exact target evidence. Unknown readiness is not permission to act. Service validation also checks live references and revisions.',
       '',
       '## Protocol Envelope',
       'Wrap your tactical directives and queries in exactly one fenced `agentc2-c2` JSON block at the very end of your final response:',
@@ -804,18 +807,32 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
     const r = operationRequest(directive, classification);
     return { ...r, entry: operations.validate(r.operation, r.input, classification) };
   } });
-  function capabilityManifest(context, { operation, automationKind, full = false } = {}) {
+  function capabilityManifest(context, { operation, automationKind, schema = 'input', definition, full = false } = {}) {
     if (operation && automationKind) throw new Error('Select either operation or automationKind');
+    if (!['input', 'output'].includes(schema)) throw new Error('Choose input or output schema');
     const catalog = operations.catalog(context);
     if (operation && !operations.definition(operation)) throw new Error('Unknown capability operation');
     if (automationKind && !AUTOMATION_KINDS.includes(automationKind)) throw new Error('Unknown automation kind');
-    return { version: 1, authority: state.config.authority, limits: { ...LIMITS, maxDirectivesPerTurn: state.config.maxDirectivesPerTurn, maxBudgetUsd: state.config.maxBudgetUsd },
+    if (definition) {
+      const selected = operation ? operations.definition(operation)[`${schema}Schema`] : automationKind ? schema === 'input' ? automationSchema(automationKind) : automationOutputSchema(automationKind) : null;
+      if (!selected?.$defs || !Object.hasOwn(selected.$defs, definition)) throw new Error('Unknown schema definition; select a capability and its schema');
+      return { version: 1, operation, automationKind, schema, definition, value: selected.$defs[definition],
+        references: 'Resolve remaining #/$defs references with the same capability, schema, and definition selector; CAPABILITIES.json contains complete bundled schemas.' };
+    }
+    const result = { version: 1, authority: state.config.authority, limits: { ...LIMITS, maxDirectivesPerTurn: state.config.maxDirectivesPerTurn, maxBudgetUsd: state.config.maxBudgetUsd },
       spend: { knownUsd: state.costUsd, coverage: state.costKnown ? 'complete' : 'incomplete', budgetPolicy: 'Stop at known spend ceiling; unknown spend is not zero.' },
-      operations: automationKind ? [] : catalog.filter((e) => !operation || e.operation === operations.definition(operation).operation).map((entry) => full || operation ? entry
-        : { operation: entry.operation, classification: entry.classification, reviewRequired: entry.reviewRequired, available: entry.available, unavailableReason: entry.unavailableReason, schemaQuery: { operation: entry.operation } }), automationKinds: AUTOMATION_KINDS,
+      operations: automationKind ? [] : catalog.filter((e) => !operation || e.operation === operations.definition(operation).operation).map((entry) => full ? entry
+        : { operation: entry.operation, classification: entry.classification, reviewRequired: entry.reviewRequired, available: entry.available, unavailableReason: entry.unavailableReason,
+          ...(operation ? { requirements: entry.requirements, [`${schema}Schema`]: entry[`${schema}Schema`] } : {}) }), automationKinds: AUTOMATION_KINDS,
       automations: operation ? [] : AUTOMATION_KINDS.filter((kind) => !automationKind || kind === automationKind).map((kind) => ({ kind,
-        ...(full || automationKind ? { inputSchema: automationSchema(kind) } : { schemaQuery: { automationKind: kind } }), reviewRequired: true })),
+        ...(full ? { inputSchema: automationSchema(kind), outputSchema: automationOutputSchema(kind) } : automationKind ? { [`${schema}Schema`]: schema === 'input' ? automationSchema(kind) : automationOutputSchema(kind) } : { schemaQuery: { automationKind: kind } }), reviewRequired: true })),
+      support: { operation: 'capabilities.support', filters: ['operation', 'hostId', 'provider', 'transport', 'sessionKey', 'after', 'limit'], freshness: 'Live read; revalidate at dispatch. Unknown prerequisites are not support guarantees.' },
+      schemaRead: 'Use capabilities.read with operation or automationKind and schema: input or output.',
       approval: { permanentChanges: 'watch_officer', nativePermissions: 'separate_from_c2', uncertain: 'inspect_before_retry' } };
+    if (operation || automationKind) {
+      delete result.support; delete result.schemaRead; delete result.spend; delete result.automationKinds;
+    }
+    return result;
   }
   async function launchAdmission(request) {
     const p = request.input;

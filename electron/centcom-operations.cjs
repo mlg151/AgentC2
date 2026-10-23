@@ -2,17 +2,21 @@
 // this registry, so doctrine cannot advertise an unimplemented dispatch branch.
 const { fingerprint } = require('./centcom-contract.cjs');
 const { operationInput, validate: validateSchema, bundled } = require('./centcom-schema.cjs');
+const { createSupport, requirements } = require('./centcom-support.cjs');
+const { outputSchema } = require('./centcom-output.cjs');
 function createOperations({ service: s, client, control, resolve, fleet, applyAutomation, readOutcomes, manifest, evidence, automations, beforeMutation = async () => {} }) {
   const registry = new Map();
   const add = (operation, classification, description, parameters, target, handler, dependencies = [], aliases = [], unavailable = '') => {
     const reviewRequired = ['configuration.save', 'specops.configure', 'oporder.enroll', 'automation.apply'].includes(operation);
     registry.set(operation, { operation, classification, description, parameters, target, handler, dependencies, aliases, unavailable, reviewRequired,
-      inputSchema: bundled(operationInput(operation, parameters, target)) });
+      inputSchema: bundled(operationInput(operation, parameters, target)), outputSchema: outputSchema(operation) });
   };
   const call = (path) => path.split('.').reduce((v, k) => v?.[k], s);
   const unit = (operation, description, parameters, handler, dependencies = [], aliases = []) => add(operation, 'action', description, parameters, 'session', handler, dependencies, aliases);
   const controlled = (u, fn) => control(u, fn);
-  add('capabilities.read', 'query', 'Read the versioned contract. Select operation or automationKind for its complete input schema within the result limit.', { operation: 'string?', automationKind: 'string?' }, 'none', (p) => manifest(undefined, p));
+  const support = createSupport({ service: s, fleet, catalog: () => catalog(), authority: () => manifest().authority, inspectUnit: evidence?.inspect });
+  add('capabilities.read', 'query', 'Read the versioned contract. Select operation or automationKind and schema (input/output); definitions can be read separately when the schema is large.', { operation: 'string?', automationKind: 'string?', schema: 'string?', definition: 'string?' }, 'none', (p) => manifest(undefined, p));
+  add('capabilities.support', 'query', 'Page current host/provider/transport support, eligibility, authority, and reasons. Select sessionKey for exact target evidence; discovery grants no control.', { operation: 'string', hostId: 'string?', provider: 'string?', transport: 'string?', sessionKey: 'string?', after: 'string?', limit: 'number?' }, 'none', support);
   add('outcomes.read', 'query', 'Read durable directive, automation, approval, audit, query, and diagnostic outcomes by cursor. Project acceptance is separate from command delivery.', { after: 'number?', limit: 'number?', collection: 'string?', clientRequestId: 'string?', serverId: 'string?' }, 'none', (p) => readOutcomes(p));
   add('fleet.inspect', 'query', 'Inspect the connected active managed fleet.', {}, 'none', async () => (await fleet()).inventory);
   add('units.list', 'query', 'Page canonical managed, external, and saved units; inspection does not grant control.', { hostId: 'string?', provider: 'string?', classification: 'string?', execution: 'string?', after: 'string?', limit: 'number?' }, 'none', (p) => evidence.units(p));
@@ -107,7 +111,7 @@ function createOperations({ service: s, client, control, resolve, fleet, applyAu
       const needsSession = ['session', 'sessions', 'sitrep', 'mission', 'exercise', 'contestant'].includes(entry.target);
       const reason = availability(registry.get(entry.operation)) || (context && needsSession && !context.sessions.length ? 'No connected active managed sessions are currently eligible' : '');
       const parameters = { ...(entry.target === 'session' ? { sessionKey: 'string?', key: 'string?', name: 'string?', hostId: 'string?', chatSessionId: 'string?' } : {}), ...entry.parameters };
-      return { ...entry, parameters, available: !reason, unavailableReason: reason || null };
+      return { ...entry, parameters, requirements: requirements(entry), available: !reason, unavailableReason: reason || null };
     });
   }
   function definition(operation) {
@@ -140,8 +144,8 @@ function createOperations({ service: s, client, control, resolve, fleet, applyAu
       throw error;
     }
     // Historical outcomes remain inspectable after a target exits the fleet.
-    if (['outcomes.read', 'capabilities.read', 'units.list', 'unit.inspect', 'hosts.inspect', 'context.read', 'admission.check', 'artifact.read', 'automation.validate', 'automation.preview', 'automation.read'].includes(entry.operation)) return result;
-    if (classification === 'action') return result; // Audit retains the real receipt, even if the unit leaves the fleet.
+    if (['outcomes.read', 'capabilities.read', 'capabilities.support', 'units.list', 'unit.inspect', 'hosts.inspect', 'context.read', 'admission.check', 'artifact.read', 'automation.validate', 'automation.preview', 'automation.read'].includes(entry.operation)) return result;
+    if (classification === 'action') return result ?? null; // No-payload adapters have an explicit JSON result.
     return (await fleet()).clean(result) ?? { unavailable: 'Result belongs to an excluded session' };
   }
   return { catalog, definition, validate, execute };

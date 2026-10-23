@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { fixture, envelope, query, action } = require('./fixtures/centcom.cjs');
+const { fixture, envelope, query, action, unit } = require('./fixtures/centcom.cjs');
 const { validate, automationSchema } = require('../electron/centcom-schema.cjs');
 const { templates } = require('../electron/specops.cjs');
 
@@ -20,6 +20,9 @@ const f = fixture(directory);
       const schema = f.engine.manifest(undefined, { operation: operation.operation });
       assert.deepEqual(schema.operations[0].inputSchema, operation.inputSchema);
       assert.ok(Buffer.byteLength(JSON.stringify(schema)) < 12000, operation.operation);
+      const output = f.engine.manifest(undefined, { operation: operation.operation, schema: 'output' });
+      assert.deepEqual(output.operations[0].outputSchema, operation.outputSchema);
+      assert.ok(Buffer.byteLength(JSON.stringify(output)) < 12000, `${operation.operation} output`);
     }
     const get = (operation) => manifest.operations.find((entry) => entry.operation === operation).inputSchema;
     const check = (operation, input) => validate(get(operation), input, get(operation).$defs);
@@ -47,6 +50,9 @@ const f = fixture(directory);
       validate(schema, request, schema.$defs);
       assert.throws(() => validate(schema, { ...request, payload: { ...payload, invented: true } }, schema.$defs), { code: 'invalid_schema' });
       assert.deepEqual(f.engine.manifest(undefined, { automationKind: kind }).automations[0].inputSchema, schema);
+      const output = f.engine.manifest(undefined, { automationKind: kind, schema: 'output' });
+      assert.ok(output.automations[0].outputSchema);
+      assert.ok(Buffer.byteLength(JSON.stringify(output)) < 12000);
     }
 
     // Before this boundary existed, validateSettings silently removed this typo
@@ -71,6 +77,31 @@ const f = fixture(directory);
     assert.equal(result.result.truncated, undefined);
     f.engine.dispose(); f.start();
     assert.deepEqual(f.engine.outcomes({ clientRequestId: 'full-schema', collection: 'query' }).entries.at(-1), result);
+    for (const operation of ['fleet.inspect', 'units.list', 'unit.inspect', 'hosts.inspect', 'context.read', 'admission.check', 'outcomes.read', 'capabilities.read']) {
+      const input = operation === 'unit.inspect' ? { sessionKey: f.sessions[0].key } : operation === 'context.read' ? { section: 'presets' } : {};
+      f.responses.push(envelope({ queries: [{ ...query(operation, input), id: `output-${operation}` }] }));
+      await f.engine.submit('Validate a real inspection result against its published output schema');
+      const observed = f.engine.outcomes({ clientRequestId: `output-${operation}`, collection: 'query' }).entries.at(-1);
+      assert.equal(observed.status, 'ok', operation);
+      const schema = f.engine.manifest(undefined, { operation, schema: 'output' }).operations[0].outputSchema;
+      validate(schema, observed.result, schema.$defs, operation);
+    }
+    f.responses.push(envelope({ queries: [{ ...query('capabilities.read', { operation: 'automation.apply', schema: 'output' }), id: 'output-discovery' }] }));
+    await f.engine.submit('Retrieve the largest output schema');
+    const largest = f.engine.outcomes({ clientRequestId: 'output-discovery', collection: 'query' }).entries.at(-1).result;
+    assert.ok(largest.operations[0].outputSchema.$defs.automationRecord);
+    f.state.workspace = { metadata: {} };
+    for (let i = 300; i < 330; i++) {
+      const item = unit(i); f.sessions.push(item);
+      f.state.workspace.metadata[item.key] = { notes: 'Large observed evidence. '.repeat(200) };
+    }
+    f.responses.push(envelope({ queries: [{ ...query('units.list', { limit: 50 }), id: 'large-unit-page' }] }));
+    await f.engine.submit('Keep a usable cursor for large evidence pages');
+    const unitPage = f.engine.outcomes({ clientRequestId: 'large-unit-page', collection: 'query' }).entries.at(-1).result;
+    assert.ok(unitPage.entries.length);
+    assert.equal(unitPage.hasMore, true);
+    assert.equal(unitPage.cursor, unitPage.entries.at(-1).id);
+    assert.ok(Buffer.byteLength(JSON.stringify(unitPage)) < 12000);
     console.log('PASS nested executable schemas, conditional input validation, unknown-field regression, complete per-operation discovery, bounded envelope readback, and restart');
   } finally { f.dispose(); fs.rmSync(directory, { recursive: true, force: true }); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });
