@@ -40,6 +40,13 @@ const defs = {
   triggers: obj({ onLoopFault: bool, onSpecopsHalt: bool, onUnitFailed: bool, onFlashTraffic: bool, onUnitCompleted: bool, onDependencyChange: bool,
     cooldownSeconds: int(10, 3600), maxAutoTurnsPerHour: int(1, 100), fallbackSeconds: { anyOf: [{ const: 0 }, int(600, 86400)] } }, []),
   preconditions: obj(Object.fromEntries(['sessionKey', 'state', 'processId', 'startedAt', 'turnId', 'revision', 'stage'].map((key) => [key, str(1000, 1)])), []),
+  missionLink: obj({ key: id, kind: choice('mission', 'issue', 'pr', 'job', 'artifact'), externalId: str(300, 1), hostId: id, repository: str(4096, 1), revision: str(200, 1) }, ['key', 'kind', 'externalId']),
+  missionOwner: obj({ sessionKey: str(300, 1), linkKeys: { ...arr(id, 30, 1), uniqueItems: true } }),
+  missionDependency: obj({ linkKey: id, requires: { ...arr(id, 30, 1), uniqueItems: true }, status: choice('unknown', 'blocked', 'claimed_satisfied'), evidenceOutcomeIds: { ...arr(str(100, 1), 10), uniqueItems: true } }),
+  missionCriterion: obj({ id, text: str(1000, 1), linkKeys: { ...arr(id, 30, 1), uniqueItems: true }, status: choice('unverified', 'blocked', 'claimed_satisfied'), evidenceOutcomeIds: { ...arr(str(100, 1), 10), uniqueItems: true } }),
+  missionNote: obj({ id, text: str(1000, 1), linkKeys: { ...arr(id, 30, 1), uniqueItems: true } }),
+  missionPlan: obj({ title: str(150, 1), links: arr(ref('missionLink'), 30, 1), owners: arr(ref('missionOwner'), 20, 1), dependencies: arr(ref('missionDependency'), 30),
+    acceptanceCriteria: arr(ref('missionCriterion'), 30), blockers: arr(ref('missionNote'), 30), nextActions: arr(ref('missionNote'), 30) }),
 };
 const automationPayloads = { preset: ref('preset'), oporder: obj({ order: ref('oporder'), revision }, ['order']), specops_workflow: ref('workflow'), centcom_trigger: ref('triggers') };
 defs.savedPreset = { ...defs.preset, required: [...defs.preset.required, 'args', 'cwd', 'instructions'] };
@@ -118,6 +125,9 @@ function operationInput(operation, parameters, target) {
   if (operation === 'context.read') patch({ section: choice('definitions', 'presets', 'oporders', 'notes', 'handoffs'), limit: int(1, 50) });
   if (operation === 'outcomes.read') patch({ collection: choice('directive', 'automation', 'approval', 'audit', 'diagnostic', 'query', 'provider'), after: int(0, Number.MAX_SAFE_INTEGER), limit: int(1, 50) });
   if (operation === 'history.read') patch({ after: int(0, Number.MAX_SAFE_INTEGER), through: int(0, Number.MAX_SAFE_INTEGER), limit: int(1, 50), view: choice('actions', 'patterns') });
+  if (operation === 'mission.update') patch({ id, expectedRevision: nullable(revision), plan: ref('missionPlan') });
+  if (operation === 'missions.read') patch({ kind: choice('coordination', 'specops', 'exercise'), linkKind: choice('mission', 'issue', 'pr', 'job', 'artifact'), limit: int(1, 50) });
+  if (operation === 'mission.inspect') patch({ section: choice('summary', 'links', 'owners', 'dependencies', 'acceptanceCriteria', 'blockers', 'nextActions', 'jobs', 'artifacts', 'evidence'), revision, limit: int(1, 50) });
   if (operation === 'capabilities.support') patch({ provider: choice(...provider.enum, 'terminal'), transport: choice('chat', 'terminal'), limit: int(1, 50) });
   if (operation === 'capabilities.read') patch({ schema: choice('input', 'output') });
   if (operation === 'artifact.read') patch({ operationId: workId, revision, offset: int(0, 256000), limit: int(1, 16000) });

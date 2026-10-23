@@ -1,7 +1,7 @@
 const crypto = require('node:crypto');
 const ENVELOPE_VERSION = 1;
 
-const LIMITS = Object.freeze({ queries: 5, directives: 20, automations: 10, queryHops: 3, resultBytes: 64000, pageSize: 50, envelopeBytes: 256000 });
+const LIMITS = Object.freeze({ queries: 5, directives: 20, automations: 10, queryHops: 3, resultBytes: 64000, pageSize: 50, envelopeBytes: 256000, coordinationRecords: 100, coordinationPlanBytes: 24000, coordinationEvidence: 50, coordinationRecordBytes: 64000 });
 const AUTOMATION_KINDS = ['specops_workflow', 'oporder', 'preset', 'centcom_trigger'];
 const object = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const fingerprint = (v) => crypto.createHash('sha256').update(JSON.stringify(canonical(v))).digest('hex');

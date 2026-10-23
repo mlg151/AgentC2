@@ -14,6 +14,7 @@ const { automationOutputSchema } = require('./centcom-output.cjs');
 const { automationExamples } = require('./centcom-examples.cjs');
 const { renderDoctrine } = require('./centcom-doctrine.cjs');
 const { summarizeAction, readHistory } = require('./centcom-history.cjs');
+const { createMissions } = require('./centcom-missions.cjs');
 const { ENVELOPE_VERSION, LIMITS, AUTOMATION_KINDS, fingerprint, redact, bounded, parseCentcomEnvelope } = require('./centcom-contract.cjs');
 const CONTEXT_REVISION = 2;
 
@@ -180,6 +181,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
     inFlightAlerts: [],
     observedUnits: {},
     observedMissions: {},
+    coordination: [],
     lastAutoWakeAt: 0,
     lastAssessmentAt: 0,
   };
@@ -198,6 +200,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
           directives: Array.isArray(saved.directives) ? saved.directives : [],
           automations: Array.isArray(saved.automations) ? saved.automations : [],
           auditLog: Array.isArray(saved.auditLog) ? saved.auditLog : [],
+          coordination: Array.isArray(saved.coordination) ? saved.coordination : [],
         };
       }
     } catch (e) {
@@ -732,6 +735,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
       if (!source) throw new Error('SitRep preview is unavailable');
       return resolveOne({ name: source.name, hostId: source.sourceHostId }, pre);
     }
+    if (entry.target === 'coordination') return p.plan.owners.map((owner) => resolveOne({ sessionKey: owner.sessionKey }, pre));
     if (['mission', 'exercise', 'contestant'].includes(entry.target)) {
       const mission = entry.target === 'mission';
       const record = (mission ? service.specops.list() : service.exercises.list()).find((r) => r.id === p.id);
@@ -756,8 +760,9 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
   }
 
   const evidence = createEvidence({ service, isCommander, activeKeys: async (inventory) => (await fleet(inventory)).keys });
+  const missions = createMissions({ state, service, persist: writeState, inventory: () => service.inventory(), isCommander });
   const automations = createAutomations({ service, state, validateConfig, persist: writeState, stateFile });
-  const operations = createOperations({ evidence, readHistory: (input) => readHistory(state, input), automations: { ...automations, read: (id) => automations.read(state.automations.find((a) => a.id === id)) }, readOutcomes, manifest: capabilityManifest, service, client,
+  const operations = createOperations({ evidence, missions, readHistory: (input) => readHistory(state, input), automations: { ...automations, read: (id) => automations.read(state.automations.find((a) => a.id === id)) }, readOutcomes, manifest: capabilityManifest, service, client,
     beforeMutation: async () => { await bindings.assert(mutationContext.getStore()?.directive); },
     control: (unit, fn) => service.commanderControl(client, unit, async (handle, controlling) => {
     try {
@@ -815,6 +820,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
     const request = operationRequest(directive, 'action');
     const entry = operations.validate(request.operation, request.input, 'action');
     directive.canonicalOperation = entry.operation;
+    if (entry.operation === 'mission.update') missions.validate(request.input);
     if (entry.operation === 'unit.create' && !request.input.hostId) request.input.hostId = state.config.hostId;
     directive.reviewRequired = entry.reviewRequired;
     directive.admission = await launchAdmission(request);

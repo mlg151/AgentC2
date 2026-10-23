@@ -297,19 +297,21 @@ async function catalogCoverage() {
     resolve: async (entry) => entry.target === 'sessions' ? [f.sessions[0]] : f.sessions[0], fleet,
     evidence: createEvidence({ service: f.service, isCommander: () => false, activeKeys: async () => (await fleet()).keys }),
     applyAutomation: async () => ({ applied: true }), readOutcomes: () => f.engine.outcomes(), readHistory: () => ({ entries: [], cursor: 0, hasMore: false }), manifest: () => f.engine.manifest(),
+    missions: { read: () => ({}), inspect: () => ({}), update: () => ({}) },
     automations: { validate: () => ({}), preview: () => ({}), read: () => ({}) },
   });
   const catalog = registry.catalog();
   for (const entry of catalog) {
     const definition = registry.definition(entry.operation);
     assert.ok(typeof definition.handler === 'function' || entry.unavailableReason, entry.operation);
-    assert.equal(entry.classification, /^(automation\.(validate|preview|read)|units.list|hosts.inspect|context.read|admission.check|artifact.read|capabilities\.(read|support)|outcomes.read|history.read|unit\.(inspect|search)|fleet\.|flash.list|specops\.(definition|inspect)|exercise\.(list|inspect|preview)|worktree.list|diff\.(files|detail)|sitrep.inspect|configuration.inspect|oporder.preview|github\.(readiness|issue|issues|pr)|devurl.list|history.discover)/.test(entry.operation) ? 'query' : 'action', entry.operation);
+    assert.equal(entry.classification, /^(automation\.(validate|preview|read)|units.list|hosts.inspect|context.read|admission.check|artifact.read|capabilities\.(read|support)|outcomes.read|history.read|missions.read|mission.inspect|unit\.(inspect|search)|fleet\.|flash.list|specops\.(definition|inspect)|exercise\.(list|inspect|preview)|worktree.list|diff\.(files|detail)|sitrep.inspect|configuration.inspect|oporder.preview|github\.(readiness|issue|issues|pr)|devurl.list|history.discover)/.test(entry.operation) ? 'query' : 'action', entry.operation);
     if (!entry.available) { await assert.rejects(registry.execute(entry.operation, {}, entry.classification), /Unavailable operation/); continue; }
     const p = {};
     for (const [key, type] of Object.entries(definition.parameters)) {
       if (type.endsWith('?')) continue;
       p[key] = type === 'string' ? 'fixture' : type === 'boolean' ? true : type === 'number' ? 1 : type === 'array' ? [] : type === 'nullable' ? null : {};
     }
+    if (entry.operation === 'mission.update') Object.assign(p, entry.examples[0].request.params.input);
     if (entry.operation === 'context.read') p.section = 'presets';
     if (entry.operation === 'capabilities.support') p.operation = 'unit.send';
     if (entry.operation === 'artifact.read') { p.operationId = 'a'.repeat(32); p.path = 'report.txt'; }

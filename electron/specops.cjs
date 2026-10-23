@@ -89,7 +89,7 @@ function createSpecops({ directory, runRemote, createSession, chats, getHost, em
   if (runs.length) save();
   function find(id) { const r = runs.find((r) => r.id === id); if (!r) throw new Error('Unknown mission'); return r; }
   function halt(r, error) { r.state = 'halted'; r.error = String(error.message || error).slice(0, 1000); save(); return r; }
-  const list = () => structuredClone(runs.map((r) => ({ ...r, source: undefined, profiles: undefined, visits: r.visits.map(({ prompt, ...v }) => v), canResume: r.state === 'halted' && Boolean(r.visits.at(-1)?.sessionId) && !r.visits.at(-1)?.completion && !r.publicationStarted, canRetry: r.state === 'halted' && Boolean(r.visits.at(-1)?.completion) && !r.publicationStarted })));
+  const list = () => structuredClone(runs.map((r) => ({ ...r, sourceLinks: (Array.isArray(r.source) ? r.source : [r.source]).filter((issue) => Number.isSafeInteger(issue?.number)).map((issue) => ({ key: `issue-${issue.number}`, kind: 'issue', externalId: String(issue.number), repository: r.repo })), source: undefined, profiles: undefined, visits: r.visits.map(({ prompt, ...v }) => v), canResume: r.state === 'halted' && Boolean(r.visits.at(-1)?.sessionId) && !r.visits.at(-1)?.completion && !r.publicationStarted, canRetry: r.state === 'halted' && Boolean(r.visits.at(-1)?.completion) && !r.publicationStarted })));
   const definition = () => ({ ...structuredClone(config), yaml: YAML.stringify(config), directory });
   function configure(source) {
     text(source, 200000, 'workflow YAML');

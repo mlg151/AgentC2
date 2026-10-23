@@ -51,7 +51,7 @@ export interface Session {
 export interface SpecopsProfile { id: string; name: string; provider: string; model: string; ranks: string[] }
 export interface SpecopsWorkflow { version: 1; id: string; name: string; trigger: string; stages: { id: string; profile: string; rank: string; role: string }[] }
 export interface SpecopsDefinition { profiles: SpecopsProfile[]; workflows: SpecopsWorkflow[]; yaml: string; directory: string }
-export interface SpecopsRun { canResume: boolean; canRetry: boolean; id: string; hostId: string; repo: string; state: string; stage: string; error: string; workflow: SpecopsWorkflow; visits: { id: string; stage: string; name: string; output: string; outcome: string }[]; costUsd: number; costKnown: boolean }
+export interface SpecopsRun { sourceLinks?: { key: string; kind: 'issue'; externalId: string; repository: string }[]; canResume: boolean; canRetry: boolean; id: string; hostId: string; repo: string; state: string; stage: string; error: string; workflow: SpecopsWorkflow; visits: { id: string; stage: string; name: string; output: string; outcome: string }[]; costUsd: number; costKnown: boolean }
 export interface GithubResult { [key: string]: unknown }
 
 export interface Inventory {

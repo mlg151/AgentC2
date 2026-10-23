@@ -5,7 +5,7 @@ const { operationInput, validate: validateSchema, bundled } = require('./centcom
 const { createSupport, requirements } = require('./centcom-support.cjs');
 const { outputSchema } = require('./centcom-output.cjs');
 const { operationExamples } = require('./centcom-examples.cjs');
-function createOperations({ service: s, client, control, resolve, fleet, applyAutomation, readOutcomes, readHistory, manifest, evidence, automations, beforeMutation = async () => {} }) {
+function createOperations({ service: s, client, control, resolve, fleet, applyAutomation, readOutcomes, readHistory, manifest, evidence, missions, automations, beforeMutation = async () => {} }) {
   const registry = new Map();
   const add = (operation, classification, description, parameters, target, handler, dependencies = [], aliases = [], unavailable = '') => {
     const reviewRequired = ['configuration.save', 'specops.configure', 'oporder.enroll', 'automation.apply'].includes(operation);
@@ -23,6 +23,9 @@ function createOperations({ service: s, client, control, resolve, fleet, applyAu
   add('outcomes.read', 'query', 'Read durable directive, automation, approval, audit, query, and diagnostic outcomes by cursor. Project acceptance is separate from command delivery.', { after: 'number?', limit: 'number?', collection: 'string?', clientRequestId: 'string?', serverId: 'string?' }, 'none', (p) => readOutcomes(p));
   add('history.read', 'query', 'Page retained action/handoff observations or repeated-action patterns. Preserve through while paging; title-based workflow suggestions remain hypotheses.', { after: 'number?', through: 'number?', limit: 'number?', view: 'string?', operation: 'string?', hostId: 'string?', sessionKey: 'string?', handoffsOnly: 'boolean?' }, 'none', (p) => readHistory(p));
   add('fleet.inspect', 'query', 'Inspect the connected active managed fleet.', {}, 'none', async () => (await fleet()).inventory);
+  add('missions.read', 'query', 'Page coordination records and observed SPECOPS/exercise links; claimed acceptance remains unverified.', { kind: 'string?', sessionKey: 'string?', linkKind: 'string?', linkId: 'string?', after: 'string?', limit: 'number?' }, 'none', (p) => missions.read(p));
+  add('mission.inspect', 'query', 'Page a mission section at an expected revision, including links, owners, dependencies, criteria, blockers, next actions, jobs, artifacts, and cited outcomes.', { id: 'string', section: 'string?', revision: 'string?', after: 'string?', limit: 'number?' }, 'none', (p) => missions.inspect(p));
+  add('mission.update', 'action', 'Create or replace a revision-bound coordination plan for active managed owners. This records unverified claims; it does not launch units or verify acceptance.', { id: 'string', expectedRevision: 'nullable', plan: 'object' }, 'coordination', (p) => missions.update(p));
   add('units.list', 'query', 'Page canonical managed, external, and saved units; inspection does not grant control.', { hostId: 'string?', provider: 'string?', classification: 'string?', execution: 'string?', after: 'string?', limit: 'number?' }, 'none', (p) => evidence.units(p));
   add('unit.inspect', 'query', 'Read structured unit identity, execution evidence, task, requests, and ownership without taking control.', { sessionKey: 'string' }, 'none', (p) => evidence.inspect(p), [], ['inspect_unit']);
   add('hosts.inspect', 'query', 'Read host health, effective cgroup headroom/pressure, ROE, and provider capabilities.', { hostId: 'string?' }, 'none', (p) => evidence.hosts(p));
@@ -112,7 +115,7 @@ function createOperations({ service: s, client, control, resolve, fleet, applyAu
   const availability = (entry) => entry.unavailable || entry.dependencies.find((dep) => call(dep) == null) && 'Required service is unavailable';
   function catalog(context) {
     return [...registry.values()].map(({ handler, dependencies, unavailable, ...entry }) => {
-      const needsSession = ['session', 'sessions', 'sitrep', 'mission', 'exercise', 'contestant'].includes(entry.target);
+      const needsSession = ['session', 'sessions', 'sitrep', 'mission', 'exercise', 'contestant', 'coordination'].includes(entry.target);
       const reason = availability(registry.get(entry.operation)) || (context && needsSession && !context.sessions.length ? 'No connected active managed sessions are currently eligible' : '');
       const parameters = { ...(entry.target === 'session' ? { sessionKey: 'string?', key: 'string?', name: 'string?', hostId: 'string?', chatSessionId: 'string?' } : {}), ...entry.parameters };
       return { ...entry, parameters, requirements: requirements(entry), available: !reason, unavailableReason: reason || null };
@@ -148,7 +151,7 @@ function createOperations({ service: s, client, control, resolve, fleet, applyAu
       throw error;
     }
     // Historical outcomes remain inspectable after a target exits the fleet.
-    if (['outcomes.read', 'history.read', 'capabilities.read', 'capabilities.support', 'units.list', 'unit.inspect', 'hosts.inspect', 'context.read', 'admission.check', 'artifact.read', 'automation.validate', 'automation.preview', 'automation.read'].includes(entry.operation)) return result;
+    if (['outcomes.read', 'history.read', 'missions.read', 'mission.inspect', 'capabilities.read', 'capabilities.support', 'units.list', 'unit.inspect', 'hosts.inspect', 'context.read', 'admission.check', 'artifact.read', 'automation.validate', 'automation.preview', 'automation.read'].includes(entry.operation)) return result;
     if (classification === 'action') return result ?? null; // No-payload adapters have an explicit JSON result.
     return (await fleet()).clean(result) ?? { unavailable: 'Result belongs to an excluded session' };
   }

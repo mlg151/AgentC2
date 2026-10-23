@@ -218,6 +218,43 @@ binary files, and files larger than 256,000 bytes. Returned text is redacted
 before paging. Continue with the returned content revision and character
 offset; a changed revision is rejected. Inspection never runs project commands.
 
+`missions.read` lists coordination records and persisted SPECOPS/exercise
+observations. Filter by `kind`, responsible `sessionKey`, or `linkKind`/`linkId`;
+issue/PR identities retain their repository to disambiguate numbers. The returned
+IDs are `coordination:<id>`, `specops:<run-id>`, and `exercise:<exercise-id>`.
+`mission.inspect` accepts an ID and pages `summary`, `links`, `owners`,
+`dependencies`, `acceptanceCriteria`, `blockers`, `nextActions`, `jobs`,
+`artifacts`, or `evidence`. Supply the returned `revision` on subsequent pages to
+reject a changed record. Ownership observations are live and can change between
+reads. Pages fit the persisted result budget; oversized source entries retain
+identity and an explicit partial marker.
+
+`mission.update` records a plan through the existing action/approval boundary.
+Supply an application-local `id`, `expectedRevision` (`null` only for creation),
+and a typed `plan` containing all seven sections: title, links, owners,
+dependencies, acceptance criteria, blockers, and next actions. Links identify
+missions, issues, PRs, jobs, and artifacts; owner/criterion/action references use
+those link keys. Owners must be connected active managed units at staging and
+execution. Duplicate keys, dangling references, cyclic dependencies, oversized
+plans, unavailable evidence, and claimed satisfaction without citations are
+rejected. Approval binds the previous revision, cited outcome identities, and
+current process/session incarnations. Recording a plan does not launch a unit,
+change a native workflow, or grant historical owners control. Operational C2
+authority applies; this is not an automation configuration change.
+
+Coordination records survive restart. The contract permits 100 records and
+24,000 bytes per plan, 50 distinct outcome citations, and 64,000 bytes for a plan
+with its retained evidence; these limits are exposed in the manifest. Criteria can be
+`unverified`, `blocked`, or `claimed_satisfied`; they cannot self-assert verified
+acceptance. Cited `evidenceOutcomeIds` retain source request IDs, dispatch state,
+completion facts, and artifact revision when available. Relevance and project
+acceptance remain unverified even if a cited command completed. Native SPECOPS
+links come from persisted issue inputs and publication receipts, with visit/job
+IDs, stage-output digests, routing, and halt evidence. Exercise records expose
+contestants and revision-bound test receipts. Titles never establish external
+issue/PR links, and workflow completion or a passing test alone never upgrades
+project acceptance.
+
 `admission.check` exposes exact assignment and resource checks. Before direct
 CENTCOM launches (`unit.create`, `specops.launch`, `exercise.create`, and
 `sitrep.handoff`), the engine repeats admission at dispatch. Existing worktree
@@ -272,6 +309,6 @@ work or remaining budget.
 ## Remaining implementation and completion gates
 
 The issue checklist is authoritative. Work still includes actual-adapter verification for every advertised operation,
-linked mission evidence and complete launch admission coverage,
+complete launch admission coverage,
 and an isolated production-bridge round trip with artifact verification. Current
 fixture coverage must not be presented as native-provider or live-host proof.

@@ -1,13 +1,13 @@
 const { page } = require('./centcom-evidence.cjs');
 const { redact } = require('./centcom-contract.cjs');
 const PROVIDERS = ['codex', 'claude', 'antigravity', 'opencode', 'terminal'];
-const LOCAL = new Set(['capabilities.read', 'capabilities.support', 'outcomes.read', 'history.read', 'configuration.inspect', 'configuration.save', 'specops.definition', 'specops.configure', 'automation.validate', 'automation.preview', 'automation.read', 'automation.apply', 'context.read', 'units.list', 'fleet.inspect', 'exercise.list']);
+const LOCAL = new Set(['capabilities.read', 'capabilities.support', 'outcomes.read', 'history.read', 'missions.read', 'mission.inspect', 'configuration.inspect', 'configuration.save', 'specops.definition', 'specops.configure', 'automation.validate', 'automation.preview', 'automation.read', 'automation.apply', 'context.read', 'units.list', 'fleet.inspect', 'exercise.list']);
 const NATIVE = new Set(['unit.send', 'unit.steer', 'unit.interrupt', 'unit.stop', 'unit.delete', 'chat.respond']);
 const LAUNCH = new Set(['unit.create', 'specops.launch', 'exercise.create', 'sitrep.handoff']);
 
 function requirements(entry) {
   return {
-    scope: LOCAL.has(entry.operation) ? 'local_or_payload_dependent' : ['session', 'sessions', 'mission', 'exercise', 'contestant', 'sitrep'].includes(entry.target) ? 'managed_target' : 'host',
+    scope: LOCAL.has(entry.operation) ? 'local_or_payload_dependent' : ['session', 'sessions', 'mission', 'exercise', 'contestant', 'sitrep', 'coordination'].includes(entry.target) ? 'managed_target' : 'host',
     connectedHost: !LOCAL.has(entry.operation),
     nativeCapability: ({ 'unit.steer': 'steering', 'unit.interrupt': 'interrupt', 'chat.respond': 'approvals_or_questions' })[entry.operation] || null,
     transports: ['unit.steer', 'chat.respond', 'specops.launch', 'specops.control'].includes(entry.operation) ? ['chat'] : ['chat', 'terminal'],
@@ -65,7 +65,7 @@ function createSupport({ service, fleet, catalog, authority, inspectUnit }) {
       else if (['exercise.create', 'sitrep.handoff'].includes(entry.operation) && row.provider === 'terminal') { status = 'unsupported'; reason = 'This launch requires an agent provider'; }
       else if (['flash.decide', 'fault.interrupt'].includes(entry.operation) && row.provider !== 'claude') { status = 'unsupported'; reason = 'This operation requires the Claude provider hook; use chat.respond for native structured requests'; }
       else if (!policy.transports.includes(row.transport) || (row.provider === 'terminal' && row.transport === 'chat')) { status = 'unsupported'; reason = 'Operation is unavailable for this provider/transport combination'; }
-      else if (policy.scope === 'managed_target' && !units.length && !['mission', 'exercise', 'contestant', 'sitrep'].includes(entry.target)) { status = 'unavailable'; reason = 'No eligible active managed unit in this host/provider/transport scope'; }
+      else if (policy.scope === 'managed_target' && !units.length && !['mission', 'exercise', 'contestant', 'sitrep', 'coordination'].includes(entry.target)) { status = 'unavailable'; reason = 'No eligible active managed unit in this host/provider/transport scope'; }
       else if ((NATIVE.has(entry.operation) || LAUNCH.has(entry.operation)) && row.transport === 'chat') {
         if (!cap || cap.status === 'unverified') { status = 'unknown'; reason = cap?.reason || 'Native provider capabilities could not be verified'; }
         else if (cap.status === 'unsupported') { status = 'unsupported'; reason = cap.reason || 'Native provider integration is unsupported'; }

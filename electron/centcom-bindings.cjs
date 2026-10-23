@@ -79,6 +79,14 @@ function createBindings({ service: s, state, resolve, request }) {
       if (pre.state && pre.state !== operationEvidence?.state) throw new Error('Exercise state changed');
     }
     if (entry.operation === 'configuration.save') operationEvidence = settings;
+    if (entry.operation === 'mission.update') {
+      const previous = state.coordination.find((record) => record.id === input.id);
+      if ((previous?.revision || null) !== input.expectedRevision) throw new Error('Mission revision changed; inspect and propose again');
+      const ids = [...new Set([...input.plan.dependencies, ...input.plan.acceptanceCriteria].flatMap((item) => item.evidenceOutcomeIds))];
+      const evidence = ids.map((id) => state.outcomes.find((row) => row.outcomeId === id));
+      if (evidence.some((row) => !row)) throw new Error('Cited outcome is unavailable or expired');
+      operationEvidence = { previous: previous || null, evidence: evidence.map((row) => ({ id: row.outcomeId, digest: fingerprint(row) })) };
+    }
     if (['specops.configure', 'specops.launch'].includes(entry.operation)) {
       const definition = s.specops.definition();
       operationEvidence = { profiles: definition.profiles, workflows: definition.workflows };
