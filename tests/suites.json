@@ -26,6 +26,16 @@
       "group": "core"
     },
     {
+      "id": "centcom-automations",
+      "file": "tests/centcom-automations.cjs",
+      "group": "core"
+    },
+    {
+      "id": "centcom-oporders",
+      "file": "tests/centcom-oporders.cjs",
+      "group": "linux-python"
+    },
+    {
       "id": "specops",
       "file": "tests/specops.cjs",
       "group": "core"

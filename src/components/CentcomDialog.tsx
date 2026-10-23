@@ -374,6 +374,7 @@ export function CentcomDialog({ settings, onClose }: { settings: Settings; onClo
                     <summary>Configuration Payload</summary>
                     <pre>{JSON.stringify(a.payload, null, 2)}</pre>
                   </details>
+                  {a.preview ? <details><summary>Reviewed change and revision</summary><pre>{JSON.stringify(a.preview, null, 2)}</pre></details> : null}
                   {a.error ? <p role="alert" className="form-error">{a.error}</p> : null}
                   {a.state === 'uncertain' ? <p className="field-note">The change may have been saved. Inspect the saved configuration before proposing it again.</p> : null}
                   {a.result ? <details><summary>Saved artifact and revision</summary><pre>{JSON.stringify(a.result, null, 2)}</pre></details> : null}

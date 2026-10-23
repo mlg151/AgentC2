@@ -373,6 +373,7 @@ kbd{font:10px Consolas,monospace;background:#29404e;padding:3px 5px;border-radiu
 .directive-state-denied { background: #381e1e; color: #f28b8b; }
 .directive-state-failed { background: #4a1f1f; color: #f26d6d; }
 .centcom-directive-card pre, .centcom-automation-card pre { background: #0b141a; border: 1px solid #23343f; border-radius: 4px; padding: 8px; font-size: 11px; overflow-x: auto; margin: 6px 0 0; }
+.centcom-automation-card pre { max-height: 240px; overflow: auto; }
 .centcom-directive-card details summary, .centcom-automation-card details summary { cursor: pointer; color: #8fb1c2; font-size: 11px; }
 .centcom-audit-log { display: flex; flex-direction: column; gap: 6px; max-height: 250px; overflow-y: auto; font-size: 11px; font-family: monospace; border: 1px solid #23343f; border-radius: 6px; padding: 8px; background: #081016; }
 .audit-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px; background: #0e171e; border-radius: 4px; border: 1px solid #1c2b36; }

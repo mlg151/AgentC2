@@ -27,7 +27,7 @@ function fixture(directory, options = {}) {
     unit(8, { kind: 'external-tmux', managed: false }), unit(9, { hostId: 'offline', key: `offline/tmux:${unit(9).name}` }),
     unit(10, { kind: 'conversation', key: 'alpha/codex:saved-history', state: 'exited' })];
   const hosts = [{ id: 'alpha', connected: true }, { id: 'offline', connected: false }];
-  const state = { settings: { hosts: [{ id: 'alpha', enabled: true }], presets: [], opOrders: [] }, deletedSessions: [sessions[3].key], attention: [], exercises: [] };
+  const state = { settings: { hosts: [{ id: 'alpha', name: 'Fixture', target: 'fixture.invalid', port: 22, enabled: true }], presets: [], opOrders: [] }, deletedSessions: [sessions[3].key], attention: [], exercises: [] };
   const journals = new Map(), receipts = new Map(), submitted = [], calls = [], syncs = [], responses = [];
   const faults = [], missions = [], exercises = state.exercises, flash = [];
   const caps = { provider: 'codex', version: 'fixture', status: 'supported', reason: null, ...Object.fromEntries(contract.capabilities.map((k) => [k, true])) };

@@ -3,16 +3,20 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { _electron } = require('playwright-core');
-const { Store } = require('../electron/config.cjs');
+const { Store, validateSettings } = require('../electron/config.cjs');
+const { createAutomations } = require('../electron/centcom-automations.cjs');
 
 (async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agentc2-centcom-ui-'));
   let app;
   try {
     const store = new Store(directory);
-    store.save('settings', {
+    store.save('settings', validateSettings({
       ...store.data.settings,
       hosts: [{ id: 'default', name: 'Primary Theater', target: '127.0.0.1', port: 1, enabled: true }],
+    }));
+    const draftPreview = await createAutomations({ service: { store } }).preview('preset', {
+      id: 'node22-unit', name: 'Node 22 Test', provider: 'codex', command: 'codex', args: '--model fixture', fullPermissions: false,
     });
     fs.mkdirSync(path.join(directory, 'centcom'), { recursive: true });
     fs.writeFileSync(
@@ -63,7 +67,8 @@ const { Store } = require('../electron/config.cjs');
             title: 'Node 22 Unit Test Preset',
             rationale: 'Developer runs npm run test repeatedly across units',
             evidence: ['5 terminal executions of npm run test'],
-            payload: { id: 'node22-unit', name: 'Node 22 Test', command: 'npm test' },
+            payload: draftPreview.payload,
+            preview: draftPreview,
             state: 'proposed',
             createdAt: Date.now() - 30000,
             appliedAt: null,
@@ -120,12 +125,26 @@ const { Store } = require('../electron/config.cjs');
     await page.getByRole('button', { name: /^Automations/ }).click();
     await page.getByText('Node 22 Unit Test Preset').waitFor();
     await page.getByRole('button', { name: 'Apply Configuration' }).waitFor();
+    const proposed = page.locator('.centcom-automation-card').filter({ hasText: 'Node 22 Unit Test Preset' });
+    await proposed.getByText('Reviewed change and revision', { exact: true }).click();
+    await proposed.getByText(draftPreview.revision, { exact: false }).waitFor();
+    await page.locator('.centcom-tab-content').evaluate((element) => { element.scrollTop = 0; });
+    await page.screenshot({ path: path.join(screenshotDir, 'centcom-automation-preview.png') });
+    assert.ok(!JSON.parse(fs.readFileSync(store.file)).settings.presets.some((p) => p.id === 'node22-unit'), 'No permanent mutation before UI approval');
+    await proposed.getByRole('button', { name: 'Apply Configuration' }).click();
+    await proposed.getByText('APPLIED', { exact: true }).waitFor();
+    const savedPreset = JSON.parse(fs.readFileSync(store.file)).settings.presets.find((p) => p.id === 'node22-unit');
+    assert.deepEqual(savedPreset, draftPreview.after);
+    await proposed.getByText('Reviewed change and revision', { exact: true }).click();
     const uncertain = page.locator('.centcom-automation-card.uncertain');
     await uncertain.getByText('UNCERTAIN', { exact: true }).waitFor();
     assert.equal(await uncertain.getByRole('button', { name: 'Apply Configuration' }).count(), 0);
     await uncertain.getByText('The change may have been saved.', { exact: false }).waitFor();
-    await page.getByText('Saved artifact and revision', { exact: true }).click();
+    await page.locator('.centcom-automation-card').filter({ hasText: 'Verified saved preset' }).getByText('Saved artifact and revision', { exact: true }).click();
     await page.getByText('saved-fixture', { exact: false }).waitFor();
+    await page.locator('.centcom-automation-card').filter({ hasText: 'Verified saved preset' }).getByText('Saved artifact and revision', { exact: true }).click();
+    await proposed.getByText('Saved artifact and revision', { exact: true }).click();
+    await page.locator('.centcom-tab-content').evaluate((element) => { element.scrollTop = 0; });
     await page.screenshot({ path: path.join(screenshotDir, 'centcom-automation-outcomes.png') });
 
     // Switch to Configuration tab and verify authority mode

@@ -1,6 +1,6 @@
 // Metadata and executable handlers live together. Both envelope dialects use
 // this registry, so doctrine cannot advertise an unimplemented dispatch branch.
-function createOperations({ service: s, client, control, resolve, fleet, applyAutomation, readOutcomes, manifest, evidence }) {
+function createOperations({ service: s, client, control, resolve, fleet, applyAutomation, readOutcomes, manifest, evidence, automations }) {
   const registry = new Map();
   const add = (operation, classification, description, parameters, target, handler, dependencies = [], aliases = [], unavailable = '') => {
     const reviewRequired = ['configuration.save', 'specops.configure', 'oporder.enroll', 'automation.apply'].includes(operation);
@@ -88,6 +88,9 @@ function createOperations({ service: s, client, control, resolve, fleet, applyAu
   add('oporder.preview', 'query', 'Preview validated OpOrder enrollment.', { order: 'object' }, 'none', (p) => s.previewOpOrder(p.order), ['previewOpOrder']);
   add('oporder.enroll', 'action', 'Enroll a reviewed OpOrder revision.', { order: 'object', revision: 'string' }, 'none', (p) => s.enrollOpOrder(p.order, p.revision), ['enrollOpOrder']);
   add('automation.apply', 'action', 'Apply a persisted automation proposal through validation.', { id: 'string' }, 'none', (p) => applyAutomation(p.id), []);
+  add('automation.validate', 'query', 'Validate and normalize a workflow, OpOrder, preset, or trigger payload without saving.', { kind: 'string', payload: 'object' }, 'none', (p) => automations.validate(p.kind, p.payload));
+  add('automation.preview', 'query', 'Preview the exact before/after artifact and revision. Save a draft using the automations envelope collection; all applications require Watch Officer review.', { kind: 'string', payload: 'object' }, 'none', (p) => automations.preview(p.kind, p.payload));
+  add('automation.read', 'query', 'Read persisted configuration and enrollment evidence for a draft; compare it with the reviewed artifact.', { id: 'string' }, 'none', (p) => automations.read(p.id));
   for (const op of ['readiness', 'issue', 'issues', 'pr', 'ready', 'close']) add(`github.${op}`, ['ready', 'close'].includes(op) ? 'action' : 'query', `GitHub ${op} using existing validated integration.`, { hostId: 'string', repo: 'string', repository: 'string?', issue: 'number?', query: 'string?', number: 'number?', headCommit: 'string?', expectedBranch: 'string?', updatedAt: 'string?', evidence: 'object?' }, 'none', (p) => s.github({ ...p, operation: op }), ['github']);
   add('devurl.list', 'query', 'List detected development URLs for an active unit.', {}, 'session', (_p, u) => s.devUrls(u.key), ['devUrls']);
   unit('devurl.open', 'Open a development URL using the managed tunnel service.', { url: 'string' }, (p, u) => controlled(u, (handle) => s.openDevUrl(client, u.transport === 'chat' ? u.key : handle, p.url)), ['openDevUrl', 'commanderControl']);
@@ -135,7 +138,7 @@ function createOperations({ service: s, client, control, resolve, fleet, applyAu
     check();
     const result = await entry.handler(input, target);
     // Historical outcomes remain inspectable after a target exits the fleet.
-    if (['outcomes.read', 'capabilities.read', 'units.list', 'unit.inspect', 'hosts.inspect', 'context.read', 'admission.check', 'artifact.read'].includes(entry.operation)) return result;
+    if (['outcomes.read', 'capabilities.read', 'units.list', 'unit.inspect', 'hosts.inspect', 'context.read', 'admission.check', 'artifact.read', 'automation.validate', 'automation.preview', 'automation.read'].includes(entry.operation)) return result;
     if (classification === 'action') return result; // Audit retains the real receipt, even if the unit leaves the fleet.
     return (await fleet()).clean(result) ?? { unavailable: 'Result belongs to an excluded session' };
   }

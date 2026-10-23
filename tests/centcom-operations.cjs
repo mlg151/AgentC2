@@ -293,12 +293,13 @@ async function catalogCoverage() {
     resolve: async (entry) => entry.target === 'sessions' ? [f.sessions[0]] : f.sessions[0], fleet,
     evidence: createEvidence({ service: f.service, isCommander: () => false, activeKeys: async () => (await fleet()).keys }),
     applyAutomation: async () => ({ applied: true }), readOutcomes: () => f.engine.outcomes(), manifest: () => f.engine.manifest(),
+    automations: { validate: () => ({}), preview: () => ({}), read: () => ({}) },
   });
   const catalog = registry.catalog();
   for (const entry of catalog) {
     const definition = registry.definition(entry.operation);
     assert.ok(typeof definition.handler === 'function' || entry.unavailableReason, entry.operation);
-    assert.equal(entry.classification, /^(units.list|hosts.inspect|context.read|admission.check|artifact.read|capabilities.read|outcomes.read|unit\.(inspect|search)|fleet\.|flash.list|specops\.(definition|inspect)|exercise\.(list|inspect|preview)|worktree.list|diff\.(files|detail)|sitrep.inspect|configuration.inspect|oporder.preview|github\.(readiness|issue|issues|pr)|devurl.list|history.discover)/.test(entry.operation) ? 'query' : 'action', entry.operation);
+    assert.equal(entry.classification, /^(automation\.(validate|preview|read)|units.list|hosts.inspect|context.read|admission.check|artifact.read|capabilities.read|outcomes.read|unit\.(inspect|search)|fleet\.|flash.list|specops\.(definition|inspect)|exercise\.(list|inspect|preview)|worktree.list|diff\.(files|detail)|sitrep.inspect|configuration.inspect|oporder.preview|github\.(readiness|issue|issues|pr)|devurl.list|history.discover)/.test(entry.operation) ? 'query' : 'action', entry.operation);
     if (!entry.available) { await assert.rejects(registry.execute(entry.operation, {}, entry.classification), /Unavailable operation/); continue; }
     const p = {};
     for (const [key, type] of Object.entries(definition.parameters)) {
@@ -422,7 +423,7 @@ async function reviewedAutomationReadback() {
   await f.engine.submit('Propose permanent change');
   assert.equal(f.engine.state().directives[0].state, 'pending');
   assert.ok(!f.calls.some((c) => c.operation === 'configuration.save'));
-  f.responses.push(envelope({ automations: [{ id: 'preset-1', kind: 'preset', title: 'Reusable preset', rationale: 'Observed repeated launch arguments', evidence: ['observed actions'], payload: { id: 'fixture-preset', title: 'Fixture' } }] }));
+  f.responses.push(envelope({ automations: [{ id: 'preset-1', kind: 'preset', title: 'Reusable preset', rationale: 'Observed repeated launch arguments', evidence: ['observed actions'], payload: { id: 'fixture-preset', name: 'Fixture', provider: 'codex', command: 'codex' } }] }));
   await f.engine.submit('Save draft');
   const [auto] = f.engine.state().automations;
   assert.throws(() => f.engine.applyAutomation(auto.id, 'yes'), /Invalid automation decision/);
@@ -431,8 +432,9 @@ async function reviewedAutomationReadback() {
   await f.engine.applyAutomation(auto.id, 'apply');
   assert.equal(f.engine.state().automations[0].state, 'uncertain');
   assert.match(f.engine.state().automations[0].error, /readback/);
-  f.service.saveSettings = async (settings) => { f.state.settings = settings; return settings; };
-  f.responses.push(envelope({ automations: [{ id: 'preset-2', kind: 'preset', title: 'Saved preset', rationale: 'Verified repetitive task', payload: { id: 'saved-preset', title: 'Saved' } }] }));
+  f.service.store.file = path.join(directory, 'automation-readback', 'workspace.json');
+  f.service.saveSettings = async (settings) => { f.state.settings = settings; fs.writeFileSync(f.service.store.file, JSON.stringify({ settings })); return settings; };
+  f.responses.push(envelope({ automations: [{ id: 'preset-2', kind: 'preset', title: 'Saved preset', rationale: 'Verified repetitive task', payload: { id: 'saved-preset', name: 'Saved', provider: 'codex', command: 'codex' } }] }));
   await f.engine.submit('Save a second draft');
   await f.engine.applyAutomation(f.engine.state().automations[0].id, 'apply');
   const saved = f.engine.state().automations[0];

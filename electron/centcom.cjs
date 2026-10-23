@@ -6,7 +6,8 @@ const { activeFleet, commanderIdentity } = require('./centcom-fleet.cjs');
 const { createOperations } = require('./centcom-operations.cjs');
 const { createEvidence } = require('./centcom-evidence.cjs');
 const { createTurnLifecycle } = require('./centcom-turn.cjs');
-const { LIMITS, AUTOMATION_KINDS, object, fingerprint, redact, bounded, parseCentcomEnvelope } = require('./centcom-contract.cjs');
+const { createAutomations } = require('./centcom-automations.cjs');
+const { LIMITS, AUTOMATION_KINDS, fingerprint, redact, bounded, parseCentcomEnvelope } = require('./centcom-contract.cjs');
 const CONTEXT_REVISION = 2;
 
 const PROVIDERS = ['codex', 'claude', 'antigravity', 'opencode'];
@@ -513,13 +514,12 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
           const duplicate = duplicateRequest('automation', auto);
           if (duplicate) { actionResults.push(diagnostic({ ...duplicate, turnId })); continue; }
           try {
-            if (!AUTOMATION_KINDS.includes(auto.kind)) throw new Error(`Unsupported automation kind: ${auto.kind}`);
-            if (!object(auto.payload)) throw new Error('Automation payload must be an object');
+            const preview = await automations.preview(auto.kind, auto.payload);
             const record = {
               id: crypto.randomUUID(), clientRequestId: auto.id || null, turnId, kind: auto.kind,
               title: text(auto.title, 150, 'title'), rationale: text(auto.rationale, 2000, 'rationale'),
               evidence: Array.isArray(auto.evidence) ? auto.evidence.map(String).slice(0, 10) : [],
-              payload: auto.payload, state: 'proposed', createdAt: Date.now(), appliedAt: null,
+              payload: preview.payload, preview, state: 'proposed', createdAt: Date.now(), appliedAt: null,
             };
             state.automations.unshift(record);
             rememberRequest('automation', auto, record.id);
@@ -731,7 +731,8 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
   }
 
   const evidence = createEvidence({ service, isCommander, activeKeys: async (inventory) => (await fleet(inventory)).keys });
-  const operations = createOperations({ evidence, readOutcomes, manifest: () => capabilityManifest(), service, client, control: (unit, fn) => service.commanderControl(client, unit, async (handle) => {
+  const automations = createAutomations({ service, state, validateConfig, persist: writeState, stateFile });
+  const operations = createOperations({ evidence, automations: { ...automations, read: (id) => automations.read(state.automations.find((a) => a.id === id)) }, readOutcomes, manifest: () => capabilityManifest(), service, client, control: (unit, fn) => service.commanderControl(client, unit, async (handle) => {
     const current = (await fleet()).find(unit.key);
     if (!current || current.chatSessionId !== unit.chatSessionId || (current.id || current.name) !== (unit.id || unit.name)) throw new Error('Target left the active fleet while acquiring control');
     if (activeTurnAbort?.signal.aborted || disposed) throw new Error('CENTCOM turn interrupted by Watch Officer');
@@ -894,41 +895,9 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
   }
 
   async function applyAutomationById(id) {
-    const auto = state.automations.find((item) => item.id === id);
-    if (!auto || auto.state !== 'proposed') throw new Error('Automation proposal not found or already resolved');
-    if (!AUTOMATION_KINDS.includes(auto.kind)) throw new Error('Unknown automation kind');
-    auto.state = 'applying';
-    writeState();
-    try {
-      let artifact;
-      if (auto.kind === 'preset') {
-        const settings = service.store.data.settings;
-        await service.saveSettings({ ...settings, presets: [...(settings.presets || []).filter((p) => p.id !== auto.payload.id), auto.payload] });
-        artifact = service.store.data.settings.presets.find((p) => p.id === auto.payload.id);
-      } else if (auto.kind === 'centcom_trigger') {
-        state.config = validateConfig({ ...state.config, triggers: { ...state.config.triggers, ...auto.payload } });
-        writeState();
-        artifact = JSON.parse(fs.readFileSync(stateFile, 'utf8')).config.triggers;
-      } else if (auto.kind === 'specops_workflow') {
-        const def = service.specops.definition();
-        await service.specops.configure(require('yaml').stringify({ profiles: def.profiles, workflows: [...def.workflows.filter((w) => w.id !== auto.payload.id), auto.payload] }));
-        artifact = service.specops.definition().workflows.find((w) => w.id === auto.payload.id);
-      } else if (auto.kind === 'oporder') {
-        if (!service.enrollOpOrder || !auto.payload.order || !auto.payload.revision) throw new Error('OpOrder automation requires a reviewed order and revision');
-        await service.enrollOpOrder(auto.payload.order, auto.payload.revision);
-        const observed = await service.previewOpOrder(auto.payload.order);
-        if (!observed?.ready || !Array.isArray(observed.changes) || observed.changes.some((c) => c.status !== 'unchanged')) throw new Error('OpOrder enrollment readback failed');
-        artifact = service.store.data.settings.opOrders.find((o) => o.id === auto.payload.order.id);
-        auto.enrollment = observed;
-      }
-      if (!artifact) throw new Error('Saved automation artifact was not found during readback');
-      auto.result = { artifact, revision: fingerprint(artifact), ...(auto.enrollment ? { enrollment: auto.enrollment } : {}) };
-      auto.state = 'applied'; auto.appliedAt = Date.now(); delete auto.error; writeState();
-      return auto;
-    } catch (error) {
-      // A failed readback may follow a successful write. Never replay blindly.
-      auto.state = 'uncertain'; auto.error = error.message; writeState(); throw error;
-    }
+    const result = await automations.apply(state.automations.find((item) => item.id === id));
+    scheduleWake();
+    return result;
   }
 
   function isCommander(hostId, identity) {
@@ -1109,6 +1078,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
       const auto = state.automations.find((item) => item.id === id);
       if (!auto || auto.state !== 'proposed') throw new Error('Automation proposal not found or already resolved');
       return enqueue(async () => {
+        if (auto.state !== 'proposed') throw new Error('Automation proposal already resolved');
         if (decision === 'dismiss') {
           auto.state = 'dismissed';
           writeState();

@@ -240,7 +240,8 @@ function createSpecops({ directory, runRemote, createSession, chats, getHost, em
     } finally { flights.delete(id); }
   }
   const timer = setInterval(() => { for (const r of runs) void tick(r); }, 2000); timer.unref();
-  return { list, definition, configure, launch, control, tick, dispose: () => clearInterval(timer) };
+  const readback = () => validateConfig(YAML.parse(fs.readFileSync(configFile, 'utf8'), { maxAliasCount: 0 }));
+  return { list, definition, readback, configure, launch, control, tick, dispose: () => clearInterval(timer) };
 }
 // Python uuid5(NAMESPACE_URL, 'agentc2-managed:' + name), for worktree recovery.
 function uuidForManaged(name) {

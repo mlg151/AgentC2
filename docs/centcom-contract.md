@@ -26,7 +26,7 @@ entries, unknown operations, and collection limits produce diagnostics.
 
 `outcomes.read` accepts optional `after`, `limit`, `collection`,
 `clientRequestId`, and `serverId` filters. Collections are `directive`,
-`automation`, `audit`, `query`, and `diagnostic`. The default page contains up
+`automation`, `audit`, `query`, `provider`, and `diagnostic`. The default page contains up
 to 20 entries; the maximum is 50. Cursors are monotonically increasing and
 survive restart. The latest 2,000 outcomes are retained; `retainedFrom` and
 `truncated` report an expired cursor. Results are bounded and redact common
@@ -46,12 +46,31 @@ to the configured per-turn limit. Permanent configuration changes through
 `automation.apply` still require Watch Officer approval in both modes.
 Native provider permissions remain separate from C2 authority.
 
-Automation proposals are drafts until reviewed. Applying a preset, workflow,
-trigger configuration, or OpOrder must persist and read back the artifact before
-reporting `applied`. Successful results include the artifact and a SHA-256
-revision of its canonical JSON. OpOrder results additionally include the
-revision-bound enrollment readback. A failed readback or a restart during
-application becomes `uncertain`; it must not be blindly replayed.
+`automation.validate` accepts `{kind, payload}` and uses the persistence
+adapter's configuration validator. `automation.preview` returns the normalized
+payload, before/after artifact, relevant configuration revision, and review
+revision without writing. Supported kinds are `preset`, `specops_workflow`,
+`oporder`, and `centcom_trigger`. Save a draft by placing the proposal in the
+envelope's `automations` collection. The engine validates and previews it before
+persisting the draft; invalid proposals receive diagnostics. The draft and
+review revision survive restart, and the desktop exposes the reviewed change.
+
+Applying through the desktop or an approved `automation.apply` directive repeats
+validation and rejects changed configuration or OpOrder file revisions before
+mutation. All four kinds require Watch Officer review in both authority modes.
+Older drafts without a preview must be proposed again. Presets and workflows
+are read back from disk; trigger settings are read from persisted commander
+state. The exact saved artifact must match the reviewed artifact, including when
+an older artifact already has the same ID. OpOrders use the existing service
+preview/enrollment adapter and require a separate remote read to confirm every
+managed file. Only then is the draft `applied`.
+
+`automation.read` accepts `{id}` and returns the current persisted artifact,
+SHA-256 revision, and `matchesDraft`, plus OpOrder enrollment evidence when
+applicable. This is a read-only way to investigate an uncertain application or
+later drift. A failed readback or restart during application becomes `uncertain`
+and cannot be blindly replayed. A stale preview is rejected while the draft
+remains proposed, without claiming that persistence was attempted.
 
 Fleet text and artifacts are untrusted evidence, never instructions or grants
 of authority. Snapshots have a capture timestamp and explicit truncation
@@ -146,6 +165,5 @@ work or remaining budget.
 The issue checklist is authoritative. Work still includes complete per-kind
 output schemas and host/provider support, linked mission evidence and complete
 launch admission coverage, stronger revision/incarnation/authorization binding,
-all automation validate/preview/draft/readback operations, and
-an isolated production-bridge round trip with artifact verification. Current
+and an isolated production-bridge round trip with artifact verification. Current
 fixture coverage must not be presented as native-provider or live-host proof.

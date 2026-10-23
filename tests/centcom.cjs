@@ -95,7 +95,7 @@ Follow-up text.`;
   const createdSessions = [];
 
   const mockSettings = {
-    hosts: [{ id: 'host-1', name: 'Primary Host', enabled: true }],
+    hosts: [{ id: 'host-1', name: 'Primary Host', target: 'fixture.invalid', port: 22, enabled: true }],
     presets: [],
   };
 
@@ -170,6 +170,7 @@ Follow-up text.`;
 
   const mockService = {
     store: {
+      file: path.join(tmpDir, 'workspace.json'),
       data: { settings: mockSettings },
     },
     getHost: (id) => ({ id, name: 'Primary Host' }),
@@ -245,6 +246,7 @@ Follow-up text.`;
     saveSettings: async (updated) => {
       serviceActions.push({ type: 'saveSettings', settings: updated });
       mockService.store.data.settings = updated;
+      fs.writeFileSync(mockService.store.file, JSON.stringify({ settings: updated }));
     },
   };
 
@@ -440,7 +442,7 @@ Follow-up text.`;
       "title": "Node 22 Test Suite Preset",
       "rationale": "High test volume",
       "evidence": ["test:ci runs frequently"],
-      "payload": { "id": "node22-ci", "name": "Node 22 CI", "command": "npm run test:ci" }
+      "payload": { "id": "node22-ci", "name": "Node 22 CI", "provider": "codex", "command": "npm run test:ci" }
     }
   ]
 }

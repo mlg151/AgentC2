@@ -202,6 +202,7 @@ export interface CentcomDirective {
 export interface CentcomAutomationSuggestion {
   id: string;
   clientRequestId?: string | null;
+  preview?: { revision: string; before: unknown; after: unknown; enrollment?: unknown };
   result?: { artifact: unknown; revision: string; enrollment?: unknown };
   turnId: string;
   kind: 'specops_workflow' | 'oporder' | 'preset' | 'centcom_trigger';
