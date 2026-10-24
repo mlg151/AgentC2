@@ -80,8 +80,15 @@ function createEvidence({ service: s, isCommander, activeKeys }) {
       currentTask: runtime.currentTask || detail.currentTask, journal: runtime.journal || null,
       transcript: unit.outputTail ? { text: unit.outputTail.slice(-12000), truncated: unit.outputTail.length > 12000, source: 'inventory', sourceUpdatedAt: unit.updatedAt || null } : unknown('No transcript evidence in this inventory'),
     };
-    const result = bounded(inspection, commandId ? 4000 : undefined);
-    return result.truncated && commandId ? { ...result, inspectedKey: sessionKey, command: inspection.command } : result;
+    // Query outcomes have a 12 KB per-result delivery limit. Keep the live
+    // operational summary outside a bounded preview of large journal details.
+    const result = bounded(inspection, commandId ? 4000 : 10000);
+    if (!result.truncated) return result;
+    return { ...bounded(inspection, 2000), inspectedKey: sessionKey,
+      runtime: bounded(inspection.runtime, 500), control: bounded(inspection.control, 1000),
+      currentTask: { ...bounded(inspection.currentTask, 1000), ...(inspection.currentTask.turnId ? { turnId: inspection.currentTask.turnId } : {}) },
+      pendingRequests: bounded(inspection.pendingRequests, 2000),
+      ...(commandId ? { command: inspection.command } : {}) };
   }
   async function hosts({ hostId } = {}) {
     const inv = await inventory();

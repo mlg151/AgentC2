@@ -105,6 +105,8 @@ for line in sys.stdin:
             with (root / "centcom-prompts.jsonl").open("a") as log:
                 log.write(json.dumps(text) + "\n")
             finish(text=answer)
+        elif settings.get("specopsHold") and text.startswith("Mission "):
+            pass
         elif settings.get("centcom") and text == "write-reviewed-artifact":
             assert thread_cwd.resolve().is_relative_to(root.resolve())
             (thread_cwd / "evidence.txt").write_text("Reviewed bridge artifact\n")

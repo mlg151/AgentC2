@@ -107,7 +107,7 @@ async function operationRevisions() {
 }
 async function structuredRequests() {
   const f = make('native-requests'), unit = f.sessions[1];
-  let pending = { requestId: 'request', turnId: 'provider-turn', itemId: 'tool', state: 'pending', type: 'approval', data: { action: 'Read', detail: 'Reviewed file' } };
+  let pending = { requestId: 'request', turnId: 'provider-turn', itemId: 'tool', state: 'pending', type: 'approval.requested', data: { action: 'Read', detail: 'Reviewed file' } };
   const remote = f.chats.remote;
   f.chats.remote = async (...args) => {
     const result = await remote(...args);
@@ -129,10 +129,22 @@ async function structuredRequests() {
   assert.equal((await resolve(f, stale)).state, 'failed');
   const [mismatch] = await f.propose([action('chat.respond', { ...input, itemId: 'different-tool' })]);
   assert.equal((await resolve(f, mismatch)).state, 'failed');
-  pending = { requestId: 'question', turnId: 'question-turn', itemId: 'question-item', state: 'pending', type: 'question', data: { questions: [{ id: 'choice', question: 'Choose', options: ['A', 'B'], multiple: false }] } };
+  pending = { requestId: 'question', turnId: 'question-turn', itemId: 'question-item', state: 'pending', type: 'question.requested', data: { questions: [{ id: 'choice', question: 'Choose', options: ['A', 'B'], multiple: false }] } };
   const [answer] = await f.propose([action('chat.respond', { sessionKey: unit.key, requestId: pending.requestId, turnId: pending.turnId, itemId: pending.itemId, answers: [{ questionId: 'choice', answers: ['A'] }] })]);
   assert.equal((await resolve(f, answer)).state, 'completed');
   assert.deepEqual(f.submitted.filter((c) => c.operation === 'respond').at(-1).payload.answers, [{ questionId: 'choice', answers: ['A'] }]);
+  for (const type of ['approval', 'question', 'approval.requested', 'question.requested', 'unknown.requested']) {
+    pending.type = type;
+    const responseInput = { sessionKey: unit.key, requestId: pending.requestId, turnId: pending.turnId, itemId: pending.itemId };
+    const payload = type.startsWith('approval') ? { decision: 'deny' } : { answers: [{ questionId: 'choice', answers: ['B'] }] };
+    const [responseDraft] = await f.propose([action('chat.respond', { ...responseInput, ...payload })]);
+    assert.equal((await resolve(f, responseDraft)).state, type === 'unknown.requested' ? 'failed' : 'completed', type);
+    if (type !== 'unknown.requested') {
+      const wrongPayload = type.startsWith('approval') ? { answers: [{ questionId: 'choice', answers: ['B'] }] } : { decision: 'allow' };
+      const [wrong] = await f.propose([action('chat.respond', { ...responseInput, ...wrongPayload })]);
+      assert.equal((await resolve(f, wrong)).state, 'failed', `${type} must reject the wrong response type`);
+    }
+  }
 }
 async function persistenceAndUncertainty() {
   const f = make('persist'), unit = f.sessions[0];

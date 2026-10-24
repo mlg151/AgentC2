@@ -301,6 +301,16 @@ async function catalogCoverage() {
     automations: { validate: () => ({}), preview: () => ({}), read: () => ({}) },
   });
   const catalog = registry.catalog();
+  const adapterCoverage = require('./fixtures/centcom-adapter-coverage.json');
+  const nativeOperations = new Set(Object.entries(adapterCoverage).filter(([suite]) => suite !== 'unsupported').flatMap(([, operations]) => operations));
+  assert.deepEqual([...new Set([...nativeOperations, ...adapterCoverage.unsupported])].sort(), catalog.map((entry) => entry.operation).sort(), 'New advertised operations need actual-adapter coverage or an explicit unsupported contract');
+  for (const [suite, operations] of Object.entries(adapterCoverage)) {
+    if (suite === 'unsupported') {
+      for (const operation of operations) { assert.equal(registry.definition(operation).handler, null); assert.ok(registry.definition(operation).unavailable); }
+    } else {
+      assert.equal(require('./suites.json').suites.find((entry) => entry.id === suite)?.group, 'linux-chat', 'Native adapter coverage must run in required CI');
+    }
+  }
   for (const entry of catalog) {
     const definition = registry.definition(entry.operation);
     assert.ok(typeof definition.handler === 'function' || entry.unavailableReason, entry.operation);

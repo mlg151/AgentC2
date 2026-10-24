@@ -371,6 +371,21 @@
       "group": "linux-chat"
     },
     {
+      "id": "centcom-adapters.e2e",
+      "file": "tests/centcom-adapters.e2e.cjs",
+      "group": "linux-chat"
+    },
+    {
+      "id": "centcom-workflows.e2e",
+      "file": "tests/centcom-workflows.e2e.cjs",
+      "group": "linux-chat"
+    },
+    {
+      "id": "centcom-hooks.e2e",
+      "file": "tests/centcom-hooks.e2e.cjs",
+      "group": "linux-chat"
+    },
+    {
       "id": "cleanup.e2e",
       "file": "tests/cleanup.e2e.cjs",
       "group": "cleanup"

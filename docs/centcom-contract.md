@@ -344,10 +344,31 @@ budget stops when known spend reaches the configured ceiling. With incomplete
 coverage, actual spend may be higher; missing cost is never evidence of free
 work or remaining budget.
 
-## Remaining implementation and completion gates
+## Adapter verification and completion gates
 
-The issue checklist is authoritative. Work still includes actual-adapter
-verification for every advertised operation and the current-head full CI gate.
+The issue checklist and current-head Quality gate are authoritative.
+`tests/fixtures/centcom-adapter-coverage.json` maps all 69 advertised operations
+onto required production-adapter suites or an explicit unsupported contract.
+The core catalog regression rejects omissions, and each native suite checks
+that every declared operation actually completed its verification.
+
+Large unit inspections retain the current turn, runtime/control summary, and
+bounded pending requests outside the journal preview, within the commander
+outcome delivery limit. Native approval/question event names are recognized
+when binding a reviewed response.
+
+The three required Linux SSH suites exercise 66 implemented operations through
+the real CENTCOM engine, service, SSH transport, native worker, and isolated
+repositories. They cover structured questions and approvals (including stale
+responses), revision-bound OpOrder enrollment, Git diff/artifact mutations,
+configuration readback, SPECOPS retry/cancel, exercise verification/promotion,
+SitRep transfers, native attention/Flash Traffic hooks, and terminal control.
+Provider and GitHub protocols use local fixtures without credentials, external
+service calls, or paid model calls. The GitHub fixture records the actual CLI
+arguments; it does not establish live GitHub integration availability.
+`unit.resume`, `history.discover`, and `history.cleanup` remain explicitly
+unsupported with reasons and no executable handler.
+
 `tests/centcom-bridge.e2e.cjs` verifies the production Electron preload/IPC,
 service, SSH transport, remote worker, and provider protocol adapter in disposable
 homes and repositories. It creates a reviewed worktree, inspects its unit, denies

@@ -98,6 +98,15 @@ const health = () => [{ hostId: 'alpha', connected: true, sampledAt: Date.now(),
     assert.equal(largeCommand.command.facts.providerTurnCompletion, 'completed', 'Large transcripts cannot hide command correlation');
     assert.ok(Buffer.byteLength(JSON.stringify(largeCommand)) < 16000);
     validate(commandSchema, largeCommand, commandSchema.$defs);
+    f.responses.push(envelope({ queries: [{ ...query('unit.inspect', { sessionKey: first.key }), id: 'large-inspection' }] }));
+    await f.engine.submit('Inspect the current turn despite large retained output');
+    const delivered = f.engine.outcomes({ collection: 'query', clientRequestId: 'large-inspection' }).entries.find((item) => item.status === 'ok').result;
+    assert.equal(delivered.currentTask?.turnId, 'task-turn', 'Bounded commander outcomes must preserve current turn identity');
+    assert.equal(delivered.control.eligible, true);
+    assert.equal(delivered.runtime.state, 'idle');
+    assert.ok(Buffer.byteLength(JSON.stringify(delivered)) < 12000);
+    assert.match(f.submitted.at(-1).payload.text, /"currentTask":\{"status":"reported","text":"Verify the acceptance artifact","turnId":"task-turn"/);
+    validate(commandSchema, delivered, commandSchema.$defs);
     first.outputTail = '';
     journal.pop();
     assert.equal(f.chats.handles.size, beforeHandles);

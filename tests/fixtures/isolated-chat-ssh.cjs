@@ -41,7 +41,7 @@ async function isolatedChatSsh(directory) {
   } catch (error) { daemon.kill(); throw error; }
   script(path.join(bin, 'ssh'), `exec /usr/bin/ssh -i ${quote(key)} -o IdentitiesOnly=yes -o UserKnownHostsFile=${quote(knownHosts)} "$@"`);
   const host = { id: 'default', name: 'CENTCOM isolated SSH', target: os.userInfo().username + '@127.0.0.1', port, enabled: true };
-  return { home, host, env: { ...process.env, PATH: bin + ':' + process.env.PATH },
+  return { home, host, remoteBin, env: { ...process.env, PATH: bin + ':' + process.env.PATH },
     close() {
       // Query only this fixture's private socket to identify its worker.
       const socket = path.join(home, '.cache/agentc2/chat-v1/worker.sock');

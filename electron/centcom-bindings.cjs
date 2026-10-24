@@ -42,8 +42,10 @@ function createBindings({ service: s, state, resolve, request }) {
         const { requestId, turnId, itemId, decision, answers } = input;
         validateCommand({ protocolVersion: 1, commandId: '00000000-0000-4000-8000-000000000001', operation: 'respond', sessionId: instance.chatSessionId,
           payload: { requestId, turnId, itemId, ...(decision !== undefined ? { decision } : {}), ...(answers !== undefined ? { answers } : {}) } });
-        if (pending.type === 'approval' ? decision === undefined : answers === undefined) throw new Error('Response does not match the pending request type');
-        const capability = pending.type === 'approval' ? 'approvals' : 'questions';
+        const capability = ['approval', 'approval.requested'].includes(pending.type) ? 'approvals'
+          : ['question', 'question.requested'].includes(pending.type) ? 'questions' : null;
+        if (!capability) throw new Error('Unsupported pending request type');
+        if (capability === 'approvals' ? decision === undefined : answers === undefined) throw new Error('Response does not match the pending request type');
         if (inspected.capabilities?.status !== 'supported' || !inspected.capabilities[capability]) throw new Error('Provider does not support this structured response');
         requestEvidence = pending;
       }
