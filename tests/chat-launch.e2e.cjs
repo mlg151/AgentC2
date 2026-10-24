@@ -8,6 +8,7 @@ const os = require('node:os');
 const net = require('node:net');
 const crypto = require('node:crypto');
 const { createService } = require('../electron/service.cjs');
+const { stopFixtureProcess } = require('./helpers/stop-fixture-process.cjs');
 const root = path.resolve(__dirname, '..');
 const quote = (value) => "'" + String(value).replaceAll("'", "'\\''") + "'";
 async function poll(check, label) { for(let i=0;i<100;i++){const result=await check();if(result)return result;await new Promise((resolve)=>setTimeout(resolve,100));}throw new Error(label); }
@@ -230,10 +231,17 @@ async function poll(check, label) { for(let i=0;i<100;i++){const result=await ch
     if(phoneProxy){await phoneProxy.page.screenshot({path:path.join(os.tmpdir(),'agentc2-chat-phone-failure.png'),fullPage:true}).catch(()=>{});console.error('Phone fixture state:',await phoneProxy.page.locator('.phone-main').innerText().catch(()=>''));}
     throw error;
   }finally{
-    await phoneProxy?.close().catch(()=>{});await browser?.close().catch(()=>{});await app?.close().catch(()=>{});service?.chats.closeAll();service?.terminals.closeAll();
-    if(workerPid){try{process.kill(workerPid,'SIGTERM');}catch{}}
+    await phoneProxy?.close().catch(()=>{});await browser?.close().catch(()=>{});await app?.close().catch(()=>{});
+    service?.centcom.dispose();service?.specops.dispose();
+    const records=service?[...service.chats.sessions.values()]:[];
+    service?.chats.closeAll();service?.terminals.closeAll();
+    await Promise.allSettled(records.flatMap(record=>[record.flight,record.queue]));
+    // Finish inventory/observer requests before stopping the worker they use.
+    if(service&&workerPid){await service.inventory();await service.flashQueue();}
+    if(workerPid)await stopFixtureProcess(workerPid);
     try{execFileSync('/usr/bin/tmux',['-S',path.join(directory,'tmux.sock'),'kill-server'],{stdio:'ignore'});}catch{}
     service?.tunnels.closeAll();fixtureServer?.closeAllConnections();if(fixtureServer)await new Promise((resolve)=>fixtureServer.close(resolve));
-    daemon?.kill();process.env.PATH=originalPath;if(originalHome===undefined)delete process.env.HOME;else process.env.HOME=originalHome;if(originalFixture===undefined)delete process.env.AGENTC2_CODEX_FIXTURE_DIR;else process.env.AGENTC2_CODEX_FIXTURE_DIR=originalFixture;fs.rmSync(directory,{recursive:true,force:true});
+    if(daemon?.pid)await stopFixtureProcess(daemon.pid);
+    process.env.PATH=originalPath;if(originalHome===undefined)delete process.env.HOME;else process.env.HOME=originalHome;if(originalFixture===undefined)delete process.env.AGENTC2_CODEX_FIXTURE_DIR;else process.env.AGENTC2_CODEX_FIXTURE_DIR=originalFixture;fs.rmSync(directory,{recursive:true,force:true});
   }
 })().catch((error)=>{console.error(error);process.exitCode=1;});

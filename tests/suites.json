@@ -221,6 +221,11 @@
       "group": "windows"
     },
     {
+      "id": "fixture-cleanup",
+      "file": "tests/fixture-cleanup.cjs",
+      "group": "linux-python"
+    },
+    {
       "id": "remote-helper-python",
       "file": "tests/remote-helper.py",
       "group": "linux-python"

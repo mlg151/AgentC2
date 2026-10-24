@@ -78,7 +78,53 @@ const { createSpecops, validateConfig, verdict, profiles, templates, uuidForMana
     const results = await Promise.allSettled([service.control(r.id, 'retry'), service.control(r.id, 'retry')]);
     assert.equal(results.filter(x => x.status === 'fulfilled').length, 1);
     assert.equal(launched.length, beforeRetry + 1, 'explicit arbitration launches only one retry');
-    assert.equal((await service.control(r.id, 'cancel')).state, 'cancelled');
+    // Hold an ordinary background read open while cancellation arrives, as on
+    // the slower SSH runner. Cancellation must win before the next send.
+    const read = dependencies.chats.read;
+    let releaseRead;
+    dependencies.chats.read = async (...args) => {
+      await new Promise(resolve => { releaseRead = resolve; });
+      return read(...args);
+    };
+    const polling = service.tick(r.id);
+    const cancelling = service.control(r.id, 'cancel');
+    releaseRead();
+    await polling;
+    assert.equal((await cancelling).state, 'cancelled');
+    dependencies.chats.read = read;
+    assert.equal(sessions.get(service.list()[0].visits.at(-1).sessionId).command, null, 'cancellation prevents a pending poll from sending');
+    // A completed receipt can route the next stage. Hold that request too so
+    // cancellation cannot be overwritten by a stale completion or dispatch.
+    r = await service.launch({ hostId: 'host', workflowId: workflow.id, repo: 'owner/repo', repository: '/fixture/repo', issue: 52 });
+    await service.tick(r.id);
+    const session = sessions.get(r.visits[0].sessionId);
+    session.events.push(
+      { sequence: 1, turnId: session.command.commandId, type: 'message.completed', data: { role: 'assistant', text: 'Completed plan' } },
+      { sequence: 2, turnId: session.command.commandId, type: 'turn.completed', data: { outcome: 'completed' } },
+    );
+    const request = dependencies.chats.request;
+    let receiptStarted, releaseReceipt;
+    const started = new Promise(resolve => { receiptStarted = resolve; });
+    dependencies.chats.request = async (...args) => {
+      if (args[1] === 'receipt') {
+        await new Promise(resolve => { releaseReceipt = resolve; receiptStarted(); });
+      }
+      return request(...args);
+    };
+    const beforeCancel = launched.length;
+    const completing = service.tick(r.id);
+    await started;
+    const cancelCompletion = service.control(r.id, 'cancel');
+    await assert.rejects(service.control(r.id, 'cancel'), /current dispatch/, 'competing controls remain excluded');
+    await service.tick(r.id);
+    releaseReceipt();
+    await completing;
+    assert.equal((await cancelCompletion).state, 'cancelled');
+    dependencies.chats.request = request;
+    await service.tick(r.id);
+    assert.equal(launched.length, beforeCancel, 'cancellation prevents a pending receipt from routing another stage');
+    assert.equal(service.list()[0].visits.length, 1);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(directory, 'runs.json'), 'utf8'))[0].state, 'cancelled');
     workflow.stages[0].role = 'implementer'; workflow.stages[0].rank = 'officer'; workflow.stages[0].profile = 'sonnet'; workflow.completion_action = 'ready_pr';
     service.configure(YAML.stringify({ profiles, workflows: [workflow] }));
     r = await service.launch({ hostId: 'host', workflowId: workflow.id, repo: 'owner/repo', repository: '/fixture/repo', issue: 52 });
