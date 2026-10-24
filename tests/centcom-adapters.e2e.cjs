@@ -26,6 +26,18 @@ let h, server;
     const launch = await action('unit.create', { hostId: 'default', provider: 'codex', transport: 'chat', title: 'Actual adapter worker', worktree: { operationId, repository, baseRef: 'HEAD', slug: 'adapters' } });
     const worker = launch.result, sessionKey = `default/tmux:${worker.name}`, target = { sessionKey }, tree = worker.worktree.path;
     await poll(async () => (await service.inventory()).sessions.find((item) => item.key === sessionKey && item.chatState === 'idle'), 'Worker readiness');
+    // URL detection follows attached view events; keep a read-only observer
+    // alive while the commander acquires and releases its action handle.
+    const observer = { id: 'adapter-observer', name: 'Adapter observer', closed: false };
+    const observerHandle = await service.chats.open(observer, worker.chatSessionId, 'default');
+    await service.chats.ready(observer, observerHandle);
+    await action('unit.send', { ...target, text: 'dev-server' });
+    await poll(() => service.devUrls(sessionKey).some((item) => item.url === devUrl), 'Attached view did not detect the development URL');
+    const urls = await query('devurl.list', target); assert.ok(urls.some((item) => item.url === devUrl));
+    const opened = await action('devurl.open', { ...target, url: devUrl });
+    assert.equal(await (await fetch(opened.result)).text(), 'Reviewed development fixture');
+    service.chats.close(observer, observerHandle);
+
     const manifest = await query('capabilities.read', { operation: 'unit.send', schema: 'input' });
     assert.equal(manifest.version, 1);
     assert.equal((await query('capabilities.support', { operation: 'unit.send', sessionKey, provider: 'codex', transport: 'chat', hostId: 'default' })).entries[0].status, 'supported');
@@ -66,16 +78,7 @@ let h, server;
     await action('unit.steer', { ...target, text: 'Reviewed steering', expectedTurnId: inspected.currentTask.turnId });
     await action('unit.interrupt', target);
     assert.equal((await query('unit.inspect', target)).runtime.state, 'idle');
-    // URL detection follows attached view events; keep a read-only observer
-    // alive while the commander acquires and releases its action handle.
-    const observer = { id: 'adapter-observer', name: 'Adapter observer', closed: false };
-    const observerHandle = await service.chats.open(observer, worker.chatSessionId, 'default');
-    await action('unit.send', { ...target, text: 'dev-server' });
-    await poll(() => service.devUrls(sessionKey).some((item) => item.url === devUrl), 'Attached view did not detect the development URL');
-    const urls = await query('devurl.list', target); assert.ok(urls.some((item) => item.url === devUrl));
-    const opened = await action('devurl.open', { ...target, url: devUrl });
-    assert.equal(await (await fetch(opened.result)).text(), 'Reviewed development fixture');
-    service.chats.close(observer, observerHandle);
+
 
     const order = { version: 1, id: 'adapter-order', hostId: 'default', repository, instructions: 'Reviewed adapter instructions', mcp: [] };
     let preview = await query('oporder.preview', { order }); assert.equal(preview.ready, true);
