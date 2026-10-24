@@ -163,6 +163,7 @@ Follow-up text.`;
     read: async (hostId, sessionId, after, limit) => {
       const list = chatEvents.get(sessionId) || [];
       return {
+        session: { id: sessionId, state: 'idle' },
         events: list.filter((e) => e.sequence > after),
         truncated: false,
       };

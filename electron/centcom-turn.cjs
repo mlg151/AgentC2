@@ -166,6 +166,16 @@ function createTurnLifecycle({ chats, client, state, persist, outcome, now = () 
       const held = await wait(acquire(turn), deadline, signal);
       turn.cursor = held.record?.latestCursor || 0;
       persist();
+      // Creation acknowledges acceptance before the provider is ready. Older
+      // commander sessions may also still be processing bootstrap instructions.
+      // Neither case is a submitted assessment or grounds for cancelling it.
+      while (true) {
+        const page = await wait(chats.read(turn.hostId, turn.sessionId, 0, 1), deadline, signal);
+        const status = page.session?.state;
+        if (status === 'idle') break;
+        if (!['starting', 'running', 'waiting'].includes(status)) throw new Error(`CENTCOM provider session is ${status || 'unavailable'}; restart the session before sending`);
+        await wait(new Promise((r) => setTimeout(r, 100)), deadline, signal);
+      }
       if (signal.aborted) throw new Error('CENTCOM turn interrupted by Watch Officer');
       turn.dispatchStarted = true; persist();
       const receipt = await wait(chats.submit(client, held.handle, { protocolVersion: 1, commandId, operation: 'send', sessionId: turn.sessionId, payload: { text } }), deadline, signal);
@@ -186,7 +196,35 @@ function createTurnLifecycle({ chats, client, state, persist, outcome, now = () 
       }
     }
   }
-  return { run, cancel, reconcile,
+  async function stop() {
+    const turn = state.providerTurn;
+    if (!turn) { release(); return true; }
+    const deadline = now() + (state.config.cancellationDeadlineSeconds || 10) * 1000;
+    try {
+      await wait(acquire(turn), deadline);
+      // Explicit reset retires this session permanently. A confirmed worker
+      // stop fences even a send rejected before acceptance (with no receipt),
+      // and late cancellations cannot affect the replacement session.
+      turn.stopCommand ||= { protocolVersion: 1, commandId: crypto.randomUUID(), operation: 'stop', sessionId: turn.sessionId, payload: {} };
+      turn.status = 'cancelling'; persist();
+      let receipt = await wait(chats.request(turn.hostId, 'command', { command: turn.stopCommand }), deadline);
+      while (true) {
+        if (receipt?.commandId !== turn.stopCommand.commandId || receipt.sessionId !== turn.sessionId) throw new Error('CENTCOM stop receipt identity mismatch');
+        turn.stopReceipt = receipt; persist();
+        if (receipt.state === 'completed') break;
+        if (receipt.state === 'failed') throw new Error(receipt.error || 'CENTCOM provider stop failed');
+        await wait(new Promise((r) => setTimeout(r, 100)), deadline);
+        receipt = await wait(chats.request(turn.hostId, 'receipt', { commandId: turn.stopCommand.commandId }), deadline);
+      }
+      turn.terminal = 'provider_stopped';
+      finish(turn);
+      return true;
+    } catch (error) { turn.error = error.message; }
+    turn.status = 'uncertain';
+    report(turn, 'uncertain');
+    return false;
+  }
+  return { run, cancel, reconcile, stop,
     dispose() {
       if (state.providerTurn) { state.providerTurn.status = 'uncertain'; state.providerTurn.cancelRequested = true; persist(); void cancel().catch(() => {}); }
       disposed = true; release();
