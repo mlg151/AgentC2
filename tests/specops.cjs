@@ -43,6 +43,8 @@ const { createSpecops, validateConfig, verdict, profiles, templates, uuidForMana
     const workflow = structuredClone(templates[0]); workflow.stages = [workflow.stages[0], workflow.stages[1]]; workflow.stages[1].transitions.on_approve = 'COMPLETE'; workflow.completion_action = null; workflow.max_loop_retries = 1; workflow.stages[0].prompt_template += ' Resolve {{repo}} #{{issue_number}}';
     service.configure(YAML.stringify({ profiles, workflows: [workflow] }));
     let r = await service.launch({ hostId: 'host', workflowId: workflow.id, repo: 'owner/repo', repository: '/fixture/repo', issue: '#52' });
+    assert.deepEqual(service.list()[0].sourceLinks, [{ key: 'issue-52', kind: 'issue', externalId: '52', repository: 'owner/repo' }]);
+    assert.equal(service.list()[0].source, undefined, 'Expose issue identities without publishing untrusted issue bodies');
     assert.equal(launched[0].roeProfile, 'gated');
     assert.equal(launched[0].model, 'astra');
     assert.equal(launched[0].worktree.operationId, r.id);

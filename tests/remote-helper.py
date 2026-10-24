@@ -38,6 +38,8 @@ class CentcomWorkspace(unittest.TestCase):
         self.assertEqual(target.read_text(), content)
         scope["centcom_sync"]({"files": {"SITUATION.json": "{}"}})
         self.assertEqual(target.read_text(), "{}")
+        scope["centcom_sync"]({"files": {"CAPABILITIES.json": '{"version":1}'}})
+        self.assertEqual((self.root / "CAPABILITIES.json").read_text(), '{"version":1}')
         self.assertEqual(list(self.root.glob("*.tmp")), [])
 
     def test_file_allowlist_and_symlink_protection(self):
@@ -50,6 +52,10 @@ class CentcomWorkspace(unittest.TestCase):
         (self.root / "SITUATION.json").symlink_to(outside)
         with self.assertRaisesRegex(ValueError, "symlink"):
             scope["centcom_sync"]({"files": {"SITUATION.json": "{}"}})
+        self.assertEqual(outside.read_text(), "keep")
+        (self.root / "CAPABILITIES.json").symlink_to(outside)
+        with self.assertRaisesRegex(ValueError, "symlink"):
+            scope["centcom_sync"]({"files": {"CAPABILITIES.json": "{}"}})
         self.assertEqual(outside.read_text(), "keep")
 
 
@@ -119,6 +125,54 @@ class HostHealth(unittest.TestCase):
             self.assertEqual(reported["gpu"]["status"], "reported")
         finally:
             scope["run"] = original_run
+
+    def test_launch_paths_resolve_aliases_without_creating_directories(self):
+        with tempfile.TemporaryDirectory(prefix="agentc2-launch-paths-") as directory:
+            root = Path(directory)
+            actual = root / "actual"
+            actual.mkdir()
+            alias = root / "alias"
+            alias.symlink_to(actual, target_is_directory=True)
+            result = scope["launch_paths"]({"cwd": str(alias), "paths": [str(actual)]})
+            self.assertEqual(result["cwd"], result["paths"][0])
+            missing = alias / "not-created"
+            result = scope["launch_paths"]({"cwd": str(missing), "paths": []})
+            self.assertEqual(result["cwd"], str(actual / "not-created"))
+            self.assertFalse(missing.exists())
+            with self.assertRaises(ValueError):
+                scope["launch_paths"]({"cwd": str(actual), "paths": ["x"] * 201})
+
+    def test_cgroup_ancestor_limits_and_pressure(self):
+        with tempfile.TemporaryDirectory(prefix="agentc2-cgroup-") as directory:
+            root = Path(directory)
+            proc, groups = root / "proc", root / "cgroup"
+            (proc / "self").mkdir(parents=True)
+            (proc / "pressure").mkdir()
+            group = groups / "parent" / "worker"
+            group.mkdir(parents=True)
+            (groups / "cgroup.controllers").write_text("cpu memory")
+            (proc / "self" / "cgroup").write_text("0::/parent/worker\n")
+            (proc / "pressure" / "memory").write_text("some avg10=2.50 avg60=1.00 avg300=0.50 total=123\n")
+            for target, maximum, current, cpu in [(groups / "parent", "1000", "900", "50000 100000"), (group, "800", "200", "100000 100000")]:
+                (target / "memory.max").write_text(maximum)
+                (target / "memory.current").write_text(current)
+                (target / "cpu.max").write_text(cpu)
+            result = scope["resource_constraints"](proc, groups)
+            self.assertEqual(result["status"], "reported")
+            self.assertEqual(result["memoryLimitBytes"], 800)
+            self.assertEqual(result["memoryHeadroomBytes"], 100)
+            self.assertEqual(result["cpuLimitCores"], 0.5)
+            self.assertEqual(result["memoryLimitStatus"], "limited")
+            self.assertEqual(result["pressure"]["memory"]["some"]["avg10"], 2.5)
+            (group / "cpu.max").unlink()
+            partial = scope["resource_constraints"](proc, groups)
+            self.assertEqual(partial["cpuLimitStatus"], "unknown")
+            self.assertEqual(partial["cpuLimitCores"], 0.5)
+            (proc / "self" / "cgroup").write_text("0::/../../outside\n")
+            self.assertEqual(scope["resource_constraints"](proc, groups)["status"], "unknown")
+            (groups / "cgroup.controllers").unlink()
+            self.assertEqual(scope["resource_constraints"](proc, groups)["status"], "unsupported")
+
 
 
 class AntigravityInventory(unittest.TestCase):

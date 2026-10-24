@@ -80,8 +80,8 @@ export function CentcomDialog({ settings, onClose }: { settings: Settings; onClo
               {state?.config.authority === 'autonomous' ? <ShieldAlert size={13} /> : <Shield size={13} />}
               {state?.config.authority === 'autonomous' ? 'AUTONOMOUS C2' : 'GATED C2'}
             </span>
-            <span className="centcom-badge spend">
-              SPEND: ${state?.costUsd?.toFixed(2) || '0.00'}
+            <span className="centcom-badge spend" title={state?.costKnown === false ? 'Some provider costs are unknown. The budget stops at the known spend ceiling; actual spend may be higher.' : 'Reported provider spend'}>
+              {state?.costKnown === false ? 'KNOWN SPEND: ' : 'SPEND: '}${state?.costUsd?.toFixed(2) || '0.00'}{state?.costKnown === false ? ' · INCOMPLETE' : ''}
             </span>
           </div>
         </header>
@@ -102,6 +102,9 @@ export function CentcomDialog({ settings, onClose }: { settings: Settings; onClo
         </nav>
 
         {error ? <p role="alert" className="form-error">{error}</p> : null}
+        {state?.providerTurn && ['cancelling', 'uncertain'].includes(state.providerTurn.status) ? (
+          <p role="status" className="form-error">Provider shutdown is unconfirmed. Control remains reserved. Retry your request to reconcile before starting another turn.</p>
+        ) : null}
 
         {tab === 'command' ? (
           <section className="centcom-tab-content">
@@ -284,6 +287,7 @@ export function CentcomDialog({ settings, onClose }: { settings: Settings; onClo
                     <summary>Directive Parameters & Preconditions</summary>
                     <pre>{JSON.stringify({ params: d.params, preconditions: d.preconditions }, null, 2)}</pre>
                   </details>
+                  {d.binding ? <details><summary>Reviewed targets and authorization</summary><pre>{JSON.stringify(d.binding, null, 2)}</pre></details> : null}
                   {d.error ? <p role="alert" className="form-error">{d.error}</p> : null}
                   <small>
                     Trigger: {d.trigger} · Created: {new Date(d.createdAt).toLocaleTimeString()}
@@ -371,7 +375,10 @@ export function CentcomDialog({ settings, onClose }: { settings: Settings; onClo
                     <summary>Configuration Payload</summary>
                     <pre>{JSON.stringify(a.payload, null, 2)}</pre>
                   </details>
+                  {a.preview ? <details><summary>Reviewed change and revision</summary><pre>{JSON.stringify(a.preview, null, 2)}</pre></details> : null}
                   {a.error ? <p role="alert" className="form-error">{a.error}</p> : null}
+                  {a.state === 'uncertain' ? <p className="field-note">The change may have been saved. Inspect the saved configuration before proposing it again.</p> : null}
+                  {a.result ? <details><summary>Saved artifact and revision</summary><pre>{JSON.stringify(a.result, null, 2)}</pre></details> : null}
                   <small>Created: {new Date(a.createdAt).toLocaleString()}</small>
                 </article>
               ))}
@@ -516,10 +523,31 @@ export function CentcomDialog({ settings, onClose }: { settings: Settings; onClo
                 />
                 Auto-wake on non-zero unit process exits
               </label>
+              <label className="checkbox-label">
+                <input type="checkbox" checked={configDraft.triggers.onUnitCompleted !== false} onChange={(e) => setConfigDraft({ ...configDraft, triggers: { ...configDraft.triggers, onUnitCompleted: e.target.checked } })} />
+                Auto-wake on unit completion
+              </label>
+              <label className="checkbox-label">
+                <input type="checkbox" checked={configDraft.triggers.onDependencyChange !== false} onChange={(e) => setConfigDraft({ ...configDraft, triggers: { ...configDraft.triggers, onDependencyChange: e.target.checked } })} />
+                Auto-wake on mission stage and dependency changes
+              </label>
             </div>
 
             <h4>Circuit Breakers & Safeguards</h4>
             <div className="form-grid">
+              <label>
+                Fallback status interval (seconds)
+                <input type="number" min="0" max="86400" step="60" value={configDraft.triggers.fallbackSeconds ?? 600} onChange={(e) => setConfigDraft({ ...configDraft, triggers: { ...configDraft.triggers, fallbackSeconds: Number(e.target.value) } })} />
+                <small>0 disables polling; otherwise use at least 600 seconds. Events wake CENTCOM first.</small>
+              </label>
+              <label>
+                Provider turn deadline (seconds)
+                <input type="number" min="1" max="86400" value={configDraft.turnDeadlineSeconds ?? 600} onChange={(e) => setConfigDraft({ ...configDraft, turnDeadlineSeconds: Number(e.target.value) } )} />
+              </label>
+              <label>
+                Cancellation reconciliation deadline (seconds)
+                <input type="number" min="1" max="120" value={configDraft.cancellationDeadlineSeconds ?? 10} onChange={(e) => setConfigDraft({ ...configDraft, cancellationDeadlineSeconds: Number(e.target.value) })} />
+              </label>
               <label>
                 Trigger Cooldown (seconds)
                 <input

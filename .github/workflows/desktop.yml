@@ -124,7 +124,7 @@ jobs:
   linux-ssh:
     name: Isolated Linux SSH regressions
     runs-on: ubuntu-22.04
-    timeout-minutes: 25
+    timeout-minutes: 40
     env:
       AGENTC2_HOST: agentc2-ci
     steps:

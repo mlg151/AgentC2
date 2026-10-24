@@ -334,6 +334,8 @@ def tmux_sessions():
             "cwd": tmux_option(name, "@hq_cwd") if managed else cwd,
             "updatedAt": iso_from_epoch(fields[7] if len(fields) > 7 else created),
             "startedAt": iso_from_epoch(created),
+            "processId": fields[8] if len(fields) > 8 and fields[8].isdigit() else None,
+            "processRole": "terminal_wrapper",
             "state": "exited" if dead else "live", "kind": "managed" if managed else "external-tmux",
             "managed": managed, "attached": attached != "0", "canAttach": True,
             "canInterrupt": managed and not dead, "canStop": managed,
@@ -460,6 +462,68 @@ def inventory(payload=None):
     return {"host": socket.gethostname(), "user": getpass.getuser(), "sessions": sessions}
 
 
+def resource_constraints(proc_root="/proc", cgroup_root="/sys/fs/cgroup"):
+    """Read pressure and effective cgroup-v2 ancestor limits without mutation."""
+    proc, root = Path(proc_root), Path(cgroup_root)
+    def pressure(directory):
+        result = {}
+        for resource in ("cpu", "memory", "io"):
+            source = directory / (resource + ".pressure") if directory != proc / "pressure" else directory / resource
+            try:
+                result[resource] = {parts[0]: {key: float(value) for key, value in (part.split("=", 1) for part in parts[1:])}
+                                    for parts in (line.split() for line in source.read_text().splitlines()) if parts}
+            except (OSError, ValueError, IndexError):
+                result[resource] = None
+        return result
+    result = {"status": "unknown", "version": None, "reason": None, "memoryLimitBytes": None,
+              "memoryHeadroomBytes": None, "memoryLimitStatus": "unknown", "cpuLimitCores": None,
+              "cpuLimitStatus": "unknown", "pressure": pressure(proc / "pressure"), "groupPressure": None}
+    if not (root / "cgroup.controllers").exists():
+        result.update(status="unsupported", reason="cgroup v2 is unavailable; host pressure may still be reported")
+        return result
+    try:
+        membership = next(line[3:] for line in (proc / "self" / "cgroup").read_text().splitlines() if line.startswith("0::"))
+        if not membership.startswith("/") or ".." in Path(membership).parts:
+            raise ValueError("Unresolvable cgroup membership")
+        group = root / membership.lstrip("/")
+        if not group.is_dir():
+            raise ValueError("Cgroup membership is outside the mounted hierarchy")
+        result.update(status="reported", version=2, groupPressure=pressure(group))
+        memory_limits, headrooms, cpu_limits = [], [], []
+        memory_known, cpu_known = True, True
+        for ancestor in [group, *group.parents]:
+            if ancestor != root and root not in ancestor.parents:
+                break
+            try:
+                maximum = (ancestor / "memory.max").read_text().strip()
+                if maximum != "max":
+                    limit = int(maximum)
+                    memory_limits.append(limit)
+                    headrooms.append(max(0, limit - int((ancestor / "memory.current").read_text().strip())))
+            except (OSError, ValueError):
+                if ancestor != root or (ancestor / "memory.max").exists():
+                    memory_known = False
+            try:
+                quota, period = (ancestor / "cpu.max").read_text().split()
+                if quota != "max":
+                    cpu_limits.append(int(quota) / int(period))
+            except (OSError, ValueError, ZeroDivisionError):
+                if ancestor != root or (ancestor / "cpu.max").exists():
+                    cpu_known = False
+            if ancestor == root:
+                break
+        result.update(memoryLimitBytes=min(memory_limits) if memory_limits else None,
+                      memoryHeadroomBytes=min(headrooms) if headrooms else None,
+                      memoryLimitStatus="limited" if memory_known and memory_limits else "unlimited" if memory_known else "unknown",
+                      cpuLimitCores=min(cpu_limits) if cpu_limits else None,
+                      cpuLimitStatus="limited" if cpu_known and cpu_limits else "unlimited" if cpu_known else "unknown")
+        if not memory_known or not cpu_known:
+            result["reason"] = "Some ancestor limits are unavailable; reported limits are not proof of full headroom"
+    except (OSError, ValueError, StopIteration) as error:
+        result["reason"] = str(error) or "Cgroup membership is unavailable"
+    return result
+
+
 def health(payload=None):
     # Return counters; the desktop computes CPU utilization between samples.
     # Guest ticks are already included in user/nice, so exclude them from total.
@@ -471,7 +535,7 @@ def health(payload=None):
         page_size = int(re.search(r"page size of (\d+) bytes", pages).group(1))
         free_pages = sum(int(value) for value in re.findall(r"Pages (?:free|inactive|speculative):\s+(\d+)", pages))
         usage = shutil.disk_usage(HOME)
-        return {"cpuTotal": 0, "cpuIdle": 0, "memoryTotal": total, "memoryUsed": max(0, total - free_pages * page_size), "disks": [{"path": str(HOME), "total": usage.total, "used": usage.used, "free": usage.free}], "sampledAt": time.time() * 1000, "gpu": {"status": "unsupported", "sampledAt": None, "devices": []}}
+        return {"cpuTotal": 0, "cpuIdle": 0, "memoryTotal": total, "memoryUsed": max(0, total - free_pages * page_size), "disks": [{"path": str(HOME), "total": usage.total, "used": usage.used, "free": usage.free}], "sampledAt": time.time() * 1000, "resources": {"status": "unsupported", "reason": "cgroup and Linux pressure are unsupported on macOS"}, "gpu": {"status": "unsupported", "sampledAt": None, "devices": []}}
     cpu = [int(value) for value in Path("/proc/stat").read_text().splitlines()[0].split()[1:9]]
     memory = {}
     for line in Path("/proc/meminfo").read_text().splitlines():
@@ -486,7 +550,7 @@ def health(payload=None):
     for directory in paths:
         usage = shutil.disk_usage(directory)
         disks.append({"path": str(directory), "total": usage.total, "used": usage.used, "free": usage.free})
-    result = {"cpuTotal": sum(cpu), "cpuIdle": cpu[3] + cpu[4], "memoryTotal": total, "memoryUsed": max(0, total - available), "disks": disks, "sampledAt": time.time() * 1000}
+    result = {"cpuTotal": sum(cpu), "cpuIdle": cpu[3] + cpu[4], "memoryTotal": total, "memoryUsed": max(0, total - available), "disks": disks, "sampledAt": time.time() * 1000, "resources": resource_constraints()}
     if payload and payload.get("includeGpu"):
         if not shutil.which("nvidia-smi"):
             result["gpu"] = {"status": "unsupported", "sampledAt": None, "devices": []}
@@ -505,6 +569,16 @@ def health(payload=None):
                         pass
             result["gpu"] = {"status": "reported" if devices else "unknown", "sampledAt": time.time() * 1000 if devices else None, "devices": devices}
     return result
+
+
+def launch_paths(payload):
+    """Canonical path evidence only; never create directories or launch a process."""
+    cwd, paths = payload.get("cwd", ""), payload.get("paths", [])
+    if not isinstance(cwd, str) or len(cwd) > 4096 or "\0" in cwd or not isinstance(paths, list) or len(paths) > 200:
+        raise ValueError("Invalid launch path inspection")
+    if any(not isinstance(item, str) or not item or len(item) > 4096 or "\0" in item for item in paths):
+        raise ValueError("Invalid assignment path")
+    return {"cwd": str(Path(cwd or HOME).expanduser().resolve()), "paths": [str(Path(item).expanduser().resolve()) for item in paths]}
 
 
 def agent_command(provider, conversation_id=None, agent_id=None, preset=None, instructions="", roe_profile=None):
@@ -711,7 +785,7 @@ def centcom_sync(payload):
         raise ValueError("Invalid CENTCOM workspace files")
     written = []
     for name, content in files.items():
-        if name not in ("AGENTS.md", "SITUATION.json") or not isinstance(content, str) or len(content.encode("utf-8")) > 1_000_000:
+        if name not in ("AGENTS.md", "SITUATION.json", "CAPABILITIES.json") or not isinstance(content, str) or len(content.encode("utf-8")) > 1_000_000:
             raise ValueError("Unsupported or oversized CENTCOM file")
         target = root / name
         if target.is_symlink():
@@ -761,6 +835,8 @@ def main():
         result = chat_remote(payload)
     elif action == "health":
         result = health(payload)
+    elif action == "launch_paths":
+        result = launch_paths(payload)
     elif action == "create":
         with cleanup_lock():
             result = create(payload)
@@ -798,6 +874,8 @@ def main():
         result = flash_decide(payload)
     elif action == "diff_files":
         result = diff_files(payload)
+    elif action == "artifact_read":
+        result = artifact_read(payload)
     elif action == "diff_detail":
         result = diff_detail(payload)
     elif action == "diff_hunk":

@@ -18,7 +18,11 @@ const { createExercises } = require('./exercises.cjs');
 const { LoopBreaker } = require('./loop-breaker.cjs');
 const { createSpecops } = require('./specops.cjs');
 const { createCentcom } = require('./centcom.cjs');
+const { createOpOrders } = require('./oporders.cjs');
+const { assertDispatchScope } = require('./centcom-dispatch.cjs');
+const { fingerprint } = require('./centcom-contract.cjs');
 const { Chats } = require('./chat.cjs');
+const { commanderFacade, routeCommanderCommands } = require('./commander.cjs');
 
 function createService({ directory, home, specopsDirectory, centcomDirectory }) {
   const events = new EventEmitter();
@@ -75,7 +79,7 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
         cpuSamples.set(host.id, sample);
         if (sample.gpu) gpuProbedAt.set(host.id, receivedAt);
         const activeChannels = [...terminals.sessions.values()].filter((record) => record.hostId === host.id && !record.disposed && record.connection === 'connected').reduce((count, record) => count + record.handles.size, 0);
-        const reading = { hostId: host.id, name: host.name, connected: true, cpuPercent, memoryTotal: sample.memoryTotal, memoryUsed: sample.memoryUsed, disks: sample.disks, sampledAt: receivedAt, sshRoundTripMs: roundTripMs, activeChannels, gpu: sample.gpu || healthCache.get(host.id)?.gpu || { status: 'unknown', sampledAt: null, devices: [] } };
+        const reading = { hostId: host.id, name: host.name, connected: true, cpuPercent, memoryTotal: sample.memoryTotal, memoryUsed: sample.memoryUsed, resources: sample.resources || { status: 'unknown', reason: 'Helper did not report resource constraints' }, disks: sample.disks, sampledAt: receivedAt, sshRoundTripMs: roundTripMs, activeChannels, gpu: sample.gpu || healthCache.get(host.id)?.gpu || { status: 'unknown', sampledAt: null, devices: [] } };
         healthCache.set(host.id, reading);
         return reading;
       });
@@ -126,7 +130,7 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
         if (mission) session.specops = { id: mission.id, state: mission.state, breadcrumb: mission.workflow.stages.map((s) => s.id === mission.stage ? `[*${s.id}*]` : `[${s.id}]`).join(' → ') };
       }
       const missionSummaries = missions.map(({ id, hostId, repo, state, stage, error, workflow, costUsd, costKnown, canResume, canRetry }) => ({ id, hostId, repo, state, stage, error, workflow, costUsd, costKnown, canResume, canRetry, visits: [] }));
-      const snapshot = { missions: missionSummaries, hosts: statuses, sessions, attention: store.data.attention, faults: loopBreaker.faults() };
+      const snapshot = { capturedAt: new Date().toISOString(), missions: missionSummaries, hosts: statuses, sessions, attention: store.data.attention, faults: loopBreaker.faults() };
       snapshot.conflicts = [...opOrderConflicts.values()];
       events.emit('inventory:updated', snapshot);
       return snapshot;
@@ -157,6 +161,7 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
     if (payload.action === 'inventory' && !payload.sourceDigest) payload = { ...payload, sourceDigest: chatDigest, chatFiles, allowUpgrade: true };
     const host = getHost(hostId);
     if (host.kind === 'local') payload = await localPayload(payload);
+    payload = assertDispatchScope(getHost(hostId), payload, store.data.settings);
     return new Promise((resolve, reject) => {
       const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
       const embedded = encoded.length > 60000;
@@ -211,6 +216,7 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
     resolveHost: (hostId) => getHost(hostId).id,
     emit: (clientId, event, value) => events.emit('client', clientId, event, value),
     onEvents: (record, chatEvents) => {
+      events.emit('commander:chat-evidence', record, chatEvents);
       const name = record.session.managedName;
       if (!TMUX_NAME.test(name || '')) return;
       for (const event of chatEvents) {
@@ -258,11 +264,12 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
     },
   });
 
-  async function saveSettings(input) {
+  async function saveSettings(input, expectedRevision) {
     if (deletionFlights.size || renameFlights.size) throw new Error('Wait for session deletion or renaming before changing settings');
     if (cleanup.isBusy()) throw new Error('Wait for history cleanup before changing settings');
     await inventoryFlight;
     await healthFlight;
+    if (expectedRevision && expectedRevision !== fingerprint(store.data.settings)) throw Object.assign(new Error('Configuration changed before persistence; review again'), { beforeMutation: true });
     if (terminals.opening.size) throw new Error('Wait for terminal connections before changing settings');
     const settings = validateSettings(input);
     for (const order of settings.opOrders) {
@@ -298,37 +305,7 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
     return result;
   }
 
-  function validatedOpOrder(input) {
-    if (!input || typeof input !== 'object') throw new Error('Invalid OpOrder');
-    const existing = store.data.settings.opOrders || [];
-    const opOrders = [...existing.filter((item) => item.id !== input?.id), input];
-    return validateSettings({ ...store.data.settings, opOrders }).opOrders.find((item) => item.id === input.id);
-  }
-  async function previewOpOrder(input) {
-    const order = { ...validatedOpOrder(input), enabled: true };
-    getHost(order.hostId);
-    return runRemote({ action: 'oporder_preview', order }, order.hostId);
-  }
-  async function enrollOpOrder(input, revision) {
-    if (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision)) throw new Error('Preview this OpOrder before enrollment');
-    const order = { ...validatedOpOrder(input), enabled: true };
-    getHost(order.hostId);
-    await runRemote({ action: 'oporder_sync', order, revision }, order.hostId);
-    // A separate SSH read must observe every managed file before we advertise
-    // this order as enabled. This also catches a partial or delayed sync.
-    let observed;
-    for (let attempt = 0; attempt < 4; attempt++) {
-      observed = await runRemote({ action: 'oporder_preview', order }, order.hostId);
-      if (observed.ready && observed.changes.every((change) => change.status === 'unchanged')) break;
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    if (!observed?.ready || observed.changes.some((change) => change.status !== 'unchanged')) throw new Error('OpOrder sync is not visible on the SSH host; review before enabling it');
-    const settings = validateSettings({ ...store.data.settings, opOrders: [...(store.data.settings.opOrders || []).filter((item) => item.id !== order.id), order] });
-    store.save('settings', settings);
-    opOrderSynced.set(order.id, JSON.stringify(order));
-    events.emit('state:updated');
-    return settings;
-  }
+  const { previewOpOrder, enrollOpOrder } = createOpOrders({ store, getHost, runRemote, opOrderSynced, events });
 
   async function create(input, requirePreset = false) {
     if (input?.conversationId && store.data.deletedSessions.includes(`${input.hostId || 'default'}/${input.provider}:${input.conversationId}`)) throw new Error('This saved history has been deleted. Start a new session instead.');
@@ -359,7 +336,7 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
     if (input.recoverSitrep !== undefined && input.recoverSitrep !== true) throw new Error('Invalid SitRep recovery flag');
     if (input.recoverSitrep && !isolated) throw new Error('SitRep recovery requires an owned worktree');
     if (isolated && (isTerminal || input.conversationId || input.agentId || !/^[a-f0-9]{32}$/.test(isolated.operationId || '') || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(isolated.slug || '') || typeof isolated.repository !== 'string' || isolated.repository.length > 4096 || typeof isolated.baseRef !== 'string' || isolated.baseRef.length > 200)) throw new Error('Invalid isolated task');
-    const created = await runRemote({
+    const payload = {
       action: isolated ? 'worktree_launch' : 'create', provider, transport,
       ...(!isolated && transport === 'chat' ? { managedName: `hq-${crypto.createHash('sha256').update(input.launchId || crypto.randomUUID()).digest('hex').slice(0, 12)}` } : {}),
       ...(transport === 'chat' ? { sourceDigest: chatDigest, chatFiles, allowUpgrade: true } : {}),
@@ -370,7 +347,8 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
       preset, roeProfile, hookSource, instructions: String(input.instructions || '').slice(0, 20000),
       ...(isolated ? { operationId: isolated.operationId, repository: isolated.repository, baseRef: isolated.baseRef, slug: isolated.slug, ...(input.recoverSitrep ? { recoverSitrep: true } : {}) } : {}),
       ...(internalSitrep ? { sitrep: internalSitrep } : {}),
-    }, input.hostId);
+    };
+    const created = await centcom.guardLaunch({ ...input, hostId: host.id, cwd: input.cwd || preset?.cwd || '' }, () => runRemote(payload, input.hostId));
     void inventory().catch(() => {});
     return created;
   }
@@ -476,8 +454,9 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
     if (!['interrupt', 'stop'].includes(action) || !TMUX_NAME.test(name)) throw new Error('Invalid session name');
     const unit = hostCache.get(host.id)?.find((item) => item.id === name);
     if (unit?.transport === 'chat') {
-      const record = chats.assertSessionOwner(client, unit.chatSessionId, host.id);
-      const handle = [...record.handles].find((id) => chats.handles.get(id)?.client.id === client.id);
+      const record = chats.sessions.get(`${host.id}/${unit.chatSessionId}`);
+      const handle = [...(record?.handles || [])].find((id) => chats.handles.get(id)?.client.id === client.id);
+      if (!handle) throw new Error('Open the chat and take control before changing this session');
       return chats.submit(client, handle, { protocolVersion: 1, commandId: crypto.randomUUID(), operation: action, sessionId: unit.chatSessionId, payload: {} });
     }
     terminals.assertSessionOwner(client, name, host.id);
@@ -486,8 +465,8 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
     if (action === 'stop') attention.resolveRequests(pending.filter((item) => item.name === name).map((item) => item.id));
     return result;
   }
-  async function deleteSession(client, key) {
-    if (client.closed || client.id !== 'desktop' || typeof key !== 'string' || !/^[A-Za-z0-9_-]{1,80}\/tmux:hq-[a-f0-9]{12}$/.test(key)) throw new Error('Invalid managed session deletion');
+  async function deleteSession(client, key, commander = false) {
+    if (client.closed || (client.id !== 'desktop' && !(commander && client.id === 'centcom-commander')) || typeof key !== 'string' || !/^[A-Za-z0-9_-]{1,80}\/tmux:hq-[a-f0-9]{12}$/.test(key)) throw new Error('Invalid managed session deletion');
     if (deletionFlights.has(key) || renameFlights.has(key)) throw new Error('Session deletion or renaming is already in progress');
     deletionFlights.add(key);
     let release;
@@ -693,8 +672,12 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
   const github = (input) => runRemote({ ...input, action: 'github' }, getHost(input?.hostId).id);
   const specops = createSpecops({ directory: specopsDirectory || path.join(directory, 'specops'), runRemote, createSession: create, chats, getHost, emit: (...args) => events.emit(...args) });
   const centcom = createCentcom({
-    directory: centcomDirectory || (process.env.AGENTC2_DATA_DIR || process.env.AGENT_HQ_DATA_DIR ? path.join(directory, 'centcom') : path.join(home, '.agentc2', 'centcom')),
-    service: {
+    directory: centcomDirectory || path.join(directory, 'centcom'),
+    service: commanderFacade({
+      chats, terminals, deleteSession, interruptFault, acknowledge, worktrees, archiveWorktree, diffRequest,
+      github, devUrls, openDevUrl, previewOpOrder, enrollOpOrder,
+      sitrepSource: (id) => sitrepPreviews.get(id),
+      commanderHandoffs: () => [...sitrepPreviews.entries()].map(([id, value]) => ({ id, ...value })),
       inventory,
       health,
       create,
@@ -716,11 +699,13 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
       loopBreaker,
       store,
       saveSettings,
-    },
+    }),
     chats,
     emit: (...args) => events.emit(...args),
   });
-  events.on('inventory:updated', (snapshot) => centcom.observe(snapshot));
+  routeCommanderCommands(chats, centcom);
+  events.on('commander:chat-evidence', (record, chatEvents) => { void centcom.observeChat(record, chatEvents).catch((error) => console.error('CENTCOM chat observation failed:', error.message)); });
+  events.on('inventory:updated', (snapshot) => { void centcom.observe(snapshot)?.catch((error) => console.error('CENTCOM observation failed:', error.message)); });
   return { centcom, specops, github, store, events, terminals, chats, tunnels, cleanup, exercises, inventory, health, create, worktrees, flashQueue, flashDecide, archiveWorktree, diffRequest, previewSitrep, launchSitrep, action, deleteSession, interruptFaults, resetFault, renameSession, loopBreaker, uploadClipboardImage, devUrls, openDevUrl, saveSettings, previewOpOrder, enrollOpOrder, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
 }
 module.exports = { createService };

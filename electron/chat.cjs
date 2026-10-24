@@ -157,11 +157,16 @@ class Chats {
     return flight;
   }
 
-  take(client, id) {
+  take(client, id, captureOwner) {
     const { record } = this.get(client, id);
+    if (record.commanderAction && record.commanderAction.ownerId !== client.id) return Promise.reject(new Error('CENTCOM reviewed action owns this session until dispatch settles'));
+    if (record.commanderTurn && record.commanderTurn.ownerId !== client.id) return Promise.reject(new Error('CENTCOM provider turn still owns this session; reconcile cancellation before taking control'));
     return this.exclusive(record, () => {
       this.get(client, id);
       if (record.connection !== 'connected') throw new Error('Chat is reconnecting');
+      if (record.commanderAction && record.commanderAction.ownerId !== client.id) throw new Error('CENTCOM reviewed action owns this session until dispatch settles');
+      if (record.commanderTurn && record.commanderTurn.ownerId !== client.id) throw new Error('CENTCOM provider turn still owns this session; reconcile cancellation before taking control');
+      captureOwner?.(record.owner);
       record.owner = client;
       this.publish(record);
       return this.state(client, id);
@@ -178,12 +183,29 @@ class Chats {
     const { record } = this.get(client, id);
     const command = validateCommand(input);
     if (command.operation === 'create' || command.sessionId !== record.sessionId) throw new Error('Command does not target this chat view');
+    if (record.commanderTurn && ['interrupt', 'stop'].includes(command.operation) &&
+        (record.owner?.id === client.id || record.commanderPreviousOwner?.id === client.id)) {
+      const routed = this.commandRouter?.(client, id, command, record);
+      if (routed) return Promise.resolve(routed);
+    }
     return this.exclusive(record, async () => {
       this.get(client, id);
-      if (record.owner?.id !== client.id) throw new Error('Take control before changing this chat');
       if (record.connection !== 'connected') throw new Error('Chat is reconnecting; commands are not queued');
-      return this.request(record.hostId, 'command', { command });
-    });
+      const canRoute = record.owner?.id === client.id ||
+        (record.owner?.id === 'centcom-commander' && record.commanderPreviousOwner?.id === client.id);
+      const routed = canRoute ? this.commandRouter?.(client, id, command, record) : null;
+      if (record.owner?.id !== client.id && !routed) throw new Error('Take control before changing this chat');
+      // Release the ownership queue before the commander acquires its temporary
+      // control handle. The routed promise resolves to the real worker receipt.
+      if (routed) return { routed };
+      try { return await this.request(record.hostId, 'command', { command }); }
+      catch (error) {
+        // An SSH failure after dispatch cannot prove that the worker rejected
+        // the command. Keep its identity so callers can inspect the receipt.
+        Object.assign(error, { uncertain: true, commandId: command.commandId, sessionId: command.sessionId });
+        throw error;
+      }
+    }).then((result) => result?.routed || result);
   }
 
   receipt(client, id, commandId) {

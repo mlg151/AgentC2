@@ -1,6 +1,6 @@
 {
   "name": "agentc2",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "private": true,
   "description": "Desktop SSH manager for Codex, Claude, and Antigravity CLI sessions",
   "main": "electron/main.cjs",
@@ -41,7 +41,7 @@
     "test:specops": "node tests/specops.cjs && python3 tests/github.py",
     "test:specops:ui": "npm run build && node tests/specops.ui.e2e.cjs",
     "test:windows:local": "npm run build && node tests/windows-local.e2e.cjs",
-    "test:centcom": "node tests/centcom.cjs",
+    "test:centcom": "node tests/centcom.cjs && node tests/centcom-operations.cjs && node tests/centcom-schema.cjs && node tests/centcom-doctrine.cjs && node tests/centcom-support.cjs && node tests/centcom-history.cjs && node tests/centcom-missions.cjs && node tests/centcom-launch.cjs && node tests/centcom-evidence.cjs && node tests/centcom-turn.cjs && node tests/centcom-automations.cjs && node tests/centcom-bindings.cjs",
     "test:inventory": "node scripts/run-tests.cjs --validate"
   },
   "dependencies": {

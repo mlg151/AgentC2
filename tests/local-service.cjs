@@ -15,6 +15,7 @@ const local = require('../electron/local.cjs');
   const load = createRequire(filename);
   const calls = [], conversions = [];
   let failure = '', service;
+  let fixtureSessions = [];
   const exports = { exports: {} };
   const options = { platform: 'win32', execute: (_binary, args, _settings, callback) => {
     conversions.push(args.at(-1));
@@ -29,7 +30,7 @@ const local = require('../electron/local.cjs');
       const encoded = /^AGENTC2_PAYLOAD_B64 = '([^']+)'/.exec(source)?.[1] || args.at(-1);
       const payload = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'));
       calls.push({ binary, payload });
-      child.stdout.emit('data', JSON.stringify(failure === 'helper' ? { ok: false, error: 'The working directory does not exist' } : { ok: true, result: payload.action === 'inventory' ? { user: 'fixture', sessions: [] } : { name: 'hq-123456abcdef' } }));
+      child.stdout.emit('data', JSON.stringify(failure === 'helper' ? { ok: false, error: 'The working directory does not exist' } : { ok: true, result: payload.action === 'inventory' ? { user: 'fixture', sessions: fixtureSessions } : { name: 'hq-123456abcdef' } }));
       child.emit('close', 0);
     });
     return child;
@@ -38,6 +39,7 @@ const local = require('../electron/local.cjs');
   vm.runInNewContext('(function(require,module,__dirname){' + fs.readFileSync(filename, 'utf8') + '\n})', { process, console, Buffer, setTimeout, clearTimeout })(requireFixture, exports, path.dirname(filename));
   try {
     service = exports.exports.createService({ directory, home: os.homedir() });
+    assert.ok(fs.existsSync(path.join(directory, 'centcom/centcom.json')), 'Commander state must stay inside the isolated service directory');
     service.store.save('settings', { ...service.store.data.settings, hosts: [{ id: 'local', kind: 'local', name: 'Local', enabled: true }, { id: 'ssh', name: 'SSH', target: 'fixture.invalid', port: 22, enabled: true }] });
     const input = { provider: 'codex', transport: 'terminal', hostId: 'local', cwd: 'C:\\Users\\Example Folder\\' };
     service.chats.capabilities = async () => [{ provider: 'codex', status: 'supported' }];
@@ -59,6 +61,23 @@ const local = require('../electron/local.cjs');
       assert.equal((await service.create(input)).name, 'hq-123456abcdef', 'The service must remain usable after startup failure');
       await service.inventory();
     }
+    const managedName = 'hq-0123456789ab', sessionId = 'chat-' + 'a'.repeat(32);
+    fixtureSessions = [{ key: `tmux:${managedName}`, id: managedName, provider: 'codex', kind: 'managed', managed: true, state: 'live', transport: 'chat', chatSessionId: sessionId }];
+    await service.inventory();
+    const desktop = { id: 'desktop' }, phone = { id: 'phone' };
+    const record = { hostId: 'local', sessionId, owner: desktop, connection: 'connected', handles: new Set(['desktop-view', 'phone-view']), queue: Promise.resolve() };
+    service.chats.sessions.set(`local/${sessionId}`, record);
+    service.chats.handles.set('desktop-view', { client: desktop, record });
+    service.chats.handles.set('phone-view', { client: phone, record });
+    let routed = 0;
+    service.centcom.isCommander = () => true;
+    service.centcom.submitCommand = async (_client, _handle, command) => { routed++; return { commandId: command.commandId, sessionId, state: 'completed' }; };
+    await assert.rejects(service.action(phone, 'stop', managedName, 'local'), /Take control/);
+    assert.equal(routed, 0, 'An observer must not cancel a commander turn through session actions');
+    assert.equal((await service.action(desktop, 'stop', managedName, 'local')).state, 'completed');
+    assert.equal(routed, 1, 'Authorized session actions must use the shared commander cancellation route');
+    service.chats.handles.clear(); service.chats.sessions.clear();
+    fixtureSessions = [];
     console.log('PASS service path conversion, SSH isolation, WSL/helper error rejection, and successful retry');
   } finally {
     service?.specops?.dispose();

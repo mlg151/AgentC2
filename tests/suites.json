@@ -11,6 +11,71 @@
       "group": "core"
     },
     {
+      "id": "centcom-operations",
+      "file": "tests/centcom-operations.cjs",
+      "group": "core"
+    },
+    {
+      "id": "centcom-schema",
+      "file": "tests/centcom-schema.cjs",
+      "group": "core"
+    },
+    {
+      "id": "centcom-doctrine",
+      "file": "tests/centcom-doctrine.cjs",
+      "group": "core"
+    },
+    {
+      "id": "centcom-support",
+      "file": "tests/centcom-support.cjs",
+      "group": "core"
+    },
+    {
+      "id": "centcom-launch",
+      "file": "tests/centcom-launch.cjs",
+      "group": "core"
+    },
+    {
+      "id": "centcom-missions",
+      "file": "tests/centcom-missions.cjs",
+      "group": "core"
+    },
+    {
+      "id": "centcom-history",
+      "file": "tests/centcom-history.cjs",
+      "group": "core"
+    },
+    {
+      "id": "centcom-evidence",
+      "file": "tests/centcom-evidence.cjs",
+      "group": "core"
+    },
+    {
+      "id": "centcom-turn",
+      "file": "tests/centcom-turn.cjs",
+      "group": "core"
+    },
+    {
+      "id": "centcom-automations",
+      "file": "tests/centcom-automations.cjs",
+      "group": "core"
+    },
+    {
+      "id": "centcom-bindings",
+      "file": "tests/centcom-bindings.cjs",
+      "group": "core"
+    },
+    {
+      "id": "centcom-oporders",
+      "file": "tests/centcom-oporders.cjs",
+      "group": "linux-python"
+    },
+    {
+      "id": "centcom-recovery",
+      "file": "tests/centcom-recovery.cjs",
+      "group": "linux-python"
+    },
+    {
       "id": "specops",
       "file": "tests/specops.cjs",
       "group": "core"
@@ -298,6 +363,26 @@
     {
       "id": "chat-launch.e2e",
       "file": "tests/chat-launch.e2e.cjs",
+      "group": "linux-chat"
+    },
+    {
+      "id": "centcom-bridge.e2e",
+      "file": "tests/centcom-bridge.e2e.cjs",
+      "group": "linux-chat"
+    },
+    {
+      "id": "centcom-adapters.e2e",
+      "file": "tests/centcom-adapters.e2e.cjs",
+      "group": "linux-chat"
+    },
+    {
+      "id": "centcom-workflows.e2e",
+      "file": "tests/centcom-workflows.e2e.cjs",
+      "group": "linux-chat"
+    },
+    {
+      "id": "centcom-hooks.e2e",
+      "file": "tests/centcom-hooks.e2e.cjs",
       "group": "linux-chat"
     },
     {
