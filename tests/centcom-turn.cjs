@@ -129,6 +129,75 @@ async function missingAndWrongIdentity() {
   t.close();
 }
 
+async function resetUnacceptedSubmission() {
+  const t = await setup('unaccepted-submission');
+  const request = t.f.chats.request.bind(t.f.chats);
+  const attempts = [];
+  let stopState = 'accepted';
+  t.f.chats.request = async (host, operation, args) => {
+    if (operation === 'command' && args.command.operation === 'send') throw new Error('Chat session is not ready; inspect its current state');
+    if (operation === 'command' && args.command.operation === 'stop') {
+      attempts.push(structuredClone(args.command));
+      const receipt = await request(host, operation, args);
+      receipt.state = stopState;
+      return receipt;
+    }
+    return request(host, operation, args);
+  };
+  const run = t.run();
+  await assert.rejects(run.promise, /not ready/);
+  assert.equal(t.state.providerTurn.status, 'uncertain');
+  assert.equal(t.f.receipts.has(run.commandId), false, 'Original startup rejection has no durable send receipt');
+  assert.equal(await t.lifecycle.reconcile(), false);
+  assert.equal(await t.lifecycle.stop(), false, 'Stop acceptance is not shutdown proof');
+  assert.equal(t.state.providerTurn.status, 'uncertain');
+  const competitor = await t.f.chats.open(phone, t.session.chatSessionId, 'alpha');
+  await assert.rejects(t.f.chats.take(phone, competitor), /still owns/);
+  const stopCommand = structuredClone(t.state.providerTurn.stopCommand);
+  t.restart();
+  stopState = 'completed';
+  assert.equal(await t.lifecycle.stop(), true, 'Explicit reset recovers only after confirmed provider shutdown');
+  assert.equal(t.state.providerTurn, null);
+  assert.equal(attempts.length, 2);
+  assert.ok(attempts.every((command) => JSON.stringify(command) === JSON.stringify(stopCommand)), 'Reset retry preserves the stop identity for worker deduplication');
+  assert.equal(t.f.submitted.filter((command) => command.operation === 'send').length, 0, 'Recovery must never replay the provider prompt');
+  assert.equal(t.outcomes.at(-1).facts.providerTurnCompletion, 'provider_stopped');
+  await t.f.chats.take(phone, competitor);
+  t.close();
+}
+
+async function providerReadiness() {
+  const t = await setup('readiness');
+  const read = t.f.chats.read.bind(t.f.chats);
+  let status = 'starting', reads = 0;
+  t.f.chats.read = async (...args) => {
+    const page = await read(...args);
+    page.session.state = status;
+    reads++;
+    return page;
+  };
+  const run = t.run();
+  await until(() => reads >= 2);
+  assert.equal(t.f.submitted.length, 0, 'Initialization must not submit or interrupt a provider turn');
+  status = 'idle';
+  await until(() => t.state.providerTurn?.receiptState === 'completed');
+  t.append('turn.completed', { outcome: 'completed', detail: '' }, run.commandId);
+  await run.promise;
+  assert.equal(t.state.providerTurn, null);
+
+  status = 'starting';
+  t.state.config.turnDeadlineSeconds = 0.03;
+  const before = t.f.submitted.length;
+  await assert.rejects(t.run().promise, /timed out/);
+  assert.equal(t.state.providerTurn, null, 'Timeout before submission must not strand ownership');
+  assert.equal(t.f.submitted.length, before);
+  status = 'failed';
+  await assert.rejects(t.run().promise, /provider session is failed/);
+  assert.equal(t.state.providerTurn, null);
+  assert.equal(t.f.chats.get(desktop, t.handle).record.owner.id, desktop.id);
+  t.close();
+}
+
 async function engineBridgeRestart() {
   const f = fixture(path.join(directory, 'engine-restart')); fixtures.push(f);
   await f.engine.start();
@@ -161,7 +230,7 @@ async function engineBridgeRestart() {
 
 (async () => {
   try {
-    for (const test of [pagedCorrelation, uncertainCancellationAndRestart, blockedDispatchAndLateCancel, missingAndWrongIdentity, engineBridgeRestart]) await test();
-    console.log('PASS CENTCOM cursor correlation, bounded deadlines, retained cancellation ownership, late cancellation fencing, and durable reconciliation');
+    for (const test of [pagedCorrelation, uncertainCancellationAndRestart, blockedDispatchAndLateCancel, missingAndWrongIdentity, resetUnacceptedSubmission, providerReadiness, engineBridgeRestart]) await test();
+    console.log('PASS CENTCOM cursor correlation, bounded readiness/deadlines, retained cancellation ownership, late cancellation fencing, confirmed reset, and durable reconciliation');
   } finally { for (const f of fixtures) f.dispose(); fs.rmSync(directory, { recursive: true, force: true }); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

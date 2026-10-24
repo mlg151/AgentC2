@@ -408,7 +408,8 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
       title: `CENTCOM // ${state.config.provider.toUpperCase()} (${state.config.model})`,
       cwd: syncRes.path,
       roeProfile,
-      instructions: initialDoctrine,
+      // The lifecycle owns the first prompt. Creation instructions would start
+      // a second, untracked provider turn before the assessment can be sent.
     });
 
     state.session = {
@@ -512,11 +513,14 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
           ...(snapshot.truncation ? ['SITUATION.json is partial. Read its truncation totals and omitted counts before assessing the fleet.'] : []),
           `</UNTRUSTED_FLEET_EVIDENCE>`,
           '',
+          ...(!session.doctrineDelivered ? [buildDoctrinePrompt(), ''] : []),
           redact(nextPrompt),
         ].join('\n');
 
         const finalAssistantText = await turnLifecycle.run({ session, commandId: turnCommandId, text: contextualPrompt, signal: abort.signal, logicalTurnId: turnId,
           dispatched: queryHop === initialHop && consoleCommand ? consoleCommand.dispatched : undefined });
+        session.doctrineDelivered = true;
+        writeState();
         check();
 
         // Parse completion-correlated agentc2-c2 envelope
@@ -1099,7 +1103,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
     resetSession: () => {
       interrupt();
       return enqueue(async () => {
-        if (!await turnLifecycle.reconcile()) throw new Error('Previous CENTCOM provider turn remains uncertain; cannot reset its ownership');
+        if (!await turnLifecycle.stop()) throw new Error(`Previous CENTCOM provider turn remains uncertain; cannot reset its ownership: ${state.providerTurn?.error || 'Provider stop is unconfirmed'}`);
         retireSession();
         state.status = 'idle'; state.error = ''; writeState();
         await ensureSession();

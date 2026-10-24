@@ -76,6 +76,7 @@ for line in sys.stdin:
     elif method == "account/read":
         reply(message, dict(account=None if settings.get("noAuth") else dict(type="apiKey"), requiresOpenaiAuth=True))
     elif method in ("thread/start", "thread/resume"):
+        time.sleep(settings.get("threadStartDelay", 0))
         thread_id = params.get("threadId", "native-thread")
         thread_cwd = Path(params.get("cwd") or root)
         full = params.get("sandbox") == "danger-full-access" or settings.get("wrongRoe")
@@ -97,7 +98,9 @@ for line in sys.stdin:
         reply(message, dict(turn=turn()))
         notify("turn/started", dict(threadId=thread_id, turn=turn()))
         item_event(dict(id="user-" + turn_id, type="userMessage", content=[dict(type="text", text=text)]), True)
-        if settings.get("centcom") and text.startswith("<UNTRUSTED_FLEET_EVIDENCE>"):
+        if settings.get("centcomHoldDoctrine") and text.startswith("# CENTCOM control doctrine"):
+            pass  # Expose startup races hidden by an instantly completed bootstrap prompt.
+        elif settings.get("centcom") and text.startswith("<UNTRUSTED_FLEET_EVIDENCE>"):
             plan_file = root / "centcom-plan.json"
             responses = json.loads(plan_file.read_text()) if plan_file.exists() else []
             answer = responses.pop(0) if responses else "Fixture observed the correlated result."

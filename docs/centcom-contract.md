@@ -327,7 +327,16 @@ and sends a real provider cancellation, including while submission is blocked.
 reconciliation window expires, the provider turn remains uncertain and retains
 control; a cancellation receipt alone cannot release it. The console shows this
 state. A later request reconciles the old turn before creating or sending another.
-Reset and provider changes also preserve the unresolved reservation.
+Provider changes preserve the unresolved reservation. Explicit session reset
+stops the reserved provider through the worker and waits for its matching completed
+stop receipt before retiring that session. A failed or unconfirmed stop retains
+the reservation. This also recovers older startup failures where the assessment
+was rejected before a send receipt existed, without replaying the assessment.
+
+Commander creation does not submit an automatic instructions prompt. The first
+owned assessment includes the doctrine and waits for provider initialization (or
+an older bootstrap turn) to finish before sending. Readiness waits use the turn
+deadline; cancellation or timeout before submission leaves no uncertain turn.
 
 The reservation persists command/session/turn identities and the journal cursor
 across restart. Completion requires the explicit provider turn ID from the
