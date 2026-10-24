@@ -83,6 +83,7 @@ function createSpecops({ directory, runRemote, createSession, chats, getHost, em
   let runs = fs.existsSync(runsFile) ? JSON.parse(fs.readFileSync(runsFile, 'utf8')) : [];
   if (!Array.isArray(runs) || runs.some((r) => r.version !== 1 || !/^[a-f0-9]{32}$/.test(r.id))) throw new Error('Invalid saved SPECOPS missions');
   const flights = new Set();
+  const polls = new Map(), cancellations = new Set();
   function write(file, data) { const temp = file + '.tmp'; fs.writeFileSync(temp, data, { mode: 0o600 }); fs.renameSync(temp, file); }
   function save() { write(runsFile, JSON.stringify(runs, null, 2)); emit('state:updated'); }
   // Never dispatch again after an uncertain launch or handoff across restart.
@@ -146,11 +147,14 @@ function createSpecops({ directory, runRemote, createSession, chats, getHost, em
   }
   async function tick(r) {
     if (typeof r === 'string') r = find(r);
-    if (flights.has(r.id) || r.state !== 'running') return;
+    if (flights.has(r.id) || cancellations.has(r.id) || r.state !== 'running') return;
     flights.add(r.id);
+    let finishPoll;
+    polls.set(r.id, new Promise(resolve => { finishPoll = resolve; }));
     try {
       const v = r.visits.at(-1);
       const page = await chats.read(r.hostId, v.sessionId, v.cursor, 500);
+      if (cancellations.has(r.id)) return;
       if (page.truncated) throw new Error('Stage history was truncated; cannot verify completion');
       if (!v.sent) {
         if (page.session.state === 'starting') return;
@@ -160,6 +164,7 @@ function createSpecops({ directory, runRemote, createSession, chats, getHost, em
         return;
       }
       const receipt = await chats.request(r.hostId, 'receipt', { commandId: v.sendId });
+      if (cancellations.has(r.id)) return;
       if (['failed', 'unknown'].includes(receipt.state)) throw new Error('Stage command failed or is uncertain: ' + (receipt.error || receipt.state));
       if (receipt.state !== 'completed' || !receipt.result?.turnId) return;
       v.turnId = receipt.result.turnId;
@@ -222,10 +227,18 @@ function createSpecops({ directory, runRemote, createSession, chats, getHost, em
       save();
       if (r.state === 'advancing') await dispatch(r);
     } catch (error) { halt(r, error); }
-    finally { flights.delete(r.id); }
+    finally { flights.delete(r.id); polls.delete(r.id); finishPoll(); }
   }
   async function control(id, action) {
     const r = find(id);
+    // A running mission is routinely polling SSH. Let that request settle,
+    // but prevent its result from sending or routing work after cancellation.
+    // Actual launch/publication and competing controls still reject overlap.
+    if (action === 'cancel' && r.state === 'running' && polls.has(id) && !cancellations.has(id)) {
+      cancellations.add(id);
+      try { await polls.get(id); }
+      finally { cancellations.delete(id); }
+    }
     if (flights.has(id) || ['launching', 'advancing', 'publishing'].includes(r.state)) throw new Error('Wait for the current dispatch to finish');
     flights.add(id);
     try {
