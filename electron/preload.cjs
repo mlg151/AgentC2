@@ -12,6 +12,25 @@ contextBridge.exposeInMainWorld('agentHQ', {
     return () => ipcRenderer.removeListener('updates:state', listener);
   },
   getState: () => ipcRenderer.invoke('state:get'),
+  overwatchWindowState: () => ipcRenderer.invoke('overwatch:state'),
+  undockOverwatch: () => ipcRenderer.invoke('overwatch:undock'),
+  dockOverwatch: () => ipcRenderer.invoke('overwatch:dock'),
+  selectOverwatchUnit: (key) => ipcRenderer.invoke('overwatch:select', key),
+  onOverwatchWindowState: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on('overwatch:window-state', listener);
+    return () => ipcRenderer.removeListener('overwatch:window-state', listener);
+  },
+  onOverwatchSelect: (callback) => {
+    const listener = (_event, key) => callback(key);
+    ipcRenderer.on('overwatch:selected', listener);
+    return () => ipcRenderer.removeListener('overwatch:selected', listener);
+  },
+  onOverwatchWorkspace: (callback) => {
+    const listener = (_event, workspace) => callback(workspace);
+    ipcRenderer.on('overwatch:workspace', listener);
+    return () => ipcRenderer.removeListener('overwatch:workspace', listener);
+  },
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
   previewOpOrder: (order) => ipcRenderer.invoke('oporder:preview', order),
   enrollOpOrder: (order, revision) => ipcRenderer.invoke('oporder:enroll', order, revision),
