@@ -2,6 +2,7 @@
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { Terminals } = require('../electron/terminals.cjs');
+const { commanderFacade } = require('../electron/commander.cjs');
 
 class FakePty extends EventEmitter {
   onData(listener) { this.on('data', listener); }
@@ -84,5 +85,22 @@ class FakePty extends EventEmitter {
   await terminals.sessions.get(`default/${name}`).queue;
   assert.equal(terminals.state(desktop, interrupted).connection, 'reconnecting', 'Queued redraw from an exited PTY must not restore readiness');
   terminals.close(desktop, interrupted);
+  const commander = { id: 'centcom-commander', name: 'CENTCOM' };
+  const facade = commanderFacade({ terminals });
+  const dispatch = facade.commanderControl(commander, { key: `default/tmux:${name}`, id: name, hostId: 'default' }, async (id) => {
+    assert.equal(terminals.state(commander, id).connection, 'connected');
+    await terminals.write(commander, id, 'reviewed command');
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(ptys[4].lastWrite, undefined, 'Commander must not dispatch before tty startup');
+  ptys[4].data('\x1b[?1049h');
+  await dispatch;
+  assert.equal(ptys[4].lastWrite, 'reviewed command');
+  assert.equal(terminals.sessions.size, 0, 'Commander must release its private attachment');
+  const stalled = await terminals.open(desktop, name, 'default', 100, 30);
+  await assert.rejects(terminals.waitForConnection(desktop, stalled, 20), /timed out/);
+  const disconnected = terminals.waitForConnection(desktop, stalled);
+  terminals.close(desktop, stalled);
+  await assert.rejects(disconnected, /disconnected/);
   console.log('PASS initial attach and reattach reject input until tmux startup, split markers and banners, no replay; SSH drop retains handles, output sequence, dimensions, and phone ownership; input is rejected until redraw; closing all viewers cancels retry');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

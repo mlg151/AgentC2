@@ -13,6 +13,7 @@ function commanderFacade({ chats, terminals, action, deleteSession, interruptFau
         ? await chats.open(client, unit.chatSessionId, unit.hostId)
         : await terminals.open(client, unit.id || unit.name, unit.hostId, 120, 32);
       record = views.get(client, handle).record;
+      if (views === terminals && record.connection === 'connecting') await terminals.waitForConnection(client, handle);
       await views.take(client, handle, (owner) => {
         previous = owner;
         record.commanderAction = { ownerId: client.id, previousControllerId: owner?.id || null };

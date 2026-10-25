@@ -167,6 +167,18 @@ class Terminals {
     });
   }
 
+  // Internal callers without a rendered Connect button must observe the same
+  // readiness boundary. This waits for attachment, never queues terminal input.
+  async waitForConnection(client, id, timeout = 10000) {
+    const deadline = Date.now() + timeout;
+    while (this.state(client, id).connection === 'connecting') {
+      if (Date.now() >= deadline) throw new Error('Terminal connection timed out');
+      await new Promise((resolve) => setTimeout(resolve, Math.min(100, Math.max(1, deadline - Date.now()))));
+    }
+    const state = this.state(client, id);
+    if (state.connection !== 'connected') throw new Error(state.exitCode !== null ? 'Terminal has exited' : 'Terminal is reconnecting');
+  }
+
   async take(client, id, captureOwner) {
     const { record } = this.get(client, id);
     if (record.commanderAction && record.commanderAction.ownerId !== client.id) throw new Error('CENTCOM reviewed action owns this session until dispatch settles');
