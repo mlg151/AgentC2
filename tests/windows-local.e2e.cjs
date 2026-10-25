@@ -59,9 +59,20 @@ const { localCommand } = require('../electron/local.cjs');
       const expected = wsl('realpath', [/^[a-z]:/i.test(cwd) ? wsl('wslpath', ['-a', '-u', cwd]) : cwd]);
       assert.equal(inventory.sessions.find((session) => session.id === result.name)?.cwd, expected);
     }
+    // ConPTY must preserve tmux's startup acknowledgement too. Exercise actual
+    // WSL input immediately after the service advertises readiness on reattach.
+    const shell = await page.evaluate(() => window.agentHQ.create({ provider: 'terminal', hostId: 'default', cwd: '/tmp', title: 'WSL reattach fixture' }));
+    created.push(shell.name);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const handle = await page.evaluate((name) => window.agentHQ.openTerminal(name, 100, 30, 'default'), shell.name);
+      await page.waitForFunction(async (id) => (await window.agentHQ.terminalState(id)).connection === 'connected', handle, { timeout: 30000 });
+      await page.evaluate(({ handle, attempt }) => window.agentHQ.writeTerminal(handle, `printf 'WSL_READY_%s\\n' '${attempt}'\r`), { handle, attempt });
+      await page.waitForFunction(async ({ handle, attempt }) => (await window.agentHQ.readyTerminal(handle)).text.includes(`WSL_READY_${attempt}`), { handle, attempt }, { timeout: 30000 });
+      await page.evaluate((id) => window.agentHQ.closeTerminal(id), handle);
+    }
     assert.equal(await page.locator('vite-error-overlay').count(), 0); assert.deepEqual(errors, []);
     await page.screenshot({ path: path.join(screenshots, 'windows-local-startup-recovered.png') });
-    console.log('PASS production Electron/WSL Codex-labelled CLI fixture: missing directory error and retry, drive root, user directory, trailing slash, spaces/quotes, POSIX path, and renderer survival');
+    console.log('PASS production Electron/WSL Codex-labelled CLI fixture: missing directory error and retry, drive root, user directory, trailing slash, spaces/quotes, POSIX path, renderer survival, and ConPTY tmux readiness/reattach input');
   } finally {
     if (page) for (const name of created) await page.evaluate((name) => window.agentHQ.stop(name, 'default'), name).catch(() => {});
     await app?.close();

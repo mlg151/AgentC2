@@ -188,9 +188,14 @@ export function TerminalView({ terminalId, visible, focused = true }: { terminal
     });
     const offState = window.agentHQ?.onTerminalState((state) => {
       if (state.id !== activeIdRef.current) return;
+      const wasWritable = controlRef.current;
       setControl(state); controlRef.current = state.canControl && state.connection === 'connected';
       terminal.options.disableStdin = !controlRef.current;
       if (!state.canControl) terminal.resize(state.cols, state.rows);
+      else if (!wasWritable && controlRef.current && snapshotReady.current) {
+        fitRef.current?.fit();
+        void window.agentHQ?.resizeTerminal(state.id, terminal.cols, terminal.rows).catch(showError);
+      }
     });
     return () => {
       resizeObserver.disconnect();
@@ -269,7 +274,7 @@ export function TerminalView({ terminalId, visible, focused = true }: { terminal
 
   return <div className={`terminal-console${visible ? '' : ' terminal-hidden'}`}>
     <div className="terminal-utilities">
-      {terminalId && control ? <><span className="control-owner">{control.connection === 'reconnecting' ? 'SSH reconnecting…' : control.canControl ? 'You control' : `${control.controller?.name || 'No device'} controls`}</span>{!control.canControl ? <button disabled={control.connection !== 'connected'} onClick={() => void window.agentHQ?.takeTerminal(terminalId).then((state) => { setControl(state); controlRef.current = true; fitRef.current?.fit(); const terminal = terminalRef.current; if (terminal) { terminal.options.disableStdin = false; void window.agentHQ?.resizeTerminal(terminalId, terminal.cols, terminal.rows).catch(showError); terminal.focus(); } }).catch(showError)}>Take control</button> : null}</> : null}
+      {terminalId && control ? <><span className="control-owner">{control.connection === 'connecting' ? 'Connecting terminal…' : control.connection === 'reconnecting' ? 'SSH reconnecting…' : control.canControl ? 'You control' : `${control.controller?.name || 'No device'} controls`}</span>{!control.canControl ? <button disabled={control.connection !== 'connected'} onClick={() => void window.agentHQ?.takeTerminal(terminalId).then((state) => { setControl(state); controlRef.current = true; fitRef.current?.fit(); const terminal = terminalRef.current; if (terminal) { terminal.options.disableStdin = false; void window.agentHQ?.resizeTerminal(terminalId, terminal.cols, terminal.rows).catch(showError); terminal.focus(); } }).catch(showError)}>Take control</button> : null}</> : null}
       <span className="terminal-hint" role="status">{feedback || 'Scroll for history · Drag to select'}</span>
       <button title={`Search retained history (${primaryModifier}+F)`} onClick={() => setSearchOpen(true)}><Search size={14} /> Find</button>
       <button title="Return to the latest output" onClick={() => void latest().catch(showError)}><ArrowDownToLine size={14} /> Latest</button>

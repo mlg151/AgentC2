@@ -215,11 +215,15 @@ async function poll(check, label) { for(let i=0;i<100;i++){const result=await ch
       const uploaded=await service.uploadClipboardImage(desktop,terminal,fs.readFileSync(path.join(root,'assets/app-icon.png')));
       assert.ok(uploaded.startsWith(home+'/'));assert.equal(fs.statSync(uploaded).mode&0o777,0o600);
       await service.terminals.scrollRemote(desktop,terminal,'up',20);
+      await service.terminals.scrollRemote(desktop,terminal,'latest',1);
       replies.dispose();service.terminals.close(desktop,terminal);
       const reattached=await service.terminals.open(desktop,shell.name,'default',100,30);
       const reattachedRecord=service.terminals.sessions.get('default/'+shell.name);
       const reattachedReplies=reattachedRecord.mirror.onData((data)=>reattachedRecord.terminal.write(data));
       await service.terminals.ready(desktop,reattached);
+      await poll(()=>service.terminals.state(desktop,reattached).connection==='connected','Reattached tmux never acknowledged startup');
+      await service.terminals.write(desktop,reattached,"printf 'REATTACH_%s\\n' 'INPUT_RETAINED'\r");
+      await poll(()=>reattachedRecord.serializer.serialize().includes('REATTACH_INPUT_RETAINED'),'First command after reattach was lost during tty startup');
       await poll(async()=>(await service.terminals.retained(desktop,reattached)).text.includes('LOCAL_PTY_WITNESS'),'Local terminal history lost after detach');
       await service.deleteSession(desktop,'default/tmux:'+shell.name);reattachedReplies.dispose();service.terminals.close(desktop,reattached);
       assert.equal((await service.inventory()).sessions.some((item)=>item.id===shell.name),false,'Deleted terminal returned to inventory');

@@ -46,18 +46,26 @@ class Terminals {
     const mirror = new Terminal({ ...size, scrollback: 5000, allowProposedApi: true });
     const serializer = new SerializeAddon();
     mirror.loadAddon(serializer);
-    const record = { key, name, hostId, terminal, mirror, serializer, ...size, handles: new Set(), owner: null, queue: Promise.resolve(), sequence: 0, exitCode: null, connection: 'connected', reconnectAttempts: 0, reconnectTimer: null, scrollQueue: Promise.resolve(), disposed: false, activityBuckets: new Map() };
+    const record = { key, name, hostId, terminal, mirror, serializer, ...size, handles: new Set(), owner: null, queue: Promise.resolve(), sequence: 0, exitCode: null, connection: 'connecting', reconnectAttempts: 0, reconnectTimer: null, scrollQueue: Promise.resolve(), disposed: false, activityBuckets: new Map() };
     this.sessions.set(key, record);
     this.bind(record, terminal);
   }
 
   bind(record, terminal) {
+    // TERM is fixed to xterm-256color. tmux emits smcup (alternate screen)
+    // or smkx (application keypad, also with clear-on-attach disabled) only
+    // after putting its client tty into raw mode. SSH banners/PTY creation
+    // are not readiness: input sent then can be flushed by tmux startup.
+    let startupTail = '', initialized = false, ended = false;
     terminal.onData((data) => {
       if (record.disposed || record.terminal !== terminal) return;
       this.onOutput?.(record, data);
-      if (record.connection !== 'connected') {
-        record.connection = 'connected'; record.reconnectAttempts = 0;
-        this.publish(record);
+      let becameReady = false;
+      if (!initialized) {
+        const startup = startupTail + data;
+        initialized = startup.includes('\x1b[?1049h') || startup.includes('\x1b[?1h\x1b=');
+        startupTail = initialized ? '' : startup.slice(-16);
+        becameReady = initialized;
       }
       const bucket = Math.floor(Date.now() / 10000);
       record.activityBuckets.set(bucket, (record.activityBuckets.get(bucket) || 0) + Buffer.byteLength(data));
@@ -65,6 +73,10 @@ class Terminals {
       record.queue = record.queue.then(() => new Promise((resolve) => {
         if (record.disposed) return resolve();
         record.mirror.write(data, () => {
+          if (becameReady && !ended && !record.disposed && record.terminal === terminal && record.exitCode === null && record.connection !== 'exited') {
+            record.connection = 'connected'; record.reconnectAttempts = 0;
+            this.publish(record);
+          }
           record.sequence++;
           for (const id of record.handles) {
             const handle = this.handles.get(id);
@@ -75,6 +87,7 @@ class Terminals {
       }));
     });
     terminal.onExit(({ exitCode, signal }) => {
+      ended = true;
       if (record.disposed || record.terminal !== terminal) return;
       if (exitCode === 255 || signal === 9) {
         record.connection = 'reconnecting';
@@ -158,7 +171,7 @@ class Terminals {
     const { record } = this.get(client, id);
     if (record.commanderAction && record.commanderAction.ownerId !== client.id) throw new Error('CENTCOM reviewed action owns this session until dispatch settles');
     if (record.exitCode !== null) throw new Error('Terminal has exited');
-    if (record.connection !== 'connected') throw new Error('Terminal is reconnecting');
+    if (record.connection !== 'connected') throw new Error(record.connection === 'connecting' ? 'Terminal is connecting' : 'Terminal is reconnecting');
     captureOwner?.(record.owner);
     record.owner = client;
     this.publish(record);
@@ -171,7 +184,7 @@ class Terminals {
   assertOwner(client, record) {
     if (record.owner?.id !== client.id) throw new Error('Take control of this session first');
     if (record.exitCode !== null) throw new Error('Terminal has exited');
-    if (record.connection !== 'connected') throw new Error('Terminal is reconnecting');
+    if (record.connection !== 'connected') throw new Error(record.connection === 'connecting' ? 'Terminal is connecting' : 'Terminal is reconnecting');
   }
 
   assertSessionOwner(client, name, hostId) {
