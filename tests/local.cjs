@@ -17,6 +17,13 @@ const { Tunnels } = require('../electron/tunnels.cjs');
   assert.deepEqual([linux.binary, ...linux.args], ['python3', '-', 'payload']);
   assert.equal(linux.env.PRIVATE_TEST, 'preserved');
   assert.ok(linux.env.PATH.startsWith('/fixture/bin:'));
+  for (const platform of ['linux', 'darwin']) {
+    const execution = localCommand('python3', [], platform, { HOME: '/fixture', PATH: '/usr/bin:/fixture/bin:/usr/bin' });
+    const entries = execution.env.PATH.split(':');
+    assert.equal(entries.length, new Set(entries).size);
+    assert.deepEqual(entries.slice(0, 2), ['/usr/bin', '/fixture/bin']);
+    for (const directory of ['/fixture/.local/bin', '/fixture/.nix-profile/bin', '/nix/var/nix/profiles/default/bin', '/home/linuxbrew/.linuxbrew/bin', '/opt/homebrew/bin', '/snap/bin']) assert.ok(entries.includes(directory), directory);
+  }
   const windows = localCommand('tmux', ['attach-session', '-t', 'hq-fixture'], 'win32', { SystemRoot: 'D:\\Windows' });
   assert.deepEqual([windows.binary, ...windows.args], ['D:\\Windows\\System32\\wsl.exe', '--exec', 'tmux', 'attach-session', '-t', 'hq-fixture']);
   const paths = new Map([

@@ -95,6 +95,7 @@ def worktree_list(_payload=None):
 
 
 def worktree_launch(payload):
+    require_tmux(payload)
     operation_id = payload.get("operationId")
     worktree_file(operation_id)  # Validate before deriving the lock pathname.
     locks = WORKTREE_ROOT / "locks"

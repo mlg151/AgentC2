@@ -9,7 +9,7 @@ function localCommand(command, args, platform = process.platform, env = process.
     return { binary: path.win32.join(env.SystemRoot || 'C:\\Windows', 'System32', 'wsl.exe'), args: ['--exec', command, ...args], env };
   }
   const home = env.HOME || os.homedir();
-  const extra = [path.posix.join(home, '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
+  const extra = [path.posix.join(home, '.local', 'bin'), path.posix.join(home, '.nix-profile', 'bin'), '/nix/var/nix/profiles/default/bin', '/home/linuxbrew/.linuxbrew/bin', '/snap/bin', '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
   return { binary: command, args, env: { ...env, PATH: [...new Set([...(env.PATH || '').split(':'), ...extra])].filter(Boolean).join(':') } };
 }
 
