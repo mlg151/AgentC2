@@ -50,6 +50,7 @@ const { Store, validateSettings } = require('../electron/config.cjs');
     await b.getByRole('button', { name: /^Pull open tabs/ }).click();
     await b.screenshot({ path: path.join(screenshots, 'desktop-peer-sync.png') });
     await apps[1].evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(940, 650));
+    await b.waitForFunction(() => innerWidth >= 940 && innerWidth <= 960 && innerHeight >= 650 && document.documentElement.scrollWidth <= innerWidth);
     assert.equal(await b.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await b.getByRole('button', { name: 'Revoke desktop', exact: true }).scrollIntoViewIfNeeded();
     await b.screenshot({ path: path.join(screenshots, 'desktop-peer-sync-narrow.png') });

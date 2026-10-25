@@ -89,6 +89,14 @@ function request(type, data) {
     fs.mkdirSync(directory,{recursive:true}); await desktop.screenshot({path:path.join(directory,'desktop-chat.png')});
     await desktop.getByRole('button',{name:'Allow once'}).click(); await poll(()=>pending.length===0,'Approval not resolved');
     const phone = await pageFor({id:'phone',name:'QA phone'},{width:390,height:844});
+    await phone.setViewportSize({ width: 390, height: 550 });
+    request('approval.requested', { requestId: 'compact-approval', action: 'Check compact layout', detail: 'The pending request must not obscure control ownership.' });
+    await phone.getByRole('button', { name: 'Take control', exact: true }).click({ timeout: 3000 });
+    await phone.getByRole('button', { name: 'Deny', exact: true }).click({ timeout: 3000 });
+    await poll(() => pending.length === 0, 'Compact approval not resolved');
+    await phone.screenshot({ path: path.join(directory, 'phone-chat-compact.png') });
+    await desktop.getByRole('button', { name: 'Take control', exact: true }).click();
+    await phone.setViewportSize({ width: 390, height: 844 });
     assert.equal(await phone.getByRole('combobox', { name: 'Chat model', exact: true }).isDisabled(), true);
     await desktop.getByRole('combobox', { name: 'Chat model', exact: true }).fill('fixture-next');
     await desktop.getByRole('button', { name: 'Apply model', exact: true }).click();

@@ -51,6 +51,11 @@ function createWindow() {
     width: 1440, height: 900, minWidth: 940, minHeight: 650, backgroundColor: '#0c151b', title: 'AgentC2', icon, autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true },
   });
+  // Native borders consume part of setSize() on Windows. Reserve the renderer's
+  // actual minimum content area, independent of title-bar and border dimensions.
+  const [outerWidth, outerHeight] = mainWindow.getSize();
+  const [contentWidth, contentHeight] = mainWindow.getContentSize();
+  mainWindow.setMinimumSize(940 + Math.max(0, outerWidth - contentWidth), 650 + Math.max(0, outerHeight - contentHeight));
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     try {
       const target = new URL(url);
