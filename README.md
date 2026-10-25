@@ -134,3 +134,53 @@ AgentC2 never reads provider authentication tokens or SSH private keys. Electron
 Local sessions: **Settings → Hosts → Add this computer** runs agents without an SSH server. Linux uses local Python 3/tmux; Windows uses the default WSL distribution. See [local setup and validation limits](docs/unified-chat.md#local-sessions).
 
 OpenCode setup, verified versions, session renaming, and update detection: [OpenCode and desktop updates](docs/opencode.md).
+
+## Documentation references and examples
+
+### Screenshots
+
+Implementation screenshots, each generated from isolated Electron/display, SSH, Git, and tmux fixtures with no provider prompts or real conversations:
+
+- [Situation Room at 1600 by 1000](docs/screenshots/situation-room.png) and the [narrow window](docs/screenshots/situation-room-narrow.png) view of full terminal panes, grouped 220px roster, shared host/command strips, and Overwatch command keys.
+- [Overwatch at 1600 by 1000](docs/screenshots/overwatch.png) and its concept reference ([overwatch-concept.png](docs/screenshots/overwatch-concept.png)): paged read-only snapshot grid, jump-key hints, and arrow-key paging.
+- [Structured chat (desktop)](docs/screenshots/structured-chat-desktop.png), [phone](docs/screenshots/structured-chat-phone.png), and local-desktop variant ([structured-chat-local-desktop.png](docs/screenshots/structured-chat-local-desktop.png)): Markdown transcript, requests, control and detach states, and usage line.
+- [SPECOPS](docs/screenshots/specops-desktop.png) and narrow variant ([specops-narrow.png](docs/screenshots/specops-narrow.png)); [SitRep preview](docs/screenshots/sitrep-preview.png); [Worktree launch](docs/screenshots/worktree-launch.png) and diff drawer ([worktree-diff.png](docs/screenshots/worktree-diff.png), [worktree-diff-narrow.png](docs/screenshots/worktree-diff-narrow.png)).
+- [Exercise review](docs/screenshots/exercise-review.png), [exercise promotion](docs/screenshots/exercise-promotion.png); [Fleet readiness](docs/screenshots/fleet-readiness.png); [Flash Traffic](docs/screenshots/flash-traffic.png); [Managed roster session names](docs/screenshots/managed-roster-session-names.png).
+- [Situation Room approval scope](docs/screenshots/centcom-approval-scope.png), [CENTCOM console](docs/screenshots/centcom-console.png) and narrow variant ([centcom-console-narrow.png](docs/screenshots/centcom-console-narrow.png)), [CENTCOM automation preview](docs/screenshots/centcom-automation-preview.png), and [CENTCOM automation outcomes](docs/screenshots/centcom-automation-outcomes.png).
+- [Application updates](docs/screenshots/application-updates.png) and pending-update state ([updates-main-pending.png](docs/screenshots/updates-main-pending.png)); [Session rename update](docs/screenshots/session-rename-update.png); [Delete session confirmation](docs/screenshots/delete-session-confirmation.png).
+- [Companion rename](docs/screenshots/companion-rename.png) and remote-access launch error ([companion-launch-error.png](docs/screenshots/companion-launch-error.png)).
+
+### Examples
+
+Build from source:
+
+```sh
+npm ci
+npm run dev        # Vite on 127.0.0.1:5173 plus Electron
+npm run build      # TypeScript check and renderer build
+npm start          # launch Electron against the built app
+npm run dist       # package the current native platform into release/
+```
+
+Run host-independent checks first, then the full CI suite:
+
+```sh
+npm run test:ci            # build + gateway, platform, and host-independent checks
+npm run test:terminal       # live desktop terminal regression (isolated SSH fixture)
+npm run test:desktop       # Electron native behavior on the current platform (Xvfb on Linux)
+npm run test:launch-modes  # verifies installed provider argv, resume, and tmux history sets
+```
+
+Launch a structured chat with a configured host; Select **Terminal** in the agent launch dialog for custom commands:
+
+```sh
+# Configure one SSH host in Settings → SSH hosts, or set AGENTC2_HOST before first launch.
+# Local execution: Settings → Hosts → Add this computer (Linux Python 3/tmux; Windows default WSL).
+npm run dev
+```
+
+Exercise an isolated Git task through the app’s Joint Exercises flow: select base ref and contestants in the Exercise dialog, run the test command, and compare captured evidence before promotion. Optional live SSH QA needs an explicit `AGENTC2_HOST`; rows use isolated fixtures and restore the clipboard on completion.
+
+See [platform setup and validation limits](docs/platforms.md), [unified chat](docs/unified-chat.md), [worktrees](docs/worktrees.md), [SPECOPS](docs/specops.md), [SitRep](docs/sitrep.md), and [Situation Room](docs/situation-room.md) for the feature-specific behaviors behind these references and examples.
+
+## Safety and scope
