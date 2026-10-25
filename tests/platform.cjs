@@ -14,6 +14,10 @@ const { packagePath } = require('../scripts/package-path.cjs');
   assert.equal(appDataDirectory('linux', {}, '/home/qa'), path.join('/home/qa', '.config'));
   assert.equal(appDataDirectory('linux', { XDG_CONFIG_HOME: '/config' }, '/home/qa'), '/config');
   assert.equal(appDataDirectory('darwin', {}, '/Users/qa'), path.join('/Users/qa', 'Library', 'Application Support'));
+  assert.equal(appDataDirectory('win32', {}, '/fixture/home'), path.join('/fixture/home', 'AppData', 'Roaming'));
+  assert.equal(appDataDirectory('win32', { APPDATA: '/fixture/roaming' }, '/fixture/home'), '/fixture/roaming');
+  assert.deepEqual(tailscaleBinaries('win32', {}), ['C:\\Program Files\\Tailscale\\tailscale.exe']);
+  assert.deepEqual(tailscaleBinaries('win32', { ProgramFiles: 'D:\\Programs' }), ['D:\\Programs\\Tailscale\\tailscale.exe']);
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agentc2-platform-'));
   try {
     fs.writeFileSync(path.join(directory, 'remote-access.json'), JSON.stringify({ enabled: true, url: 'https://qa.example.ts.net' }));
@@ -34,6 +38,8 @@ const { packagePath } = require('../scripts/package-path.cjs');
   assert.equal(missing.installed, false);
   const stopped = await tailscaleStatus({ execute: (_file, _args, _options, done) => done(new Error('not signed in'), '{}') });
   assert.equal(stopped.installed, true); assert.ok(stopped.error);
+  const malformed = await tailscaleStatus({ execute: (_file, _args, _options, done) => done(null, 'invalid fixture JSON') });
+  assert.deepEqual(malformed, { installed: true, state: 'Unavailable', url: '', error: 'Start Tailscale and sign in on your computer and phone.' });
   for (const platform of ['win32', 'linux', 'darwin']) {
     assert.equal(closeAction({ platform, quitting: true, remoteEnabled: true, hasTray: true }), 'close');
     assert.equal(closeAction({ platform, remoteEnabled: false, hasTray: true }), 'close');

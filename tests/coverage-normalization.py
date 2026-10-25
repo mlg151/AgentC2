@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from coverage import CoverageData
+from coverage import Coverage, CoverageData
 from coverage.exceptions import DataError
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +14,30 @@ spec.loader.exec_module(module)
 
 
 class Normalization(unittest.TestCase):
+    def test_lambda_definitions_need_actual_calls_and_ambiguous_lines_stay_unknown(self):
+        with tempfile.TemporaryDirectory(prefix="agentc2-coverage-lambdas-") as directory:
+            root = Path(directory)
+            source = root / "electron"
+            source.mkdir()
+            file = source / "fixture.py"
+            file.write_text('"Fixture"\nunused = lambda value: value + 1\nused = lambda value: value + 2\ndef owner(): return lambda: 3\npair = (lambda: 4, lambda: 5)\n')
+            data_file = root / ".coverage"
+            collector = Coverage(data_file=str(data_file), source=[str(source)], branch=True, config_file=False)
+            collector.set_option('run:core', 'ctrace')
+            scope = {}
+            collector.start()
+            try:
+                exec(compile(file.read_text(), str(file), "exec"), scope)
+                self.assertEqual(scope["used"](1), 3)
+                scope["owner"]()
+                scope["pair"][0]()
+            finally:
+                collector.stop()
+                collector.save()
+            self.assertIn(2, collector.get_data().lines(str(file)), 'The unused callback definition executed')
+            result = module.lambda_coverage(data_file, source)["electron/fixture.py"]
+            self.assertEqual(result, {"total": 5, "covered": 1, "ambiguousLines": [4, 5]})
+
     def test_mixed_source_labels_reproduce_failure_and_preserve_all_arcs_contexts(self):
         with tempfile.TemporaryDirectory(prefix="agentc2-coverage-merge-") as directory:
             root = Path(directory)

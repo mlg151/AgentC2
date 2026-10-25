@@ -96,17 +96,20 @@ function check(summary) {
   return gaps;
 }
 
-function pythonSummary(report) {
+function pythonSummary(report, lambdas = null) {
   if (report.meta?.branch_coverage !== true) throw Error('Python branch coverage was not enabled');
-  return Object.fromEntries(Object.entries(report.files).map(([file, value]) => {
+  return Object.fromEntries(Object.entries(report.files).map(([name, value]) => {
+    const file = name.replaceAll('\\', '/');
     if (!value.functions) throw Error(`Python function measurement is missing for ${file}`);
     const functions = Object.entries(value.functions).filter(([name]) => name);
+    if (lambdas && !Object.hasOwn(lambdas, file)) throw Error(`Python lambda measurement is missing for ${file}`);
+    const callbacks = lambdas?.[file] || { total: 0, covered: 0 };
     const measured = (total, covered) => ({ total, covered });
     return [file, {
       statements: measured(value.summary.num_statements, value.summary.covered_lines),
       lines: measured(value.summary.num_statements, value.summary.covered_lines),
       branches: measured(value.summary.num_branches, value.summary.covered_branches),
-      functions: measured(functions.length, functions.filter(([, region]) => region.executed_lines.length > 0).length),
+      functions: measured(functions.length + callbacks.total, functions.filter(([, region]) => region.executed_lines.length > 0).length + callbacks.covered),
     }];
   }));
 }
@@ -132,8 +135,10 @@ function report() {
   const pythonFile = path.join(directory, 'python/coverage.json');
   if (!run(python, ['-m', 'coverage', 'json', '--rcfile', reportConfig, '-o', pythonFile], { env })) return false;
   if (!run(python, ['-m', 'coverage', 'html', '--rcfile', reportConfig], { env })) return false;
+  const lambdaFile = path.join(directory, 'python/lambdas.json');
+  if (!run(python, ['scripts/normalize-coverage.py', '--functions', reportData, path.join(root, 'electron'), lambdaFile], { env })) return false;
   const javascript = JSON.parse(fs.readFileSync(path.join(directory, 'javascript/coverage-summary.json'), 'utf8'));
-  const pythonData = pythonSummary(JSON.parse(fs.readFileSync(pythonFile, 'utf8')));
+  const pythonData = pythonSummary(JSON.parse(fs.readFileSync(pythonFile, 'utf8')), JSON.parse(fs.readFileSync(lambdaFile, 'utf8')));
   const summary = { ...Object.fromEntries(Object.entries(javascript).filter(([file]) => file !== 'total').map(([file, value]) => [path.relative(root, file).replaceAll('\\', '/'), value])), ...pythonData };
   const declarations = new Set(declarationFiles());
   const ts = require('typescript');

@@ -25,6 +25,8 @@ const fixture = { meta: { branch_coverage: true }, files: { 'electron/fixture.py
 } } };
 const python = pythonSummary(fixture);
 assert.deepEqual(python['electron/fixture.py'].functions, { total: 2, covered: 1 });
+assert.deepEqual(pythonSummary(fixture, { 'electron/fixture.py': { total: 2, covered: 1 } })['electron/fixture.py'].functions, { total: 4, covered: 2 });
+assert.throws(() => pythonSummary(fixture, {}), /lambda measurement is missing/);
 assert.equal(check(python).length, 4);
 assert.throws(() => pythonSummary({ ...fixture, meta: {} }), /branch coverage/);
 delete fixture.files['electron/fixture.py'].functions;

@@ -3,6 +3,7 @@ const { LIMITS, fingerprint, redact, bounded, parseCentcomEnvelope } = require('
 const { activeFleet, commanderIdentity } = require('../electron/centcom-fleet.cjs');
 const { outputSchema, automationOutputSchema } = require('../electron/centcom-output.cjs');
 const { validate, automationSchema } = require('../electron/centcom-schema.cjs');
+const { readHistory, summarizeAction } = require('../electron/centcom-history.cjs');
 const envelope = (value) => '```agentc2-c2\n' + JSON.stringify(value) + '\n```';
 
 for (const value of [undefined, null, false, 1, {}, '', ' \n', 'ordinary response']) assert.equal(parseCentcomEnvelope(value), null);
@@ -61,6 +62,15 @@ assert.throws(() => automationSchema('unknown-kind'), /Unknown automation schema
 assert.throws(() => validate({ $ref: '#/$defs/unknown' }, {}), /Unresolved schema reference/);
 assert.equal(validate({ not: { const: 1 } }, 2), 2);
 assert.deepEqual(validate({ type: 'object' }, { upstream: 'permitted extension' }), { upstream: 'permitted extension' });
+assert.throws(() => validate({ type: 'array', uniqueItems: true }, ['same', 'same']), /duplicate items/);
+assert.deepEqual(validate({ type: 'object', propertyNames: { pattern: '^safe_' } }, { safe_key: true }), { safe_key: true });
+assert.throws(() => validate({ type: 'object', propertyNames: { pattern: '^safe_' } }, { unsafe: true }), /Malformed input property/);
+assert.equal(readHistory({ outcomeSequence: 0, outcomes: [] }).retainedFrom, 1);
+assert.equal(summarizeAction({ kind: 'sitrep.handoff', params: {}, result: { hostId: 'alpha' } }).handoff.destination.key, undefined);
+const legacy = { outcomeSequence: 1, outcomes: [{ collection: 'directive', sequence: 1, serverId: 'legacy', outcomeId: 'old', status: 'completed' }] };
+assert.equal(readHistory(legacy).unknownMetadata, 1, 'Legacy outcomes without source records retain explicit uncertainty');
+const incomplete = { ...legacy, outcomes: [{ ...legacy.outcomes[0], action: { operation: 'unit.send', scope: {}, targets: [], coverage: 'bound' } }] };
+assert.deepEqual(readHistory(incomplete, { view: 'patterns' }).entries, [], 'Absent scope fingerprints cannot establish an observed repeated pattern');
 
 assert.equal(commanderIdentity(null), null);
 assert.equal(commanderIdentity({ hostId: 'alpha', name: 'hq-' + 'a'.repeat(12) }).key, 'alpha/tmux:hq-' + 'a'.repeat(12));
@@ -72,5 +82,6 @@ const fleet = activeFleet({ hosts: [{ id: 'alpha', connected: true }], sessions:
 assert.equal(fleet.find(name), unit); assert.equal(fleet.find('native-fixture', 'alpha'), unit);
 assert.equal(fleet.clean({ key, name }).key, key);
 assert.equal(fleet.clean('saved-legacy-id'), '[Excluded session]');
+assert.equal(fleet.clean('hq-' + 'b'.repeat(12)), '[Excluded session]');
 assert.deepEqual(fleet.flash(), []);
 console.log('PASS envelope admission limits and diagnostics, malformed collections/requests/evidence, canonical fingerprints, nested/inline credential redaction, byte bounds, missing schema rejection, and fleet identity/default boundaries');

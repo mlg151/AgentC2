@@ -52,7 +52,11 @@ Coverage builds retain generated statement boundaries for accurate source-map
 remapping; ordinary production builds keep their existing minification.
 
 Python reports use the standard Coverage.py statement/line and branch metrics.
-Named function regions are covered only when their bodies execute. Copied
+Named function regions are covered only when their bodies execute. Python
+lambda callbacks additionally require negative runtime entry arcs; an executed
+definition alone does not count. Ambiguous shared-line callbacks stay uncovered.
+Anonymous JavaScript callbacks receive stable coverage-only names so C8 cannot
+silently omit them from the function denominator. Copied
 worker modules and renamed session hooks are attributed to production files
 only when their bytes match; frozen v1 workers and modified fixtures cannot
 contribute coverage for the current worker. The deployed-v1 compatibility and
