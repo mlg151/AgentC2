@@ -104,7 +104,7 @@ app.whenReady().then(async () => {
     gateway = new Gateway({ directory, assets: path.join(__dirname, '..', 'dist'), service });
     peerSync = new PeerSync({ directory, service });
     peerSync.on('status', (value) => send('peer-sync:status', value));
-    peerSync.on('applied', (value) => send('peer-sync:applied', { ...value, peerEpoch: ++peerEpoch }));
+    peerSync.on('applied', (value) => { send('peer-sync:applied', { ...value, peerEpoch: ++peerEpoch }); send('overwatch:workspace', value.workspace); });
     await peerSync.start().catch((error) => { peerSync.error = error.message; });
     service.events.on('client', (clientId, event, value) => {
       if (clientId !== 'desktop') return;
