@@ -99,6 +99,19 @@ class CodexTests(unittest.TestCase):
         finally:
             reopened.close()
 
+    def test_model_change_reaches_next_turn_in_same_thread(self):
+        self.start(model="fixture-first")
+        self.send("plain")
+        poll(self.page, lambda value: value["session"]["state"] == "idle")
+        native = self.adapter.thread_id
+        self.adapter.set_model("fixture-second")
+        self.send("plain")
+        poll(self.page, lambda value: sum(event["type"] == "turn.completed" for event in value["events"]) == 2)
+        requests = [json.loads(line) for line in (self.root / "requests.jsonl").read_text().splitlines()]
+        turns = [item["params"] for item in requests if item.get("method") == "turn/start"]
+        self.assertEqual([item["model"] for item in turns], ["fixture-first", "fixture-second"])
+        self.assertTrue(all(item["threadId"] == native for item in turns))
+
     def test_streamed_text_final_and_cumulative_usage(self):
         self.start()
         result, command_id = self.send("plain")

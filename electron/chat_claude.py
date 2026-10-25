@@ -191,6 +191,17 @@ print(json.dumps(None if info is None else [dict(uuid=m.uuid,type=m.type,message
             raise ProviderRejected("Claude SDK client is disconnected")
         return asyncio.run_coroutine_threadsafe(operation, self.loop).result(timeout=self.timeout)
 
+    def set_model(self, model):
+        async def change():
+            if self.active is not None:
+                raise ProviderRejected("Wait for the current Claude turn before changing the model")
+            if not callable(getattr(self.client, "set_model", None)):
+                raise ProviderRejected("The installed Claude SDK cannot change models")
+            await self.client.set_model(model)
+            self.session["model"] = model
+            return dict(model=model, providerSessionId=self.native_id)
+        return self.call(change())
+
     def send(self, text, command_id):
         async def submit():
             if self.active is not None:

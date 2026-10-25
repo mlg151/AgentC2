@@ -9,6 +9,8 @@ const command = (operation, payload = {}, session = sessionId) => ({ protocolVer
 const event = (type, data) => ({ protocolVersion: 1, sessionId, sequence: 1, timestamp: '2026-10-22T12:00:00.000Z', provider: 'codex', providerSessionId: 'thread-one', turnId: 'turn-one', itemId: 'item-one', type, data });
 const cases = [];
 const add = (kind, value, valid) => cases.push({ kind, value, valid });
+for (const model of ['fixture-model', 'provider/model-v2']) add('command', command('model', { model }), true);
+for (const model of ['', null, 42, 'x'.repeat(201), 'model\nname', 'model\tname']) add('command', command('model', { model }), false);
 const create = command('create', { provider: 'codex', cwd: '/tmp/repo', title: 'Fixture', roeProfile: 'gated' });
 add('command', { ...create, payload: { ...create.payload, model: 'fixture-model' } }, true);
 for (const model of ['', 42, 'x'.repeat(201)]) add('command', { ...create, payload: { ...create.payload, model } }, false);

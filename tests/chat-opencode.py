@@ -49,6 +49,18 @@ class OpenCodeTests(unittest.TestCase):
             time.sleep(0.01)
         self.fail("ACP fixture did not reach expected state")
 
+    def test_model_change_preserves_native_session_and_rejection(self):
+        self.create()
+        native = self.adapter.native_id
+        self.assertEqual(self.adapter.set_model("fixture/second")["model"], "fixture/second")
+        from chat_adapters import ProviderRejected
+        with self.assertRaisesRegex(ProviderRejected, "Model unavailable"):
+            self.adapter.set_model("rejected-model")
+        self.assertEqual(self.adapter.session["model"], "fixture/second")
+        self.adapter.send("hello", str(uuid.uuid4()))
+        self.wait(lambda items: items[-1]["type"] == "turn.completed")
+        self.assertEqual(self.adapter.native_id, native)
+
     def test_streaming_usage_and_native_resume(self):
         self.create(resume="ses_saved123456")
         self.assertEqual(self.journal.history(self.identifier)["session"]["providerSessionId"], "ses_saved123456")

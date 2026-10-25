@@ -48,6 +48,13 @@ def wire_size(value):
         raise ValueError("Chat message is too large")
 
 
+def model_id(value):
+    text(value, 200)
+    if re.search(r"[\x00-\x20\x7f]", value):
+        raise ValueError("Invalid model ID")
+    return value
+
+
 def validate_command(value):
     fields(value, ["protocolVersion", "commandId", "operation", "sessionId", "payload"], ["protocolVersion", "commandId", "operation", "payload"])
     if type(value["protocolVersion"]) is not int or value["protocolVersion"] != CONTRACT["version"]:
@@ -63,7 +70,7 @@ def validate_command(value):
         if "managedName" in payload and (not isinstance(payload["managedName"], str) or not re.fullmatch(r"hq-[a-f0-9]{12}", payload["managedName"])):
             raise ValueError("Invalid managed chat name")
         if "model" in payload:
-            text(payload["model"], 200)
+            model_id(payload["model"])
         if "instructions" in payload:
             text(payload["instructions"], 20000, True)
         choice(payload["provider"], CONTRACT["providers"])
@@ -80,6 +87,9 @@ def validate_command(value):
             text(payload["text"], CONTRACT["limits"]["text"])
             if operation == "steer":
                 identifier(payload["expectedTurnId"])
+        elif operation == "model":
+            fields(payload, ["model"])
+            model_id(payload["model"])
         elif operation == "respond":
             fields(payload, ["requestId", "turnId", "itemId", "decision", "answers"], ["requestId", "turnId", "itemId"])
             identifier(payload["requestId"])

@@ -57,6 +57,26 @@ class JournalTests(unittest.TestCase):
     def response(self, **extra):
         return command("respond", dict(requestId="request-one", turnId="turn-one", itemId="item-one", **extra), self.identifier)
 
+    def test_model_change_is_idle_only_and_blocks_competing_sends(self):
+        submission = command("model", dict(model="fixture-next"), self.identifier)
+        receipt, fresh = self.journal.accept(submission)
+        self.assertTrue(fresh)
+        self.assertEqual(self.journal.accept(submission), (receipt, False))
+        with self.assertRaisesRegex(ValueError, "model change"):
+            self.send()
+        with self.assertRaises(ValueError):
+            self.journal.accept(command("model", dict(model="competing"), self.identifier))
+        self.journal.command_state(submission["commandId"], "dispatching")
+        self.journal.set_model(self.identifier, "fixture-next")
+        self.journal.command_state(submission["commandId"], "completed", dict(model="fixture-next"))
+        self.assertEqual(self.journal.history(self.identifier)["session"]["model"], "fixture-next")
+        self.send()
+        with self.assertRaisesRegex(ValueError, "current turn"):
+            self.journal.accept(command("model", dict(model="too-late"), self.identifier))
+        self.journal.close()
+        self.journal = Journal(self.directory)
+        self.assertEqual(self.journal.history(self.identifier)["session"]["model"], "fixture-next")
+
     def test_managed_title_rename_survives_restart_without_changing_activity(self):
         creation = command("create", dict(provider="codex", cwd="/tmp/repo", title="Managed title", roeProfile="full", managedName="hq-123456abcdef"))
         receipt, _ = self.journal.accept(creation, capabilities())
