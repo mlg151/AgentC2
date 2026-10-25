@@ -1,5 +1,6 @@
 """ACP process integration without model calls or credentials."""
 import os
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -25,9 +26,11 @@ class OpenCodeTests(unittest.TestCase):
         self.journal.close()
         self.temp.cleanup()
 
-    def create(self, profile="provider-default", resume=None):
+    def create(self, profile="provider-default", resume=None, model=None):
         capabilities = dict(provider="opencode", version="2.1.3", status="supported", reason=None, **{key: key in ("streaming", "history", "resume", "interrupt", "approvals", "questions") for key in CONTRACT["capabilities"]})
         payload = dict(provider="opencode", cwd=self.temp.name, title="OpenCode fixture", roeProfile=profile, managedName="hq-123456abcdef")
+        if model:
+            payload["model"] = model
         if resume:
             payload["providerSessionId"] = resume
         receipt, _ = self.journal.accept(dict(protocolVersion=1, commandId=str(uuid.uuid4()), operation="create", payload=payload), capabilities)
@@ -49,6 +52,13 @@ class OpenCodeTests(unittest.TestCase):
             time.sleep(0.01)
         self.fail("ACP fixture did not reach expected state")
 
+    def test_launch_model_uses_current_config_option_protocol(self):
+        self.create(model="fixture/launch")
+        requests = [json.loads(line) for line in (Path(self.temp.name) / "acp-requests.jsonl").read_text().splitlines()]
+        change = next(item for item in requests if item.get("method") == "session/set_config_option")
+        self.assertEqual(change["params"], dict(sessionId=self.adapter.native_id, configId="model", value="fixture/launch"))
+        self.assertFalse(any(item.get("method") == "session/set_model" for item in requests))
+
     def test_model_change_preserves_native_session_and_rejection(self):
         self.create()
         native = self.adapter.native_id
@@ -56,6 +66,8 @@ class OpenCodeTests(unittest.TestCase):
         from chat_adapters import ProviderRejected
         with self.assertRaisesRegex(ProviderRejected, "Model unavailable"):
             self.adapter.set_model("rejected-model")
+        with self.assertRaisesRegex(RuntimeError, "did not confirm"):
+            self.adapter.set_model("unconfirmed-model")
         self.assertEqual(self.adapter.session["model"], "fixture/second")
         self.adapter.send("hello", str(uuid.uuid4()))
         self.wait(lambda items: items[-1]["type"] == "turn.completed")

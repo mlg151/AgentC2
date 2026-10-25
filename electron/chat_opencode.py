@@ -206,7 +206,10 @@ class OpenCodeAdapter:
             if self.turn_id is not None:
                 raise ProviderRejected("Wait for the current OpenCode turn before changing the model")
         # Use the ACP operation; never silently pass an ignored prompt field.
-        self.request("session/set_model", dict(sessionId=self.native_id, modelId=model))
+        result = self.request("session/set_config_option", dict(sessionId=self.native_id, configId="model", value=model))
+        confirmed = next((item.get("currentValue") for item in result.get("configOptions", []) if item.get("id") == "model"), None)
+        if confirmed != model:
+            raise RuntimeError("OpenCode did not confirm the requested model; inspect the session before continuing")
         self.session["model"] = model
         return dict(model=model, providerSessionId=self.native_id)
 
