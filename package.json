@@ -32,6 +32,7 @@
     "test:package": "node scripts/run-tests.cjs packaged",
     "test:ci": "npm run build && node scripts/run-tests.cjs core",
     "test:chat:runtime": "python3 tests/chat-runtime.py",
+    "test:chat:upgrade": "python3 tests/chat-upgrade.py -v",
     "test:chat:ui": "node tests/chat-ui.e2e.cjs",
     "test:desktop:sessions": "npm run build && node tests/desktop-sessions.e2e.cjs",
     "test:chat:ssh": "npm run build && node tests/chat-launch.e2e.cjs",

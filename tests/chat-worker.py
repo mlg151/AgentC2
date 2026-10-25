@@ -326,7 +326,7 @@ class BootstrapTests(unittest.TestCase):
                     location = Path(temporary) / ".cache" / "agentc2" / "chat-v1" / "worker.sock"
                     poll(lambda: not location.exists())
 
-    def test_detached_bootstrap_reconnect_and_version_conflict(self):
+    def test_detached_bootstrap_reconnect_and_compatible_upgrade(self):
         with tempfile.TemporaryDirectory(prefix="a2-bootstrap-") as temporary:
             root = Path(temporary) / "worker"
             source = Path(__file__).resolve().parents[1] / "electron"
@@ -355,12 +355,14 @@ class BootstrapTests(unittest.TestCase):
                 self.assertEqual(chat_remote(dict(payload, request=request("list")), root), [])
                 changed = dict(files)
                 changed["chat_adapters.py"] += "\n# upgrade fixture\n"
-                with self.assertRaisesRegex(ValueError, "different worker version"):
-                    chat_remote(dict(payload, chatFiles=changed), root)
+                self.assertEqual(chat_remote(dict(payload, chatFiles=changed), root), health)
                 self.assertEqual(chat_remote(payload, root), health)
                 self.assertEqual(root.stat().st_mode & 0o777, 0o700)
                 self.assertEqual((root / "worker.sock").stat().st_mode & 0o777, 0o600)
-                upgraded = chat_remote(dict(payload, chatFiles=changed, allowUpgrade=True), root)
+                with ThreadPoolExecutor(max_workers=4) as pool:
+                    upgrades = list(pool.map(lambda _: chat_remote(dict(payload, chatFiles=changed, allowUpgrade=True), root), range(4)))
+                upgraded = upgrades[0]
+                self.assertEqual(len({result["bootId"] for result in upgrades}), 1)
                 self.assertNotEqual(upgraded["bootId"], health["bootId"])
                 health = upgraded
             finally:

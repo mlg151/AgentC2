@@ -43,4 +43,7 @@ assert.deepEqual([...workflow.jobs['quality-gate'].needs].sort(), Object.keys(su
 assert.deepEqual(workflow.jobs.release.needs, ['quality-gate']);
 assert.equal(workflow.jobs.desktop.strategy['fail-fast'], false);
 assert.equal(workflow.jobs.desktop.strategy.matrix.include.length, 4);
+const inventory = require('./suites.json');
+assert.ok(inventory.suites.some((suite) => suite.id === 'chat-upgrade-python' && suite.file === 'tests/chat-upgrade.py' && suite.group === 'linux-python'), 'Seamless worker upgrades must remain a required suite');
+assert.ok(workflow.jobs['linux-ssh'].steps.some((step) => step.run === 'node scripts/run-tests.cjs linux-python'), 'The quality gate must execute worker upgrade continuity tests');
 console.log('PASS workflow connects the complete native matrix and isolated jobs to the release gate');

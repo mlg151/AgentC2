@@ -286,6 +286,11 @@
       "group": "linux-python"
     },
     {
+      "id": "chat-upgrade-python",
+      "file": "tests/chat-upgrade.py",
+      "group": "linux-python"
+    },
+    {
       "id": "chat-ui.e2e",
       "file": "tests/chat-ui.e2e.cjs",
       "group": "linux-web"
