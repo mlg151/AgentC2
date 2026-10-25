@@ -13,7 +13,7 @@ const { Store, validateSettings } = require('../electron/config.cjs');
       const root = path.join(directory, name), store = new Store(root);
       store.save('settings', validateSettings({ ...store.data.settings, hosts: [{ id: 'remote', name: 'Shared host', target: 'fixture.invalid', port: 22, enabled: true }, { id: `local-${name.replaceAll(' ', '-')}`, kind: 'local', name: 'This computer', enabled: true }] }));
       const app = await _electron.launch({ executablePath: require('electron'), args: [path.join(__dirname, 'helpers/peer-app.cjs'), `--user-data-dir=${path.join(root, 'browser')}`], cwd: path.resolve(__dirname, '..'), env: { ...process.env, NODE_ENV: 'production', AGENTC2_DATA_DIR: root }, timeout: 60000 }); apps.push(app);
-      const page = await app.firstWindow(); page.on('pageerror', (error) => errors.push(error.message));
+      const page = await app.firstWindow(); page.on('pageerror', (error) => errors.push(error.message)); page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
       await page.locator('.session-row').first().waitFor();
       await page.getByRole('button', { name: 'Settings', exact: true }).click();
       await page.getByRole('button', { name: 'Desktop sync', exact: true }).click();
