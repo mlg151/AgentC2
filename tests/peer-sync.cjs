@@ -1,0 +1,96 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { WebSocket } = require('ws');
+const { PeerSync, endpoint, privateAddress, channel } = require('../electron/peer-sync.cjs');
+const { extract, project, mergeRecords, keyFor } = require('../electron/peer-state.cjs');
+const { validateSettings } = require('../electron/config.cjs');
+const createService = require('./helpers/peer-service.cjs');
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function until(check, detail) { for (let n = 0; n < 150; n++) { if (check()) return; await pause(40); } throw new Error('Timed out: ' + detail); }
+(async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agentc2-peer-')), peers = [], services = [];
+  const unit = 'remote/tmux:hq-123456abcdef', gone = 'remote/codex:old';
+  function make(name) {
+    const directory = path.join(root, name), service = createService(directory); services.push(service);
+    service.store.save('settings', validateSettings({ ...service.store.data.settings, hosts: [{ id: 'remote', name: 'Shared', target: 'fixture.invalid', port: 22, enabled: true }, { id: 'local-' + name, kind: 'local', name, enabled: true }], presets: [...service.store.data.settings.presets, { ...service.store.data.settings.presets[0], id: 'local-preset-' + name, hostId: 'local-' + name }] }));
+    const peer = new PeerSync({ directory, service }); peers.push(peer); return peer;
+  }
+  try {
+    for (const address of ['127.0.0.1', '10.1.2.3', '172.16.0.1', '192.168.2.1', '100.100.1.1']) assert.equal(privateAddress(address), true);
+    for (const address of ['0.0.0.0', '8.8.8.8', '172.15.1.1', '172.32.1.1', '100.128.1.1', 'localhost', '127.1', '127.0.0.999']) assert.equal(privateAddress(address), false);
+    for (const url of ['ws://example.com', 'ws://8.8.8.8', 'ws://127.0.0.1?token=x', 'ws://user:pass@127.0.0.1', 'http://127.0.0.1']) assert.throws(() => endpoint(url));
+    const secret = 'a'.repeat(64), sender = channel(secret, 'unique-handshake', true), receiver = channel(secret, 'unique-handshake', false);
+    const wire = sender.seal({ notes: 'private fixture notes' }); assert.ok(!wire.includes('private fixture'));
+    assert.deepEqual(receiver.open(JSON.parse(wire)), { notes: 'private fixture notes' }); assert.throws(() => receiver.open(JSON.parse(wire)), /replayed/);
+    const next = JSON.parse(sender.seal({ a: 1 })); next.tag = '0'.repeat(32); assert.throws(() => receiver.open(next));
+    assert.throws(() => channel(secret, 'another-handshake', false).open(JSON.parse(wire)));
+    const a = make('A'), b = make('B');
+    await a.configure({ ...a.data.config, enabled: true, port: 0 }); await b.configure({ ...b.data.config, enabled: true, port: 0 });
+    const pairing = a.pair();
+    await assert.rejects(b.connect({ url: pairing.url, code: 'b'.repeat(64) }), /authentication/);
+    assert.equal(Object.keys(a.data.peers).length, 0);
+    a.pairing.expiresAt = 0;
+    await assert.rejects(b.connect({ url: pairing.url, code: pairing.code }), /authentication/);
+    const fresh = a.pair();
+    const rejectedOrigin = new WebSocket(fresh.url, { origin: 'https://hostile.example' }); rejectedOrigin.on('error', () => {});
+    await new Promise((resolve) => rejectedOrigin.once('close', resolve)); assert.equal(a.pairing.code, fresh.code);
+    const unauthenticated = new WebSocket(fresh.url); unauthenticated.on('error', () => {});
+    unauthenticated.once('message', () => unauthenticated.send(JSON.stringify({ type: 'state', records: {} })));
+    await new Promise((resolve) => unauthenticated.once('close', resolve));
+    await b.connect({ url: fresh.url, code: fresh.code });
+    await until(() => a.connections.size === 1 && b.connections.size === 1 && a.views.size && b.views.size, 'mutual pairing');
+    assert.equal(a.pairing, null); await assert.rejects(b.connect({ url: fresh.url, code: fresh.code }));
+    assert.ok(!JSON.stringify(a.status()).includes(a.data.peers[b.data.id].secret));
+    if (process.platform !== 'win32') assert.equal(fs.statSync(a.file).mode & 0o777, 0o600);
+    assert.ok(!JSON.stringify(extract(a.store.data)).includes('local-A'));
+    assert.equal(b.store.data.settings.hosts.filter((host) => host.kind === 'local')[0].id, 'local-B');
+    await a.service.saveSettings({ ...a.store.data.settings, hosts: a.store.data.settings.hosts.map((host) => host.id === 'remote' ? { ...host, name: 'Renamed remote' } : host), presets: a.store.data.settings.presets.map((preset) => preset.id === 'codex' ? { ...preset, instructions: 'Shared instructions' } : preset), roe: { version: 1, hostDefaults: { remote: 'gated' } }, cleanup: [{ hostId: 'remote', provider: 'codex', enabled: false, days: 40 }] });
+    await until(() => b.store.data.settings.hosts.find((host) => host.id === 'remote').name === 'Renamed remote', 'fleet sync');
+    assert.equal(b.store.data.settings.presets.find((preset) => preset.id === 'codex').instructions, 'Shared instructions'); assert.equal(b.store.data.settings.roe.hostDefaults.remote, 'gated'); assert.equal(b.store.data.settings.cleanup[0].days, 40);
+    b.store.saveWorkspace({ ...b.store.data.workspace, metadata: { [unit]: { project: 'Mission', notes: 'Cross-desktop note' } }, tabs: [unit], situation: { ...b.store.data.workspace.situation, anchorKey: unit, callsigns: { [unit]: '07' } } }); b.store.setSessionPinned(unit, true);
+    await until(() => a.store.data.workspace.metadata[unit]?.pinned, 'pin and notes sync');
+    assert.equal(a.store.data.workspace.metadata[unit].notes, 'Cross-desktop note'); assert.equal(a.store.data.workspace.situation.callsigns[unit], '07'); assert.deepEqual(a.store.data.workspace.tabs, []);
+    await until(() => a.status().peers[0].remoteTabs.includes(unit), 'peer tabs'); a.pullTabs(b.data.id); assert.deepEqual(a.store.data.workspace.tabs, [unit]);
+    a.store.save('attention', [{ id: 'alert-a', sessionKey: unit, signature: 'hook:stable-event', acknowledged: false }]); b.store.save('attention', [{ id: 'alert-b', sessionKey: unit, signature: 'hook:stable-event', acknowledged: true }]);
+    await until(() => a.store.data.attention[0].acknowledged, 'stable event acknowledgement');
+    const address = a.status().address;
+    await a.configure({ ...a.data.config, enabled: false }); await b.configure({ ...b.data.config, enabled: false });
+    a.store.save('settings', validateSettings({ ...a.store.data.settings, presets: a.store.data.settings.presets.map((p) => p.id === 'codex' ? { ...p, instructions: 'offline A' } : p) }));
+    b.data.clock = a.data.clock + 10;
+    b.store.save('settings', validateSettings({ ...b.store.data.settings, presets: b.store.data.settings.presets.map((p) => p.id === 'codex' ? { ...p, instructions: 'offline B wins' } : p) }));
+    a.store.forgetSessions([gone]);
+    const port = Number(new URL(address).port);
+    await a.configure({ ...a.data.config, enabled: true, port }); await b.configure({ ...b.data.config, enabled: true });
+    await until(() => a.store.data.settings.presets.find((p) => p.id === 'codex').instructions === 'offline B wins' && b.store.data.deletedSessions.includes(gone), 'offline reconciliation');
+    assert.deepEqual(a.data.records, b.data.records);
+    const rows = { [keyFor('metadata', gone)]: { clock: a.data.clock + 1, peer: a.data.id, deleted: false, value: { notes: 'resurrection' } } };
+    assert.equal(project(a.store.data, mergeRecords(a.data.records, rows)).workspace.metadata[gone], undefined);
+    // Entity tombstones propagate without removing machine-local presets.
+    await a.service.saveSettings({ ...a.store.data.settings, presets: a.store.data.settings.presets.filter((p) => p.id !== 'claude-openrouter') });
+    await until(() => !b.store.data.settings.presets.some((p) => p.id === 'claude-openrouter'), 'preset deletion');
+    assert.ok(b.store.data.settings.presets.some((p) => p.id === 'local-preset-B'));
+    const order = { version: 1, id: 'shared-order', hostId: 'remote', repository: '/fixture/repo', enabled: true, instructions: 'Enrolled fixture instructions', overrides: {}, mcp: [] };
+    a.store.save('settings', validateSettings({ ...a.store.data.settings, opOrders: [order] }));
+    await until(() => b.store.data.settings.opOrders.some((item) => item.id === order.id && item.enabled), 'enrolled OpOrder sync');
+    const tiedKey = keyFor('metadata', unit), left = { [tiedKey]: { clock: 1, peer: 'a'.repeat(32), deleted: false, value: { notes: 'A' } } }, right = { [tiedKey]: { clock: 1, peer: 'b'.repeat(32), deleted: false, value: { notes: 'B' } } };
+    assert.deepEqual(mergeRecords(left, right), mergeRecords(right, left));
+    assert.throws(() => mergeRecords(a.data.records, { [keyFor('host', 'local-A')]: { clock: 1, peer: a.data.id, deleted: false, value: { id: 'local-A', kind: 'local' } } }), /Local hosts/);
+    const fakeLocal = { [keyFor('host', 'local-A')]: { clock: a.data.clock + 1, peer: b.data.id, deleted: false, value: { id: 'local-A', name: 'collision', target: 'fixture.invalid', port: 22, enabled: true } } };
+    assert.throws(() => project(a.store.data, mergeRecords(a.data.records, fakeLocal)), /conflicts/);
+    // Host retargeting must still respect production service's open-view guard.
+    b.service.chats.sessions.set('fixture', { hostId: 'remote', handles: new Set() });
+    await a.service.saveSettings({ ...a.store.data.settings, hosts: a.store.data.settings.hosts.map((h) => h.id === 'remote' ? { ...h, target: 'changed.invalid' } : h) });
+    await until(() => b.error.includes('Close this host'), 'active connection guard'); assert.equal(b.store.data.settings.hosts.find((h) => h.id === 'remote').target, 'fixture.invalid');
+    b.service.chats.sessions.clear(); await b.apply(); assert.equal(b.store.data.settings.hosts.find((h) => h.id === 'remote').target, 'changed.invalid');
+    // Restart retains credentials, records, and tombstones, without replaying mutations.
+    const records = structuredClone(b.data.records), dir = path.dirname(b.file); b.close();
+    const restarted = new PeerSync({ directory: dir, service: b.service }); peers.push(restarted); assert.deepEqual(restarted.data.records, records); await restarted.start();
+    await until(() => restarted.connections.size === 1, 'restart reconnect');
+    a.revoke(b.data.id); await until(() => restarted.connections.size === 0, 'revocation disconnect');
+    await assert.rejects(restarted.dial(address, null, a.data.id), /authentication/);
+    assert.equal(Object.keys(a.data.peers).length, 0);
+    console.log('PASS encrypted mutual pairing, expiry/single use, origin/auth rejection, replay/tamper protection, fleet/metadata/callsign/ack sync, local exclusion, independent/pulled tabs, offline conflict/tombstone convergence, production retarget guard, restart, revocation');
+  } finally { for (const peer of peers) peer.close(); for (const service of services) { service.specops.dispose(); service.centcom.dispose(); service.tunnels.closeAll(); } await pause(50); fs.rmSync(root, { recursive: true, force: true }); }
+})().catch((error) => { console.error(error); process.exitCode = 1; });

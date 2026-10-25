@@ -264,7 +264,7 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
     },
   });
 
-  async function saveSettings(input, expectedRevision) {
+  async function saveSettings(input, expectedRevision, source) {
     if (deletionFlights.size || renameFlights.size) throw new Error('Wait for session deletion or renaming before changing settings');
     if (cleanup.isBusy()) throw new Error('Wait for history cleanup before changing settings');
     await inventoryFlight;
@@ -275,7 +275,7 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
     for (const order of settings.opOrders) {
       if (!order.enabled) continue;
       const previous = store.data.settings.opOrders?.find((item) => item.id === order.id);
-      if (!previous?.enabled || JSON.stringify(previous) !== JSON.stringify(order)) throw new Error('Preview and enroll changed OpOrders before enabling sync');
+      if (source !== 'peer-sync' && (!previous?.enabled || JSON.stringify(previous) !== JSON.stringify(order))) throw new Error('Preview and enroll changed OpOrders before enabling sync');
     }
     for (const record of terminals.sessions.values()) {
       const oldHost = getHost(record.hostId);
@@ -297,7 +297,7 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
       return old && next && connectionKey(next) === connectionKey(old);
     }));
     const result = settings;
-    store.update({ settings, cachedUnits: retained });
+    store.update({ settings, cachedUnits: retained }, source);
     for (const order of store.data.settings.opOrders || []) if (!order.enabled) { opOrderSynced.delete(order.id); opOrderAttempts.delete(order.id); opOrderConflicts.delete(order.id); }
     for (const id of opOrderConflicts.keys()) if (!store.data.settings.opOrders.some((order) => order.id === id)) opOrderConflicts.delete(id);
     if (JSON.stringify(Object.fromEntries(opOrderConflicts)) !== JSON.stringify(store.data.opOrderConflicts)) store.save('opOrderConflicts', Object.fromEntries(opOrderConflicts));

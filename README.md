@@ -69,6 +69,10 @@ Use your browser's Add to Home Screen / Install action where supported. The mani
 
 `npm run test:remote` covers gateway authentication/origin checks, pairing expiry/reuse/rate limits, scoped terminal handles, control ownership, snapshot sequencing, lifecycle deduplication, revocation, and disconnect cleanup. `npm run test:companion` runs live Electron/SSH and phone-size Chromium/Edge flows through a local transport proxy using the production HTTPS-origin/cookie rules; it never changes Tailscale configuration or sends model prompts. On Windows it uses installed Edge by default; set `AGENTC2_COMPANION_CHROMIUM=1` to use downloaded Chromium. On other platforms install Chromium with `npx playwright-core install chromium` first. Set `AGENT_HQ_COMPANION_BROWSER=webkit` to run with installed Playwright WebKit. The proxy test does not establish real Tailscale or physical-phone connectivity. Screenshots go to the OS temporary directory.
 
+## Desktop sync
+
+Pair trusted computers in **Settings → Desktop sync** to share remote hosts, presets, policies, notes, pins, and callsigns over a LAN or VPN. Each desktop keeps its own local sessions and open panes, with an explicit **Pull open tabs** action. See [pairing, conflict resolution, and validation](docs/desktop-sync.md).
+
 ## Saved-session cleanup
 
 On desktop, choose **Session cleanup** in the sidebar, or **Delete history** on a saved conversation. Select a host/provider and minimum age, preview the eligible histories and reviewed files, select entries, and confirm permanent deletion. A pinned history requires an explicit manual override and a fresh preview. Stop and Detach preserve history; AgentC2 does not directly remove repositories or Git worktrees during history cleanup. The companion receives the updated inventory but cannot invoke deletion APIs.

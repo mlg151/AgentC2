@@ -1,7 +1,25 @@
 const { contextBridge, ipcRenderer } = require('electron');
+let peerEpoch = 0;
+ipcRenderer.on('peer-sync:applied', (_event, state) => { peerEpoch = Math.max(peerEpoch, state.peerEpoch); });
 
 contextBridge.exposeInMainWorld('agentHQ', {
   platform: process.platform,
+  peerSyncStatus: () => ipcRenderer.invoke('peer-sync:status'),
+  savePeerSync: (input) => ipcRenderer.invoke('peer-sync:save', input),
+  issuePeerPairing: () => ipcRenderer.invoke('peer-sync:pair'),
+  connectPeer: (input) => ipcRenderer.invoke('peer-sync:connect', input),
+  revokePeer: (id) => ipcRenderer.invoke('peer-sync:revoke', id),
+  pullPeerTabs: (id) => ipcRenderer.invoke('peer-sync:pull-tabs', id),
+  onPeerSyncStatus: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on('peer-sync:status', listener);
+    return () => ipcRenderer.removeListener('peer-sync:status', listener);
+  },
+  onPeerSyncApplied: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on('peer-sync:applied', listener);
+    return () => ipcRenderer.removeListener('peer-sync:applied', listener);
+  },
   checkForUpdates: () => ipcRenderer.invoke('updates:check'),
   updateState: () => ipcRenderer.invoke('updates:state'),
   downloadUpdate: () => ipcRenderer.invoke('updates:download'),
@@ -11,8 +29,8 @@ contextBridge.exposeInMainWorld('agentHQ', {
     ipcRenderer.on('updates:state', listener);
     return () => ipcRenderer.removeListener('updates:state', listener);
   },
-  getState: () => ipcRenderer.invoke('state:get'),
-  saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
+  getState: async () => { const state = await ipcRenderer.invoke('state:get'); peerEpoch = Math.max(peerEpoch, state.peerEpoch || 0); return state; },
+  saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings, peerEpoch),
   previewOpOrder: (order) => ipcRenderer.invoke('oporder:preview', order),
   enrollOpOrder: (order, revision) => ipcRenderer.invoke('oporder:enroll', order, revision),
   previewSitrep: (input) => ipcRenderer.invoke('sitrep:preview', input),
@@ -51,7 +69,7 @@ contextBridge.exposeInMainWorld('agentHQ', {
   decideFlashTraffic: (input) => ipcRenderer.invoke('flash:decide', input),
   interruptFaults: () => ipcRenderer.invoke('fault:interrupt-all'),
   resetFault: (key) => ipcRenderer.invoke('fault:reset', key),
-  saveWorkspace: (workspace) => ipcRenderer.invoke('workspace:save', workspace),
+  saveWorkspace: (workspace) => ipcRenderer.invoke('workspace:save', workspace, peerEpoch),
   setSessionPinned: (key, pinned) => ipcRenderer.invoke('session:pin', key, pinned),
   previewCleanup: (input) => ipcRenderer.invoke('cleanup:preview', input),
   executeCleanup: (token, keys) => ipcRenderer.invoke('cleanup:execute', token, keys),

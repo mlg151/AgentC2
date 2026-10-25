@@ -426,6 +426,16 @@
       "env": {
         "AGENTC2_CHAT_TEST_LOCAL": "1"
       }
+    },
+    {
+      "id": "peer-sync",
+      "file": "tests/peer-sync.cjs",
+      "group": "core"
+    },
+    {
+      "id": "peer-sync-ui",
+      "file": "tests/peer-sync.e2e.cjs",
+      "group": "desktop"
     }
   ],
   "nested": {
