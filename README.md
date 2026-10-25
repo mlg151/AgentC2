@@ -134,3 +134,53 @@ AgentC2 never reads provider authentication tokens or SSH private keys. Electron
 Local sessions: **Settings → Hosts → Add this computer** runs agents without an SSH server. Linux uses local Python 3/tmux; Windows uses the default WSL distribution. See [local setup and validation limits](docs/unified-chat.md#local-sessions).
 
 OpenCode setup, verified versions, session renaming, and update detection: [OpenCode and desktop updates](docs/opencode.md).
+
+## Screenshots and examples
+
+The screenshots below show the app using isolated test fixtures. Click an image to inspect the full-size view.
+
+### Monitor your fleet
+
+![Situation Room with a grouped roster, two session panes, and host resources](docs/screenshots/situation-room.png)
+
+Configure a host in **Settings → SSH hosts**, then choose **New** to launch a session. Select a unit in the roster to open it, pin a unit to Pane A, and use Alt+J/K to cycle through other units in Pane B. Press Ctrl+G for the read-only Overwatch grid.
+
+![Overwatch grid showing multiple session snapshots](docs/screenshots/overwatch.png)
+
+See [Situation Room](docs/situation-room.md) for shortcuts and narrow-window examples.
+
+### Work in a structured chat
+
+![Desktop structured chat transcript and controls](docs/screenshots/structured-chat-desktop.png)
+
+Choose **New → Structured chat**, select a supported provider and configured host, and enter a working directory. Send a task in the composer and inspect tool results and any requests in the transcript. Choose **Terminal** in the launch dialog for custom commands. See [unified chat](docs/unified-chat.md) for provider setup and recovery.
+
+For local execution, choose **Settings → Hosts → Add this computer** first. Linux needs Python 3 and tmux; Windows uses the default WSL distribution. The [local-session guide](docs/unified-chat.md#local-sessions) explains setup.
+
+### Review isolated work
+
+![Worktree launch form for an isolated Git task](docs/screenshots/worktree-launch.png)
+
+Launch a task in an isolated worktree, inspect its [live diff](docs/worktree-diffs.md), and review the changes before integrating them. For competing approaches, use Joint Exercises to choose a base ref and contestants, run a test command, and compare captured evidence before promotion.
+
+![Exercise review with contestant results](docs/screenshots/exercise-review.png)
+
+See [worktrees](docs/worktrees.md), [SPECOPS](docs/specops.md), and [SitRep](docs/sitrep.md) for related workflows.
+
+### Validate a source build
+
+```sh
+npm run test:ci       # renderer build and host-independent checks
+npm run test:desktop  # native Electron checks; use xvfb-run -a on headless Linux
+npm run dist          # package the current native platform into release/
+npm run test:package  # smoke-test the packaged app
+```
+
+Live SSH checks need an explicit test environment; they are separate from the host-independent suite:
+
+```sh
+AGENTC2_HOST=your-test-host npm run test:terminal
+AGENTC2_HOST=your-test-host npm run test:launch-modes
+```
+
+Terminal tests create isolated sessions and restore the clipboard. Launch-mode tests require installed provider CLIs. See [platform setup](docs/platforms.md) and [live SSH QA](docs/releases.md#live-ssh-qa) for prerequisites and validation limits.
