@@ -29,6 +29,9 @@ def chat_remote(payload, directory=None):
         digest = payload.get("sourceDigest")
         if not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest):
             raise ValueError("Invalid remote chat worker digest")
+    request = payload.get("request")
+    if not isinstance(request, dict):
+        raise ValueError("Invalid chat request")
     root = Path(directory) if directory is not None else Path.home() / ".cache" / "agentc2" / "chat-v1"
 
     def owned_directory(location):
@@ -62,19 +65,56 @@ def chat_remote(payload, directory=None):
             return result["result"]
 
     health_request = dict(protocolVersion=1, action="health")
-    # Serialize the health check and detached launch. The worker's lifetime
-    # lock rejects simultaneous workers, but cannot prevent a delayed duplicate
-    # launcher from starting after the original worker retires during upgrade.
+
+    def read_health():
+        try:
+            result = rpc(health_request)
+        except (FileNotFoundError, ConnectionRefusedError):
+            return None
+        if result.get("protocolVersion") != 1:
+            raise ValueError("Unsupported chat worker protocol; active sessions have been preserved")
+        return result
+
+    def can_upgrade(health):
+        return (health is not None and health.get("sourceDigest") != digest
+                and payload.get("allowUpgrade") is True and files is not None
+                and health.get("canRetire") is True)
+
+    # A source digest identifies code, not wire compatibility. Keep serving
+    # existing sessions on their owning worker until it can retire safely.
+    # Shared locks allow concurrent RPCs (including long SDK preparations),
+    # while an exclusive lock fences the entire retirement/bootstrap handoff.
     bootstrap_descriptor = os.open(root / "bootstrap.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     with os.fdopen(bootstrap_descriptor, "w") as bootstrap_lock:
         info = os.fstat(bootstrap_lock.fileno())
         if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1:
             raise ValueError("Unsupported worker bootstrap lock")
+        fcntl.flock(bootstrap_lock, fcntl.LOCK_SH)
+        health = read_health()
+        if health is not None and not can_upgrade(health):
+            return health if request == health_request else rpc(request)
         fcntl.flock(bootstrap_lock, fcntl.LOCK_EX)
-        try:
-            health = rpc(health_request)
-        except (FileNotFoundError, ConnectionRefusedError):
-            health = None
+        # Another helper may have launched/upgraded or accepted work while we
+        # changed locks. Never act on the earlier health snapshot.
+        health = read_health()
+        if can_upgrade(health):
+            try:
+                rpc(dict(protocolVersion=1, action="retire"))
+            except ValueError:
+                # Older helpers only lock their health check. A command or SDK
+                # preparation can win that race; the worker remains authoritative.
+                current = read_health()
+                if current is None or current.get("bootId") != health.get("bootId") or current.get("canRetire") is not False:
+                    raise
+                health = current
+            else:
+                for _ in range(100):
+                    if not location.exists():
+                        health = None
+                        break
+                    time.sleep(0.05)
+                else:
+                    raise ValueError("Previous chat worker did not finish retiring; reconnect without resending uncertain commands")
         if health is None:
             if files is None:
                 raise ValueError("Remote chat worker is unavailable; reconnect to bootstrap it again")
@@ -106,23 +146,10 @@ def chat_remote(payload, directory=None):
             finally:
                 os.close(log)
             for _ in range(100):
-                try:
-                    health = rpc(health_request)
+                health = read_health()
+                if health is not None:
                     break
-                except (FileNotFoundError, ConnectionRefusedError):
-                    time.sleep(0.05)
+                time.sleep(0.05)
             if health is None:
                 raise ValueError("Remote chat worker did not start; inspect its private worker.log")
-    if health.get("protocolVersion") != 1 or health.get("sourceDigest") != digest:
-        if payload.get("allowUpgrade") is True and health.get("canRetire") is True and files is not None:
-            rpc(dict(protocolVersion=1, action="retire"))
-            for _ in range(100):
-                if not location.exists():
-                    return chat_remote(payload, root)
-                time.sleep(0.05)
-            raise ValueError("Previous chat worker did not finish retiring; reconnect without resending uncertain commands")
-        raise ValueError("A different worker version is running; stop its managed chat sessions before upgrading the worker")
-    request = payload.get("request")
-    if not isinstance(request, dict):
-        raise ValueError("Invalid chat request")
-    return health if request == health_request else rpc(request)
+        return health if request == health_request else rpc(request)
