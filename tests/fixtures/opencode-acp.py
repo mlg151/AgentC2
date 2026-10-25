@@ -54,6 +54,11 @@ for raw in sys.stdin:
             update(dict(sessionUpdate="agent_message_chunk", content=dict(type="text", text="Streamed ")))
             update(dict(sessionUpdate="usage_update", used=250, size=1000, cost=dict(currency="USD", amount=0.01)))
             complete("answer")
+    elif method == "session/set_model":
+        if params["modelId"] == "rejected-model":
+            write(dict(id=request["id"], error=dict(code=-32602, message="Model unavailable")))
+        else:
+            write(dict(id=request["id"], result={}))
     elif method == "session/cancel":
         if prompt is not None:
             complete("Interrupted", "cancelled")

@@ -271,8 +271,17 @@ class CodexAdapter:
                 return
             self.event("approval.requested", dict(requestId=request_id, action=display(params.get("command") or "Review file changes", 2000), detail=detail), params["turnId"], params["itemId"])
 
+    def set_model(self, model):
+        if self.turn_id is not None:
+            raise ProviderRejected("Wait for the current Codex turn before changing the model")
+        self.session["model"] = model
+        return dict(model=model, appliesTo="next-turn")
+
     def send(self, text, command_id):
-        result = self.request("turn/start", dict(threadId=self.thread_id, input=[dict(type="text", text=text)], clientUserMessageId=command_id))
+        params = dict(threadId=self.thread_id, input=[dict(type="text", text=text)], clientUserMessageId=command_id)
+        if self.session.get("model"):
+            params["model"] = self.session["model"]
+        result = self.request("turn/start", params)
         return dict(turnId=result["turn"]["id"])
 
     def steer(self, text, expected_turn_id):

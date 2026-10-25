@@ -51,6 +51,7 @@ export type ChatEvent = ChatEventData & {
 };
 type ChatOperation =
   | { operation: 'create'; sessionId?: never; payload: { provider: ChatProvider; cwd: string; title: string; roeProfile: 'full' | 'gated' | 'provider-default'; providerSessionId?: string; managedName?: string; instructions?: string; model?: string } }
+  | { operation: 'model'; sessionId: string; payload: { model: string } }
   | { operation: 'send'; sessionId: string; payload: { text: string } }
   | { operation: 'steer'; sessionId: string; payload: { text: string; expectedTurnId: string } }
   | { operation: 'respond'; sessionId: string; payload: { requestId: string; turnId: string | null; itemId: string | null } & ({ decision: 'allow' | 'deny'; answers?: never } | { answers: ChatAnswer[]; decision?: never }) }

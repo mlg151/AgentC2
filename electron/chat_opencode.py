@@ -88,6 +88,8 @@ class OpenCodeAdapter:
             self.loading = False
             self.native_id = identifier(params["sessionId"] if resumed else result["sessionId"])
             self.journal.set_provider_session(self.session["id"], self.native_id)
+            if self.session.get("model"):
+                self.set_model(self.session["model"])
             self.event("session.updated", dict(state="idle", detail="OpenCode session ready"))
             return dict(providerSessionId=self.native_id, pid=self.process.pid)
         except BaseException:
@@ -198,6 +200,15 @@ class OpenCodeAdapter:
         with self.lock:
             self.requests[request_id] = record
         self.event(kind, data, self.turn_id, item_id)
+
+    def set_model(self, model):
+        with self.lock:
+            if self.turn_id is not None:
+                raise ProviderRejected("Wait for the current OpenCode turn before changing the model")
+        # Use the ACP operation; never silently pass an ignored prompt field.
+        self.request("session/set_model", dict(sessionId=self.native_id, modelId=model))
+        self.session["model"] = model
+        return dict(model=model, providerSessionId=self.native_id)
 
     def send(self, text, command_id):
         with self.lock:

@@ -121,6 +121,19 @@ class SdkAdapterTests(unittest.TestCase):
         self.assertIn('FIRST_CONTEXT_MARKER', json.dumps(self.requests[-1]))
         self.assertTrue(any(event['type'] == 'usage.updated' for event in page['events']))
 
+    def test_model_change_resumes_same_native_conversation(self):
+        adapter = self.start()
+        self.finished(adapter, self.send(adapter, 'MODEL_CONTEXT_MARKER'))
+        native = adapter.native_id
+        before = len(self.journal.history(adapter.session['id'], limit=500)['events'])
+        adapter.set_model('fixture-second')
+        self.finished(adapter, self.send(adapter, 'Continue after model switch'))
+        self.assertEqual(adapter.native_id, native)
+        self.assertEqual(self.requests[-1]['model'], 'fixture-second')
+        self.assertIn('MODEL_CONTEXT_MARKER', json.dumps(self.requests[-1]))
+        events = self.journal.history(adapter.session['id'], limit=500)['events'][before:]
+        self.assertFalse(any(event['turnId'] == 'sdk-history' for event in events))
+
     def test_real_sdk_gated_deny_allow_and_stale_decision(self):
         adapter = self.start('gated')
         denied = self.send(adapter, 'PROTECTED_COMMAND deny')

@@ -44,6 +44,16 @@ class FixtureAdapter:
         self.event("session.updated", dict(state="idle", detail="Fixture ready"))
         return dict(pid=self.process.pid)
 
+    def set_model(self, model):
+        if model == "rejected-model":
+            raise ProviderRejected("Fixture rejected model")
+        if model == "uncertain-model":
+            raise TimeoutError("Fixture model acknowledgement lost")
+        with (self.journal.directory / "models.txt").open("a") as stream:
+            stream.write(model + "\n")
+        self.session["model"] = model
+        return dict(model=model)
+
     def send(self, text, command_id):
         if text == "reject":
             raise ProviderRejected("Fixture rejected before executing")
@@ -167,6 +177,25 @@ class WorkerProcessTests(unittest.TestCase):
                     raise
                 return None
         return poll(receipt, lambda value: value is not None and value["state"] in ("completed", "failed", "unknown"))
+
+    def test_model_command_receipt_idempotency_rejection_and_uncertainty(self):
+        identifier, _ = self.create()
+        value = command("model", dict(model="fixture-next"), identifier)
+        rpc(self.root, request("command", command=value))
+        self.assertEqual(self.wait_receipt(value)["state"], "completed")
+        rpc(self.root, request("command", command=value))
+        self.assertEqual((self.root / "models.txt").read_text().splitlines(), ["fixture-next"])
+        page = rpc(self.root, request("history", sessionId=identifier))
+        self.assertEqual(page["session"]["model"], "fixture-next")
+        native = page["session"]["providerSessionId"]
+        for model, expected in (("rejected-model", "failed"), ("uncertain-model", "unknown")):
+            value = command("model", dict(model=model), identifier)
+            rpc(self.root, request("command", command=value))
+            self.assertEqual(self.wait_receipt(value)["state"], expected)
+            page = rpc(self.root, request("history", sessionId=identifier))
+            self.assertEqual(page["session"]["model"], "fixture-next")
+            self.assertEqual(page["session"]["providerSessionId"], native)
+        self.assertEqual(page["session"]["state"], "unknown")
 
     def test_client_disconnect_does_not_kill_worker_or_owned_provider(self):
         identifier, created = self.create()
