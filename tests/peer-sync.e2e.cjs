@@ -1,3 +1,4 @@
+const { poll } = require('./helpers/poll.cjs');
 // Browser plugin unavailable: actual Electron windows, preload, IPC, and sockets.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -40,9 +41,9 @@ const { Store, validateSettings } = require('../electron/config.cjs');
     await a.getByRole('button', { name: 'Close settings', exact: true }).click();
     await b.getByRole('button', { name: 'Close settings', exact: true }).click();
     await a.evaluate(async () => { const api = window.agentHQ, state = await api.getState(); await api.saveWorkspace({ ...state.workspace, metadata: { ...state.workspace.metadata, 'remote/tmux:hq-123456abcdef': { notes: 'Coordinate shared fixture mission', project: 'Shared project', pinned: false } } }); await api.setSessionPinned('remote/tmux:hq-123456abcdef', true); });
-    await b.waitForFunction(async () => { const state = await window.agentHQ.getState(); return state.workspace.metadata['remote/tmux:hq-123456abcdef']?.pinned && state.workspace.metadata['remote/tmux:hq-123456abcdef']?.notes === 'Coordinate shared fixture mission'; });
+    await poll(() => b.evaluate(async () => { const state = await window.agentHQ.getState(); return state.workspace.metadata['remote/tmux:hq-123456abcdef']?.pinned && state.workspace.metadata['remote/tmux:hq-123456abcdef']?.notes === 'Coordinate shared fixture mission'; }), 'Peer notes and pin did not converge');
     await a.evaluate(async () => { const api = window.agentHQ, state = await api.getState(); await api.saveSettings({ ...state.settings, hosts: state.settings.hosts.map((host) => host.id === 'remote' ? { ...host, name: 'Synced command host' } : host) }); });
-    await b.waitForFunction(async () => (await window.agentHQ.getState()).settings.hosts.some((host) => host.name === 'Synced command host'));
+    await poll(() => b.evaluate(async () => (await window.agentHQ.getState()).settings.hosts.some((host) => host.name === 'Synced command host')), 'Peer host settings did not converge');
     await b.getByRole('button', { name: 'Settings', exact: true }).click();
     assert.equal(await b.getByRole('textbox', { name: 'Name', exact: true }).first().inputValue(), 'This computer');
     assert.equal(await b.getByRole('textbox', { name: 'Name', exact: true }).nth(1).inputValue(), 'Synced command host');

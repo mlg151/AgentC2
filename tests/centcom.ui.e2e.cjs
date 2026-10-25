@@ -1,3 +1,4 @@
+const { poll } = require('./helpers/poll.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -164,7 +165,7 @@ const { createAutomations } = require('../electron/centcom-automations.cjs');
     await page.getByLabel('Provider turn deadline (seconds)', { exact: true }).fill('1200');
     await page.getByLabel('Cancellation reconciliation deadline (seconds)', { exact: true }).fill('20');
     await page.getByRole('button', { name: 'Save Configuration', exact: true }).click();
-    await page.waitForFunction(async () => (await window.agentHQ.centcomState()).config.triggers.fallbackSeconds === 0);
+    await poll(() => page.evaluate(async () => (await window.agentHQ.centcomState()).config.triggers.fallbackSeconds === 0), 'CENTCOM fallback setting was not saved');
     const persisted = JSON.parse(fs.readFileSync(path.join(directory, 'centcom/centcom.json')));
     assert.equal(persisted.config.triggers.fallbackSeconds, 0);
     assert.equal(persisted.config.turnDeadlineSeconds, 1200);

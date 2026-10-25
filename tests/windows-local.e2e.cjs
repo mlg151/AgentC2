@@ -1,3 +1,4 @@
+const { poll } = require('./helpers/poll.cjs');
 // Browser plugin not available: exercise the production Electron entry point.
 // Requires default WSL Python 3/tmux. Uses a disposable HOME, no provider account.
 const assert = require('node:assert/strict');
@@ -65,9 +66,9 @@ const { localCommand } = require('../electron/local.cjs');
     created.push(shell.name);
     for (let attempt = 0; attempt < 2; attempt++) {
       const handle = await page.evaluate((name) => window.agentHQ.openTerminal(name, 100, 30, 'default'), shell.name);
-      await page.waitForFunction(async (id) => (await window.agentHQ.terminalState(id)).connection === 'connected', handle, { timeout: 30000 });
+      await poll(() => page.evaluate(async (id) => (await window.agentHQ.terminalState(id)).connection === 'connected', handle), 'WSL tmux did not acknowledge startup');
       await page.evaluate(({ handle, attempt }) => window.agentHQ.writeTerminal(handle, `printf 'WSL_READY_%s\\n' '${attempt}'\r`), { handle, attempt });
-      await page.waitForFunction(async ({ handle, attempt }) => (await window.agentHQ.readyTerminal(handle)).text.includes(`WSL_READY_${attempt}`), { handle, attempt }, { timeout: 30000 });
+      await poll(() => page.evaluate(async ({ handle, attempt }) => (await window.agentHQ.readyTerminal(handle)).text.includes(`WSL_READY_${attempt}`), { handle, attempt }), 'WSL first input after attach was lost');
       await page.evaluate((id) => window.agentHQ.closeTerminal(id), handle);
     }
     assert.equal(await page.locator('vite-error-overlay').count(), 0); assert.deepEqual(errors, []);

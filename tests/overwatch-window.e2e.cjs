@@ -1,3 +1,4 @@
+const { poll } = require('./helpers/poll.cjs');
 // Browser plugin not available: exercise actual Electron windows/preload/IPC.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -82,7 +83,7 @@ const { Store } = require('../electron/config.cjs');
     detached = await next; observe(detached);
     await detached.getByRole('main', { name: 'Overwatch', exact: true }).waitFor();
     await (await app.browserWindow(detached)).evaluate((window) => window.close());
-    await main.waitForFunction(async () => !(await window.agentHQ.overwatchWindowState()).undocked);
+    await poll(() => main.evaluate(async () => !(await window.agentHQ.overwatchWindowState()).undocked), 'Native close did not restore docked state');
     assert.equal(main.isClosed(), false);
     assert.equal(await main.getByRole('dialog', { name: 'Overwatch', exact: true }).count(), 0);
     await main.getByRole('button', { name: /OVERWATCH$/ }).click();
