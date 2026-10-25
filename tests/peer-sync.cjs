@@ -80,8 +80,15 @@ async function until(check, detail) { for (let n = 0; n < 150; n++) { if (check(
     const fakeLocal = { [keyFor('host', 'local-A')]: { clock: a.data.clock + 1, peer: b.data.id, deleted: false, value: { id: 'local-A', name: 'collision', target: 'fixture.invalid', port: 22, enabled: true } } };
     assert.throws(() => project(a.store.data, mergeRecords(a.data.records, fakeLocal)), /conflicts/);
     // Host retargeting must still respect production service's open-view guard.
+    const originalSave = b.service.saveSettings; let entered = false, release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    b.service.saveSettings = async (...args) => { entered = true; await gate; return originalSave(...args); };
+    await a.service.saveSettings({ ...a.store.data.settings, hosts: a.store.data.settings.hosts.map((h) => h.id === 'remote' ? { ...h, name: 'First pending edit' } : h) });
+    await until(() => entered, 'delayed first settings application');
     b.service.chats.sessions.set('fixture', { hostId: 'remote', handles: new Set() });
     await a.service.saveSettings({ ...a.store.data.settings, hosts: a.store.data.settings.hosts.map((h) => h.id === 'remote' ? { ...h, target: 'changed.invalid' } : h) });
+    await until(() => b.data.records[keyFor('host', 'remote')].value.target === 'changed.invalid', 'second settings edit during apply');
+    release();
     await until(() => b.error.includes('Close this host'), 'active connection guard'); assert.equal(b.store.data.settings.hosts.find((h) => h.id === 'remote').target, 'fixture.invalid');
     const pendingRecords = structuredClone(b.data.records), pendingService = b.service, pendingDirectory = path.dirname(b.file);
     b.close(); b = new PeerSync({ directory: pendingDirectory, service: pendingService }); peers.push(b);

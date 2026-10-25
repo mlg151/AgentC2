@@ -260,6 +260,13 @@ class PeerSync extends EventEmitter {
       let patch = project(this.store.data, this.data.records);
       if (!equal(patch.settings, this.store.data.settings)) await this.service.saveSettings(patch.settings, fingerprint(this.store.data.settings), 'peer-sync');
       patch = project(this.store.data, this.data.records);
+      // Records can advance while saveSettings awaits in-flight inventory. Every
+      // subsequent settings version must pass the service's connection guards.
+      if (!equal(patch.settings, this.store.data.settings)) {
+        const { settings, workspace, attention } = this.store.data;
+        this.emit('applied', { settings, workspace, attention });
+        return;
+      }
       const deleted = patch.deletedSessions.filter((key) => !this.store.data.deletedSessions.includes(key));
       if (Object.entries(patch).some(([key, value]) => !equal(value, this.store.data[key]))) {
         const cachedUnits = Object.fromEntries(Object.entries(this.store.data.cachedUnits).map(([id, units]) => [id, units.filter((unit) => !patch.deletedSessions.includes(unit.key))]));
