@@ -431,6 +431,26 @@
       "id": "local-lifecycle",
       "file": "tests/local-lifecycle.cjs",
       "group": "linux-python"
+    },
+    {
+      "id": "overwatch-window.e2e",
+      "file": "tests/overwatch-window.e2e.cjs",
+      "group": "desktop"
+    },
+    {
+      "id": "window-sender",
+      "file": "tests/window-sender.cjs",
+      "group": "core"
+    },
+    {
+      "id": "peer-sync",
+      "file": "tests/peer-sync.cjs",
+      "group": "core"
+    },
+    {
+      "id": "peer-sync-ui",
+      "file": "tests/peer-sync.e2e.cjs",
+      "group": "desktop"
     }
   ],
   "nested": {

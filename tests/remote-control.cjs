@@ -96,6 +96,8 @@ async function connect(url, cookie, origin = url) {
     const aHandle = await a.request('terminal:open', ['hq-fixture', 40, 20, 'default']);
     const bHandle = await b.request('terminal:open', ['hq-fixture', 60, 25, 'default']);
     assert.equal(ptys.length, 1);
+    ptys[0].emit('data', '\x1b[?1049h');
+    await terminals.sessions.get('default/hq-fixture').queue;
     assert.equal((await a.request('terminal:state', [aHandle])).canControl, false);
     const key = 'default/tmux:hq-fixture';
     service.store.save('workspace', { tabs: [key], selectedKey: key, splitKey: null, metadata: { [key]: { pinned: false, project: 'Pin QA', notes: 'Preserve me' } } });

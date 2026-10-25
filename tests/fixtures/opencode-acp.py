@@ -2,6 +2,7 @@
 """No model calls: an ACP peer for streaming, replies, cancellation, and resume."""
 import json
 import sys
+from pathlib import Path
 
 session = "ses_fixture123456"
 prompt = None
@@ -24,6 +25,8 @@ def complete(text="Fixture answer", reason="end_turn"):
 
 
 for raw in sys.stdin:
+    with Path("acp-requests.jsonl").open("a") as log:
+        log.write(raw)
     request = json.loads(raw)
     method, params = request.get("method"), request.get("params", {})
     if method == "initialize":
@@ -54,6 +57,16 @@ for raw in sys.stdin:
             update(dict(sessionUpdate="agent_message_chunk", content=dict(type="text", text="Streamed ")))
             update(dict(sessionUpdate="usage_update", used=250, size=1000, cost=dict(currency="USD", amount=0.01)))
             complete("answer")
+    elif method == "session/set_model":
+        write(dict(id=request["id"], error=dict(code=-32601, message="Method not found in OpenCode 2.1.3")))
+    elif method == "session/set_config_option":
+        assert set(params) == {"sessionId", "configId", "value"}
+        assert params["sessionId"] == session and params["configId"] == "model"
+        if params["value"] == "rejected-model":
+            write(dict(id=request["id"], error=dict(code=-32602, message="Model unavailable")))
+        else:
+            current = "fixture/unconfirmed" if params["value"] == "unconfirmed-model" else params["value"]
+            write(dict(id=request["id"], result=dict(configOptions=[dict(id="model", category="model", currentValue=current)])))
     elif method == "session/cancel":
         if prompt is not None:
             complete("Interrupted", "cancelled")

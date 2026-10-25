@@ -5,26 +5,57 @@ const { tailscaleStatus, closeAction } = require('./platform.cjs');
 const { createService } = require('./service.cjs');
 const { createUpdates, createMainCheck } = require('./updates.cjs');
 const { Gateway } = require('./gateway.cjs');
+const { PeerSync } = require('./peer-sync.cjs');
 const { readClipboardPng } = require('./clipboard-image.cjs');
+const { assertWindowSender } = require('./window-sender.cjs');
 
 const desktop = { id: 'desktop', name: 'Desktop' };
-let mainWindow, service, gateway, tray, monitor, healthMonitor, cleanupMonitor;
+let mainWindow, overwatchWindow, service, gateway, peerSync, tray, monitor, healthMonitor, cleanupMonitor;
+let peerEpoch = 0;
 let quitting = false;
 let startupError = '';
 const icon = path.join(__dirname, '..', 'assets', process.platform === 'win32' ? 'app-icon.ico' : 'app-icon.png');
+const overwatchEvents = new Set(['inventory:updated', 'session:pinned', 'sessions:deleted', 'overwatch:workspace']);
 function send(event, ...args) {
+  if (overwatchEvents.has(event) && overwatchWindow && !overwatchWindow.isDestroyed()) overwatchWindow.webContents.send(event, ...args);
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(event, ...args);
 }
 function showWindow() { if (!mainWindow || mainWindow.isDestroyed()) createWindow(); if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); }
-function assertSender(event) {
-  if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('Untrusted window');
+function assertSender(event, allowOverwatch = false) {
+  const windows = [mainWindow, ...(allowOverwatch ? [overwatchWindow] : [])];
+  assertWindowSender(event, windows);
   if (startupError) throw new Error(startupError);
+}
+function overwatchState() { return { undocked: Boolean(overwatchWindow && !overwatchWindow.isDestroyed()) }; }
+function closeOverwatchWindow() { if (overwatchWindow && !overwatchWindow.isDestroyed()) overwatchWindow.destroy(); }
+function undockOverwatch() {
+  if (overwatchState().undocked) {
+    if (overwatchWindow.isMinimized()) overwatchWindow.restore();
+    overwatchWindow.show(); overwatchWindow.focus();
+    return overwatchState();
+  }
+  overwatchWindow = new BrowserWindow({
+    width: 1280, height: 820, minWidth: 760, minHeight: 520, backgroundColor: '#0c151b', title: 'AgentC2 — Overwatch', icon, autoHideMenuBar: true,
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true },
+  });
+  overwatchWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  overwatchWindow.webContents.on('will-navigate', (event) => event.preventDefault());
+  overwatchWindow.on('closed', () => { overwatchWindow = null; send('overwatch:window-state', overwatchState()); });
+  if (process.env.NODE_ENV === 'development') void overwatchWindow.loadURL('http://127.0.0.1:5173/?view=overwatch');
+  else void overwatchWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'), { search: 'view=overwatch' });
+  send('overwatch:window-state', overwatchState());
+  return overwatchState();
 }
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440, height: 900, minWidth: 940, minHeight: 650, backgroundColor: '#0c151b', title: 'AgentC2', icon, autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true },
   });
+  // Native borders consume part of setSize() on Windows. Reserve the renderer's
+  // actual minimum content area, independent of title-bar and border dimensions.
+  const [outerWidth, outerHeight] = mainWindow.getSize();
+  const [contentWidth, contentHeight] = mainWindow.getContentSize();
+  mainWindow.setMinimumSize(940 + Math.max(0, outerWidth - contentWidth), 650 + Math.max(0, outerHeight - contentHeight));
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     try {
       const target = new URL(url);
@@ -40,6 +71,7 @@ function createWindow() {
   if (process.env.NODE_ENV === 'development') mainWindow.loadURL('http://127.0.0.1:5173');
   else mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   mainWindow.on('close', (event) => {
+    closeOverwatchWindow();
     const action = closeAction({ quitting, remoteEnabled: gateway?.data.enabled, hasTray: Boolean(tray) });
     if (action !== 'close') { event.preventDefault(); if (action === 'minimize') mainWindow.minimize(); else mainWindow.hide(); }
   });
@@ -100,6 +132,10 @@ app.whenReady().then(async () => {
   try {
     service = createService({ directory, home: app.getPath('home'), specopsDirectory: process.env.AGENTC2_DATA_DIR || process.env.AGENT_HQ_DATA_DIR ? undefined : path.join(app.getPath('home'), '.agentc2', 'specops'), centcomDirectory: process.env.AGENTC2_DATA_DIR || process.env.AGENT_HQ_DATA_DIR ? undefined : path.join(app.getPath('home'), '.agentc2', 'centcom') });
     gateway = new Gateway({ directory, assets: path.join(__dirname, '..', 'dist'), service });
+    peerSync = new PeerSync({ directory, service });
+    peerSync.on('status', (value) => send('peer-sync:status', value));
+    peerSync.on('applied', (value) => { send('peer-sync:applied', { ...value, peerEpoch: ++peerEpoch }); send('overwatch:workspace', value.workspace); });
+    await peerSync.start().catch((error) => { peerSync.error = error.message; });
     service.events.on('client', (clientId, event, value) => {
       if (clientId !== 'desktop') return;
       if (event === 'terminal:data') send(event, value.id, value.data, value.sequence);
@@ -127,9 +163,27 @@ app.whenReady().then(async () => {
     if (gateway.data.enabled) await gateway.start().catch((error) => { gateway.error = error.message; });
     updateTray();
   } catch (error) { startupError = `Could not open saved configuration in ${directory}: ${error.message}`; }
-  function handle(name, fn) { ipcMain.handle(name, (event, ...args) => { assertSender(event); return fn(...args); }); }
-  handle('state:get', () => service.store.data);
-  handle('settings:save', (input) => service.saveSettings(input));
+  const overwatchReads = new Set(['state:get', 'inventory', 'terminal:previews', 'overwatch:state', 'overwatch:dock', 'overwatch:select']);
+  function handle(name, fn) { ipcMain.handle(name, (event, ...args) => { assertSender(event, overwatchReads.has(name)); return fn(...args); }); }
+  handle('overwatch:state', overwatchState);
+  handle('overwatch:undock', undockOverwatch);
+  handle('overwatch:dock', () => { closeOverwatchWindow(); showWindow(); const state = { ...overwatchState(), dockOpen: true }; send('overwatch:window-state', state); return state; });
+  handle('overwatch:select', async (key) => {
+    if (typeof key !== 'string' || key.length > 256) throw new Error('Invalid unit key');
+    const snapshot = await service.inventory();
+    if (!snapshot.sessions.some((unit) => unit.key === key && unit.kind === 'managed')) throw new Error('Managed unit is no longer available');
+    if (quitting || !mainWindow || mainWindow.isDestroyed()) throw new Error('Main window is unavailable');
+    showWindow(); send('overwatch:selected', key);
+  });
+  handle('state:get', () => ({ ...service.store.data, peerEpoch }));
+  const assertPeerEpoch = (epoch) => { if (epoch !== peerEpoch) throw new Error('Desktop sync updated this workspace. Review the latest state before saving.'); };
+  handle('peer-sync:status', () => peerSync.status());
+  handle('peer-sync:save', (input) => peerSync.configure(input));
+  handle('peer-sync:pair', () => peerSync.pair());
+  handle('peer-sync:connect', (input) => peerSync.connect(input));
+  handle('peer-sync:revoke', (id) => peerSync.revoke(id));
+  handle('peer-sync:pull-tabs', (id) => peerSync.pullTabs(id));
+  handle('settings:save', (input, epoch) => { assertPeerEpoch(epoch); return service.saveSettings(input); });
   handle('oporder:preview', (order) => service.previewOpOrder(order));
   handle('oporder:enroll', (order, revision) => service.enrollOpOrder(order, revision));
   handle('sitrep:preview', (input) => service.previewSitrep(desktop, input));
@@ -163,7 +217,7 @@ app.whenReady().then(async () => {
   handle('flash:decide', (input) => service.flashDecide(desktop, input));
   handle('fault:interrupt-all', () => service.interruptFaults(desktop));
   handle('fault:reset', (key) => service.resetFault(key));
-  handle('workspace:save', (input) => service.saveWorkspace(input));
+  handle('workspace:save', (input, epoch) => { assertPeerEpoch(epoch); const result = service.saveWorkspace(input); send('overwatch:workspace', result); return result; });
   handle('session:pin', (key, pinned) => service.setSessionPinned(key, pinned));
   const updater = !app.isPackaged
     ? new (require('./source-updater.cjs').SourceUpdater)({ revision: buildInfo.revision, directory: path.join(directory, 'source-updates'), app })
@@ -249,6 +303,8 @@ app.whenReady().then(async () => {
 const notified = new Set();
 app.on('before-quit', () => {
   quitting = true;
+  closeOverwatchWindow();
+  peerSync?.close();
   clearInterval(monitor); clearInterval(healthMonitor); clearInterval(cleanupMonitor);
   service?.specops.dispose(); service?.centcom.dispose(); void gateway?.dispose(); service?.terminals.closeAll(); service?.chats.closeAll(); tray?.destroy(); tray = null;
   service?.tunnels.closeAll();

@@ -1,0 +1,85 @@
+const { poll } = require('./helpers/poll.cjs');
+// Browser plugin unavailable: actual Electron windows, preload, IPC, and sockets.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { _electron } = require('playwright-core');
+const { Store, validateSettings } = require('../electron/config.cjs');
+(async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agentc2-peer-ui-')), apps = [], errors = [];
+  const screenshots = process.env.AGENTC2_QA_SCREENSHOT_DIR || path.join(directory, 'screenshots'); fs.mkdirSync(screenshots, { recursive: true });
+  try {
+    async function launch(name) {
+      const root = path.join(directory, name), store = new Store(root);
+      store.save('settings', validateSettings({ ...store.data.settings, hosts: [{ id: 'remote', name: 'Shared host', target: 'fixture.invalid', port: 22, enabled: true }, { id: `local-${name.replaceAll(' ', '-')}`, kind: 'local', name: 'This computer', enabled: true }] }));
+      const app = await _electron.launch({ executablePath: require('electron'), args: [path.join(__dirname, 'helpers/peer-app.cjs'), `--user-data-dir=${path.join(root, 'browser')}`], cwd: path.resolve(__dirname, '..'), env: { ...process.env, NODE_ENV: 'production', AGENTC2_DATA_DIR: root }, timeout: 60000 }); apps.push(app);
+      const page = await app.firstWindow(); page.on('pageerror', (error) => errors.push(error.message)); page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+      await page.locator('.session-row').first().waitFor();
+      await page.getByRole('button', { name: 'Settings', exact: true }).click();
+      await page.getByRole('button', { name: 'Desktop sync', exact: true }).click();
+      await page.getByRole('textbox', { name: 'Device name', exact: true }).fill(name);
+      await page.getByRole('checkbox', { name: 'Enable desktop sync', exact: true }).check();
+      await page.getByRole('spinbutton', { name: 'Sync port', exact: true }).fill('0');
+      await page.getByRole('button', { name: 'Apply desktop sync', exact: true }).click();
+      await page.getByRole('button', { name: 'Generate pairing code', exact: true }).waitFor();
+      return page;
+    }
+    const a = await launch('Command desktop'), b = await launch('Field laptop');
+    await a.getByRole('button', { name: 'Generate pairing code', exact: true }).click();
+    const address = await a.getByRole('textbox', { name: 'Pairing address', exact: true }).inputValue();
+    const code = await a.getByRole('textbox', { name: 'Pairing code', exact: true }).inputValue();
+    await b.getByRole('textbox', { name: 'Peer address', exact: true }).fill(address);
+    await b.getByLabel('Peer pairing code', { exact: true }).fill('invalid-code');
+    await b.getByRole('button', { name: 'Connect desktop', exact: true }).click();
+    await b.getByRole('alert').filter({ hasText: 'valid pairing code' }).waitFor();
+    await b.getByLabel('Peer pairing code', { exact: true }).fill(code);
+    await b.getByRole('button', { name: 'Connect desktop', exact: true }).click();
+    await b.locator('.host-editor').filter({ hasText: 'Command desktop' }).waitFor();
+    await a.locator('.host-editor').filter({ hasText: 'Field laptop' }).waitFor();
+    assert.equal(await b.getByLabel('Peer pairing code', { exact: true }).inputValue(), '');
+    await a.getByRole('button', { name: 'Close settings', exact: true }).click();
+    await b.getByRole('button', { name: 'Close settings', exact: true }).click();
+    // Edit through the renderer: writing its backing store behind React and
+    // then clicking Pin lets the renderer legitimately save its old draft.
+    await a.locator('.session-row').first().click();
+    await a.getByLabel('Session project', { exact: true }).fill('Shared project');
+    await a.getByRole('button', { name: 'Notes & handoff', exact: true }).click();
+    await a.getByLabel('Session notes and handoff', { exact: true }).fill('Coordinate shared fixture mission');
+    await a.getByRole('button', { name: 'Pin Shared fixture mission', exact: true }).click();
+    await poll(() => b.evaluate(async () => { const state = await window.agentHQ.getState(); return state.workspace.metadata['remote/tmux:hq-123456abcdef']?.pinned && state.workspace.metadata['remote/tmux:hq-123456abcdef']?.notes === 'Coordinate shared fixture mission'; }), 'Peer notes and pin did not converge');
+    await a.getByRole('button', { name: 'Settings', exact: true }).click();
+    await a.getByRole('textbox', { name: 'Name', exact: true }).nth(1).fill('Synced command host');
+    await a.getByRole('button', { name: 'Save settings', exact: true }).click();
+    await a.getByRole('dialog', { name: 'Settings', exact: true }).waitFor({ state: 'hidden' });
+    await poll(() => b.evaluate(async () => (await window.agentHQ.getState()).settings.hosts.some((host) => host.name === 'Synced command host')), 'Peer host settings did not converge');
+    await b.getByRole('button', { name: 'Settings', exact: true }).click();
+    assert.equal(await b.getByRole('textbox', { name: 'Name', exact: true }).first().inputValue(), 'This computer');
+    assert.equal(await b.getByRole('textbox', { name: 'Name', exact: true }).nth(1).inputValue(), 'Synced command host');
+    await b.getByRole('button', { name: 'Desktop sync', exact: true }).click();
+    await b.getByRole('button', { name: /^Pull open tabs/ }).click();
+    await b.screenshot({ path: path.join(screenshots, 'desktop-peer-sync.png') });
+    await apps[1].evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(940, 650));
+    await b.waitForFunction(() => innerWidth >= 940 && innerWidth <= 960 && innerHeight >= 650 && document.documentElement.scrollWidth <= innerWidth);
+    assert.equal(await b.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await b.getByRole('button', { name: 'Revoke desktop', exact: true }).scrollIntoViewIfNeeded();
+    await b.screenshot({ path: path.join(screenshots, 'desktop-peer-sync-narrow.png') });
+    const windowOpened = apps[1].waitForEvent('window');
+    await b.evaluate(() => window.agentHQ.undockOverwatch());
+    const detached = await windowOpened;
+    await detached.getByRole('main', { name: 'Overwatch', exact: true }).waitFor();
+    await a.evaluate(async () => { const state = await window.agentHQ.getState(); await window.agentHQ.saveWorkspace({ ...state.workspace, situation: { ...state.workspace.situation, callsigns: { 'remote/tmux:hq-123456abcdef': '07' } } }); });
+    await detached.getByRole('button', { name: 'Inspect unit 07', exact: true }).waitFor();
+    const forbidden = await detached.evaluate(async () => { try { await window.agentHQ.issuePeerPairing(); return ''; } catch (error) { return String(error); } });
+    assert.match(forbidden, /Untrusted window/);
+    await detached.close();
+    await b.getByRole('button', { name: 'Revoke desktop', exact: true }).click();
+    await b.getByText('No paired desktops.', { exact: true }).waitFor();
+    assert.equal(await b.evaluate(() => typeof window.require), 'undefined');
+    assert.deepEqual(errors, []);
+    console.log(`PASS two production Electron desktops: pairing/error recovery, live fleet/pin/note updates, pull tabs, narrow settings, revoke, isolated renderer, live detached Overwatch callsigns and restricted sync IPC; screenshots ${screenshots}`);
+  } catch (error) {
+    for (const app of apps) { const page = app.windows()[0]; console.error('Peer fixture metadata:', await page?.evaluate(async () => (await window.agentHQ.getState()).workspace.metadata).catch(() => null)); }
+    throw error;
+  } finally { for (const app of apps.reverse()) await app.close(); fs.rmSync(directory, { recursive: true, force: true }); }
+})().catch((error) => { console.error(error); process.exitCode = 1; });

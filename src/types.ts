@@ -97,7 +97,7 @@ export interface SituationWorkspace { version: 1; anchorKey: string | null; targ
 export interface Workspace { tabs: string[]; selectedKey: string | null; splitKey: string | null; metadata: Record<string, SessionMetadata>; situation?: SituationWorkspace }
 export interface AttentionItem { id: string; sessionKey: string; hostId: string; title: string; provider: Provider; createdAt: string; acknowledged: boolean; requestId?: string; kind: 'completed' | 'failed' | 'input'; confidence: 'confirmed' | 'inferred'; detail: string; signature: string }
 
-export interface TerminalState { id: string; cols: number; rows: number; controller: { id: string; name: string } | null; canControl: boolean; exitCode: number | null; connection: 'connected' | 'reconnecting' | 'exited' }
+export interface TerminalState { id: string; cols: number; rows: number; controller: { id: string; name: string } | null; canControl: boolean; exitCode: number | null; connection: 'connecting' | 'connected' | 'reconnecting' | 'exited' }
 export interface TerminalSnapshot { text: string; sequence: number; state: TerminalState }
 export interface UnitPreview { key: string; text: string; sampledAt: number | null; error: boolean }
 export interface HistoryMatches { matches: { key: string; line: number; excerpt: string }[]; searched: number; total: number; truncated: boolean; errors: string[] }
@@ -252,7 +252,28 @@ export interface CentcomState {
 }
 
 export interface AppUpdate { status: 'idle' | 'checking' | 'current' | 'pending' | 'available' | 'downloading' | 'ready' | 'installing' | 'error'; version: string; target: string | null; percent: number | null; error: string; source: boolean; mainAhead: boolean | null }
+export interface OverwatchWindowState { undocked: boolean; dockOpen?: boolean }
+
+export interface PeerSyncConfig { enabled: boolean; bindAddress: string; port: number; deviceName: string }
+export interface SyncedPeer { id: string; name: string; url: string; direction: 'inbound' | 'outbound'; connected: boolean; lastSyncedAt: string | null; remoteTabs: string[]; error: string }
+export interface PeerSyncStatus extends PeerSyncConfig { id: string; running: boolean; address: string; error: string; peers: SyncedPeer[] }
+export interface PeerSyncApplied { settings: Settings; workspace: Workspace; attention: AttentionItem[] }
 export interface AgentHQApi {
+  overwatchWindowState(): Promise<OverwatchWindowState>;
+  undockOverwatch(): Promise<OverwatchWindowState>;
+  dockOverwatch(): Promise<OverwatchWindowState>;
+  selectOverwatchUnit(key: string): Promise<void>;
+  onOverwatchWindowState(callback: (state: OverwatchWindowState) => void): () => void;
+  onOverwatchSelect(callback: (key: string) => void): () => void;
+  onOverwatchWorkspace(callback: (workspace: Workspace) => void): () => void;
+  peerSyncStatus(): Promise<PeerSyncStatus>;
+  savePeerSync(input: PeerSyncConfig): Promise<PeerSyncStatus>;
+  issuePeerPairing(): Promise<{ code: string; url: string; expiresAt: number }>;
+  connectPeer(input: { url: string; code: string }): Promise<PeerSyncStatus>;
+  revokePeer(id: string): Promise<PeerSyncStatus>;
+  pullPeerTabs(id: string): Promise<Workspace>;
+  onPeerSyncStatus(callback: (state: PeerSyncStatus) => void): () => void;
+  onPeerSyncApplied(callback: (state: PeerSyncApplied) => void): () => void;
   centcomState(): Promise<CentcomState>;
   configureCentcom(config: CentcomConfig): Promise<CentcomState>;
   startCentcom(prompt?: string): Promise<CentcomState>;

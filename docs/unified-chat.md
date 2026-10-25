@@ -88,6 +88,24 @@ Choose **New → Interaction mode → Structured chat** for a standard supported
 
 Chat renders safe Markdown, collapsed tool input/results, explicit outcomes, and exact approval/question cards. Messages are text only. Unsupported attachments/forks are not offered. Ctrl/Command+Enter sends; regular Enter inserts a newline. **Take control** owns mutation rights for the current desktop/phone connection. **Detach** closes only the view, **Interrupt** cancels the active turn when supported, and **Stop** ends the worker-owned process. A stopped conversation remains readable and can be resumed using its native provider ID.
 
+### Model selection
+
+The launch dialog accepts an optional **Launch model** ID for structured chats; blank uses the provider default. In an attached chat, enter an available model ID in **Model** (or choose a recently used value) and select **Apply model**. The choice applies to the next turn and appears on both desktop and phone. Only the controlling client can change it, while the session is idle with no pending commands or agent requests. Changing the model preserves the native conversation and transcript.
+
+Codex supplies the selected model on the next `turn/start`; availability is validated by the provider when that turn runs. Claude uses the installed SDK's `set_model` control, OpenCode 2.1.3 uses ACP `session/set_config_option` with `configId: "model"` and verifies the returned current value, and Antigravity resumes its persisted SDK conversation with the new model. A rejected change keeps the previously recorded model; an uncertain provider acknowledgement marks the session unknown for inspection. Durable command receipts prevent a retried change from being applied twice.
+
+The installed OpenCode 2.1.3 binary was checked with an isolated empty auth/config directory: it rejects the legacy `session/set_model` method and routes `session/set_config_option` to session validation. This probe creates no session and sends no model prompt. The adapter fixture covers model application, rejection, launch selection, and mismatched acknowledgement using that current method.
+
+IDs must be nonempty, at most 200 characters, and contain no whitespace or control characters. There is no account model catalog or in-session reset-to-default action; enter an explicit available model ID. Recent choices are kept only for the mounted chat view. Terminal sessions keep their native CLI controls. Provider credentials stay on the host.
+
+![Desktop model selection](screenshots/chat-model-desktop.png)
+
+![Phone model selection](screenshots/chat-model-phone.png)
+
+On short viewports, the chat scrolls vertically to keep ownership controls, pending decisions, model selection, and the composer reachable.
+
+![Compact chat after an approval decision](screenshots/chat-model-compact.png)
+
 Managed chat sessions keep an `hq-…` tmux reservation for existing worktree and orchestration associations. This reservation displays an informational message; it does not run a second provider. The worker stops a reservation only when its chat identity tag matches. The roster and fleet readiness consume confirmed worker states, including idle, active, waiting, and unknown. Attention, usage, Overwatch previews, and explicit history search consume structured data; resolved requests acknowledge their alerts. Worker descendants are excluded from unmanaged process duplicates. Claude loop-breaker policies consume stable, input-digested tool outcomes and use provider interrupt receipts instead of terminal Ctrl+C for chat. Notes and pins retain the existing host-qualified key. Worktree diffs and SitRep mutations require chat ownership. Structured message/tool output feeds the same loopback URL detector and SSH forwarding service as terminals. Opening a tunnel requires a connected view of that host/session, and closing the last view releases its tunnel references. An actual SSH-forward test checks discovery, scope, and HTTP access. The full cross-workflow release regression remains a separate gate.
 
 A failed submission checks its durable receipt. The view never automatically resends a prompt. **Retry same action** explicitly reuses the original command ID; this can recover a missing acknowledgement without creating a second accepted command. If the worker reports `unknown`, inspect native provider history before creating or resuming work. Worker loss cannot reconstruct an orphaned native stdio connection, and Stop never targets an unowned PID.
@@ -95,7 +113,7 @@ A failed submission checks its durable receipt. The view never automatically res
 ## Validation commands and release gaps
 
 - `npm run test:ci`: build, protocol/worker/provider fixtures, controller/gateway tests, timeline normalization, and existing host-independent regressions.
-- `npm run test:chat:runtime`: cold daemon SDK deployment, concurrent installation/reuse, four real Antigravity SDK cases, and eight Claude SDK/bundled-CLI cases against loopback models.
+- `npm run test:chat:runtime`: cold daemon SDK deployment, concurrent installation/reuse, five real Antigravity SDK cases, and nine Claude SDK/bundled-CLI cases against loopback models.
 - `npm run test:chat:ui`: rendered desktop/phone chat interactions and safe content, using a fixture worker.
 - `npm run test:desktop:sessions`: built desktop managed-only ORBAT/Overwatch, saved-history access, deletion confirmation/errors, refresh persistence, and narrow layout with a deterministic bridge. The local/SSH launch suites separately verify real worker/terminal stops, ownership, persistent deletion, and stale-save protection.
 - `node tests/companion-filters.e2e.cjs`: real built companion plus authenticated gateway, managed filtering/search/attention, and mobile layout.

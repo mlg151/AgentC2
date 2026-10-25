@@ -30,7 +30,7 @@ const path = require('node:path');
       window.qa.emitUpdate = (patch) => { update = { ...update, ...patch }; listener(update); };
       window.agentHQ = {
         getState: async () => ({ settings, workspace, attention: [] }), inventory: async () => { if (window.qa.holdInventory) await new Promise((resolve) => { window.qa.finishInventory = resolve; }); return inventory(); },
-        create: async () => { throw new Error('The working directory does not exist'); },
+        create: async (input) => { window.qa.lastCreate = input; throw new Error('The working directory does not exist'); },
         saveWorkspace: async (value) => { workspace = value; return value; },
         onInventory: off, onSessionPinned: off, onSessionsDeleted: off, onAttentionOpen: off, onHealth: off,
         onDevUrls: off, onTerminalExit: off, onTerminalData: off, onTerminalState: off,
@@ -95,10 +95,15 @@ const path = require('node:path');
     await dialog.getByRole('combobox', { name: 'Launch preset', exact: true }).selectOption('opencode');
     assert.equal(await dialog.getByRole('combobox', { name: 'Provider', exact: true }).inputValue(), 'opencode');
     assert.equal(await dialog.getByRole('combobox', { name: 'Interaction mode', exact: true }).inputValue(), 'chat');
+    await dialog.getByRole('textbox', { name: 'Launch model', exact: true }).fill('provider/custom-model');
+    await dialog.getByRole('combobox', { name: 'Interaction mode', exact: true }).selectOption('terminal');
+    assert.equal(await dialog.getByRole('textbox', { name: 'Launch model', exact: true }).count(), 0);
+    await dialog.getByRole('combobox', { name: 'Interaction mode', exact: true }).selectOption('chat');
     await page.screenshot({ path: path.join(screenshots, 'opencode-launch.png') });
     await dialog.getByRole('button', { name: 'Start session', exact: true }).click();
     const launchError = dialog.getByRole('alert').filter({ hasText: 'working directory does not exist' });
     await launchError.waitFor();
+    assert.equal(await page.evaluate(() => window.qa.lastCreate.model), 'provider/custom-model');
     await page.evaluate(() => { window.qa.holdInventory = false; window.qa.finishInventory(); });
     await page.waitForFunction(() => !document.querySelector('.lucide-refresh-cw.spin'));
     assert.equal(await launchError.isVisible(), true, 'An inventory refresh must not clear a failed launch');

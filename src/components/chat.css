@@ -1,4 +1,4 @@
-.structured-chat{position:relative;display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;background:#0a1018;color:#dce7ee;font-size:13px}
+.structured-chat{position:relative;overflow:auto;display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;background:#0a1018;color:#dce7ee;font-size:13px}
 .chat-controls{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;min-height:42px;padding:8px 14px;border-bottom:1px solid #233040;background:#0f1723}
 .chat-live-state{text-transform:capitalize;color:#62e3df;font-weight:700}.chat-controller{font-size:11px;color:#9badbd}.chat-control-buttons{display:flex;flex-wrap:wrap;gap:5px;margin-left:auto}
 .structured-chat button{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:30px;border:1px solid #354759;border-radius:5px;background:#172433;color:#dce7ee;padding:5px 9px;font:inherit;font-size:11px;cursor:pointer}.structured-chat button:hover:not(:disabled){background:#223548;border-color:#59758e}.structured-chat button:disabled{opacity:.45;cursor:default}.structured-chat button.button-primary{background:#0e626a;border-color:#32b7bd;color:#efffff}.structured-chat button.danger{color:#ff9aa7}.structured-chat button:focus-visible,.structured-chat summary:focus-visible,.structured-chat input:focus-visible{outline:2px solid #53e4e1;outline-offset:2px}
@@ -15,3 +15,8 @@
 
 .structured-chat .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .chat-storage{flex-shrink:0;border-top:1px solid #253446;padding:8px 14px;font-size:11px;color:#9fb2c1;background:#101a27}.chat-storage summary{cursor:pointer}.chat-storage p{max-width:720px;line-height:1.5;margin:9px 0}.chat-storage small{display:block;margin-top:7px;line-height:1.5}.chat-storage[open]{max-height:35%;overflow:auto}
+
+.chat-model-selector{display:flex;align-items:end;flex-wrap:wrap;gap:8px;padding:8px 12px;border-top:1px solid #293d53;flex:none}.chat-model-selector label{display:flex;align-items:center;gap:8px;min-width:0;flex:1;font-size:12px}.chat-model-selector input{width:100%;min-width:0;background:#14232b;color:#dce6eb;border:1px solid #344650;border-radius:4px;padding:6px}.chat-model-selector small{flex-basis:100%;font-size:10px;color:#91a6b0}.chat-model-selector button{white-space:nowrap}
+
+/* Keep controls and requests in normal flow when a short viewport cannot fit them. */
+.structured-chat>*{flex-shrink:0}.structured-chat>.chat-transcript{flex-shrink:1}

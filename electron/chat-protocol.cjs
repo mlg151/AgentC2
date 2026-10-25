@@ -19,6 +19,7 @@ function choice(value, values) {
   return value;
 }
 
+function modelId(value) { text(value, 200); if (/[\x00-\x20\x7f]/.test(value)) throw new Error('Invalid model ID'); return value; }
 function identifier(value) { return text(value, contract.limits.id); }
 function optionalId(value) { return value === null ? null : identifier(value); }
 function wireSize(input) {
@@ -44,7 +45,7 @@ function validateCommand(input) {
     object(payload, ['provider', 'cwd', 'title', 'roeProfile', 'providerSessionId', 'managedName', 'instructions', 'model'], ['provider', 'cwd', 'title', 'roeProfile']);
     if (Object.hasOwn(payload, 'managedName') && (typeof payload.managedName !== 'string' || !/^hq-[a-f0-9]{12}$/.test(payload.managedName))) throw new Error('Invalid managed chat name');
     if (Object.hasOwn(payload, 'instructions')) text(payload.instructions, 20000, true);
-    if (Object.hasOwn(payload, 'model')) text(payload.model, 200);
+    if (Object.hasOwn(payload, 'model')) modelId(payload.model);
     choice(payload.provider, contract.providers);
     if (!text(payload.cwd, contract.limits.path).startsWith('/')) throw new Error('Chat working directory must be absolute');
     text(payload.title, contract.limits.title, true);
@@ -56,6 +57,8 @@ function validateCommand(input) {
       object(payload, input.operation === 'steer' ? ['text', 'expectedTurnId'] : ['text']);
       text(payload.text, contract.limits.text);
       if (input.operation === 'steer') identifier(payload.expectedTurnId);
+    } else if (input.operation === 'model') {
+      object(payload, ['model']); modelId(payload.model);
     } else if (input.operation === 'respond') {
       object(payload, ['requestId', 'turnId', 'itemId', 'decision', 'answers'], ['requestId', 'turnId', 'itemId']);
       identifier(payload.requestId); optionalId(payload.turnId); optionalId(payload.itemId);

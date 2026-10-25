@@ -121,6 +121,14 @@ class Journal:
             self.db.execute("UPDATE sessions SET title=? WHERE id=?", (title.strip(), identifier))
         return dict(title=title.strip())
 
+    def set_model(self, identifier, model):
+        from chat_protocol import model_id
+        model_id(model)
+        with self.transaction():
+            self._session(identifier)
+            self.db.execute("UPDATE sessions SET model=? WHERE id=?", (model, identifier))
+            self._append(identifier, "session.updated", dict(state="idle", detail="Model changed to " + model))
+
     def receipt(self, command_id):
         with self.lock:
             row = self.db.execute("SELECT * FROM commands WHERE id=?", (command_id,)).fetchone()
@@ -159,6 +167,12 @@ class Journal:
                 needed = dict(send="streaming", steer="steering", interrupt="interrupt").get(operation)
                 if needed and not capabilities[needed]:
                     raise ValueError("Provider does not support this operation")
+                if operation == "model" and session["state"] != "idle":
+                    raise ValueError("Wait for the current turn to finish before changing the model")
+                if operation in ("send", "model"):
+                    pending = self.db.execute("SELECT operation FROM commands WHERE session_id=? AND state IN ('accepted','dispatching')", (identifier,)).fetchall()
+                    if any(row["operation"] == "model" for row in pending) or (operation == "model" and pending):
+                        raise ValueError("Wait for the pending command or model change to finish")
                 if operation == "send" and session["state"] != "idle":
                     raise ValueError("Wait for the active turn before sending another message")
                 # Reserve the turn before acknowledgement so concurrent senders cannot
