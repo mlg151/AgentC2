@@ -40,9 +40,18 @@ const { Store, validateSettings } = require('../electron/config.cjs');
     assert.equal(await b.getByLabel('Peer pairing code', { exact: true }).inputValue(), '');
     await a.getByRole('button', { name: 'Close settings', exact: true }).click();
     await b.getByRole('button', { name: 'Close settings', exact: true }).click();
-    await a.evaluate(async () => { const api = window.agentHQ, state = await api.getState(); await api.saveWorkspace({ ...state.workspace, metadata: { ...state.workspace.metadata, 'remote/tmux:hq-123456abcdef': { notes: 'Coordinate shared fixture mission', project: 'Shared project', pinned: false } } }); await api.setSessionPinned('remote/tmux:hq-123456abcdef', true); });
+    // Edit through the renderer: writing its backing store behind React and
+    // then clicking Pin lets the renderer legitimately save its old draft.
+    await a.locator('.session-row').first().click();
+    await a.getByLabel('Session project', { exact: true }).fill('Shared project');
+    await a.getByRole('button', { name: 'Notes & handoff', exact: true }).click();
+    await a.getByLabel('Session notes and handoff', { exact: true }).fill('Coordinate shared fixture mission');
+    await a.getByRole('button', { name: 'Pin Shared fixture mission', exact: true }).click();
     await poll(() => b.evaluate(async () => { const state = await window.agentHQ.getState(); return state.workspace.metadata['remote/tmux:hq-123456abcdef']?.pinned && state.workspace.metadata['remote/tmux:hq-123456abcdef']?.notes === 'Coordinate shared fixture mission'; }), 'Peer notes and pin did not converge');
-    await a.evaluate(async () => { const api = window.agentHQ, state = await api.getState(); await api.saveSettings({ ...state.settings, hosts: state.settings.hosts.map((host) => host.id === 'remote' ? { ...host, name: 'Synced command host' } : host) }); });
+    await a.getByRole('button', { name: 'Settings', exact: true }).click();
+    await a.getByRole('textbox', { name: 'Name', exact: true }).nth(1).fill('Synced command host');
+    await a.getByRole('button', { name: 'Save settings', exact: true }).click();
+    await a.getByRole('dialog', { name: 'Settings', exact: true }).waitFor({ state: 'hidden' });
     await poll(() => b.evaluate(async () => (await window.agentHQ.getState()).settings.hosts.some((host) => host.name === 'Synced command host')), 'Peer host settings did not converge');
     await b.getByRole('button', { name: 'Settings', exact: true }).click();
     assert.equal(await b.getByRole('textbox', { name: 'Name', exact: true }).first().inputValue(), 'This computer');
@@ -69,5 +78,8 @@ const { Store, validateSettings } = require('../electron/config.cjs');
     assert.equal(await b.evaluate(() => typeof window.require), 'undefined');
     assert.deepEqual(errors, []);
     console.log(`PASS two production Electron desktops: pairing/error recovery, live fleet/pin/note updates, pull tabs, narrow settings, revoke, isolated renderer, live detached Overwatch callsigns and restricted sync IPC; screenshots ${screenshots}`);
+  } catch (error) {
+    for (const app of apps) { const page = app.windows()[0]; console.error('Peer fixture metadata:', await page?.evaluate(async () => (await window.agentHQ.getState()).workspace.metadata).catch(() => null)); }
+    throw error;
   } finally { for (const app of apps.reverse()) await app.close(); fs.rmSync(directory, { recursive: true, force: true }); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });
