@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { EventEmitter } = require('node:events');
 
 const PROVIDERS = ['codex', 'claude', 'antigravity', 'opencode'];
 const ROE_PROFILES = ['', 'full', 'gated', 'provider-default'];
@@ -192,8 +193,9 @@ function validateCachedUnits(value) {
   }
   return cached;
 }
-class Store {
+class Store extends EventEmitter {
   constructor(directory) {
+    super();
     this.file = path.join(directory, 'workspace.json');
     fs.mkdirSync(directory, { recursive: true });
     this.data = { settings: defaults(), workspace: validateWorkspace({ tabs: [], selectedKey: null, splitKey: null, metadata: {} }), attention: [], attentionCursors: {}, deletedSessions: [], cleanupState: { lastRuns: {}, results: [] }, cachedUnits: {}, exercises: [], flashResolved: [], loopState: {}, opOrderConflicts: {} };
@@ -224,12 +226,13 @@ class Store {
     this.update({ [key]: value });
     return value;
   }
-  update(patch) {
+  update(patch, source) {
     const next = { ...this.data, ...patch };
     const temporary = this.file + '.tmp';
     fs.writeFileSync(temporary, JSON.stringify(next, null, 2), { mode: 0o600 });
     fs.renameSync(temporary, this.file);
     this.data = next;
+    this.emit('updated', source);
   }
   saveWorkspace(input) {
     const workspace = validateWorkspace(input);

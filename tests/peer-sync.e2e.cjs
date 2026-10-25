@@ -1,0 +1,62 @@
+// Browser plugin unavailable: actual Electron windows, preload, IPC, and sockets.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { _electron } = require('playwright-core');
+const { Store, validateSettings } = require('../electron/config.cjs');
+(async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agentc2-peer-ui-')), apps = [], errors = [];
+  const screenshots = process.env.AGENTC2_QA_SCREENSHOT_DIR || path.join(directory, 'screenshots'); fs.mkdirSync(screenshots, { recursive: true });
+  try {
+    async function launch(name) {
+      const root = path.join(directory, name), store = new Store(root);
+      store.save('settings', validateSettings({ ...store.data.settings, hosts: [{ id: 'remote', name: 'Shared host', target: 'fixture.invalid', port: 22, enabled: true }, { id: `local-${name.replaceAll(' ', '-')}`, kind: 'local', name: 'This computer', enabled: true }] }));
+      const app = await _electron.launch({ executablePath: require('electron'), args: [path.join(__dirname, 'helpers/peer-app.cjs'), `--user-data-dir=${path.join(root, 'browser')}`], cwd: path.resolve(__dirname, '..'), env: { ...process.env, NODE_ENV: 'production', AGENTC2_DATA_DIR: root }, timeout: 60000 }); apps.push(app);
+      const page = await app.firstWindow(); page.on('pageerror', (error) => errors.push(error.message));
+      await page.locator('.session-row').first().waitFor();
+      await page.getByRole('button', { name: 'Settings', exact: true }).click();
+      await page.getByRole('button', { name: 'Desktop sync', exact: true }).click();
+      await page.getByRole('textbox', { name: 'Device name', exact: true }).fill(name);
+      await page.getByRole('checkbox', { name: 'Enable desktop sync', exact: true }).check();
+      await page.getByRole('spinbutton', { name: 'Sync port', exact: true }).fill('0');
+      await page.getByRole('button', { name: 'Apply desktop sync', exact: true }).click();
+      await page.getByRole('button', { name: 'Generate pairing code', exact: true }).waitFor();
+      return page;
+    }
+    const a = await launch('Command desktop'), b = await launch('Field laptop');
+    await a.getByRole('button', { name: 'Generate pairing code', exact: true }).click();
+    const address = await a.getByRole('textbox', { name: 'Pairing address', exact: true }).inputValue();
+    const code = await a.getByRole('textbox', { name: 'Pairing code', exact: true }).inputValue();
+    await b.getByRole('textbox', { name: 'Peer address', exact: true }).fill(address);
+    await b.getByLabel('Peer pairing code', { exact: true }).fill('invalid-code');
+    await b.getByRole('button', { name: 'Connect desktop', exact: true }).click();
+    await b.getByRole('alert').filter({ hasText: 'valid pairing code' }).waitFor();
+    await b.getByLabel('Peer pairing code', { exact: true }).fill(code);
+    await b.getByRole('button', { name: 'Connect desktop', exact: true }).click();
+    await b.locator('.host-editor').filter({ hasText: 'Command desktop' }).waitFor();
+    await a.locator('.host-editor').filter({ hasText: 'Field laptop' }).waitFor();
+    assert.equal(await b.getByLabel('Peer pairing code', { exact: true }).inputValue(), '');
+    await a.getByRole('button', { name: 'Close settings', exact: true }).click();
+    await b.getByRole('button', { name: 'Close settings', exact: true }).click();
+    await a.evaluate(async () => { const api = window.agentHQ, state = await api.getState(); await api.saveWorkspace({ ...state.workspace, metadata: { ...state.workspace.metadata, 'remote/tmux:hq-123456abcdef': { notes: 'Coordinate shared fixture mission', project: 'Shared project', pinned: false } } }); await api.setSessionPinned('remote/tmux:hq-123456abcdef', true); });
+    await b.waitForFunction(async () => { const state = await window.agentHQ.getState(); return state.workspace.metadata['remote/tmux:hq-123456abcdef']?.pinned && state.workspace.metadata['remote/tmux:hq-123456abcdef']?.notes === 'Coordinate shared fixture mission'; });
+    await a.evaluate(async () => { const api = window.agentHQ, state = await api.getState(); await api.saveSettings({ ...state.settings, hosts: state.settings.hosts.map((host) => host.id === 'remote' ? { ...host, name: 'Synced command host' } : host) }); });
+    await b.waitForFunction(async () => (await window.agentHQ.getState()).settings.hosts.some((host) => host.name === 'Synced command host'));
+    await b.getByRole('button', { name: 'Settings', exact: true }).click();
+    assert.equal(await b.getByRole('textbox', { name: 'Name', exact: true }).first().inputValue(), 'This computer');
+    assert.equal(await b.getByRole('textbox', { name: 'Name', exact: true }).nth(1).inputValue(), 'Synced command host');
+    await b.getByRole('button', { name: 'Desktop sync', exact: true }).click();
+    await b.getByRole('button', { name: /^Pull open tabs/ }).click();
+    await b.screenshot({ path: path.join(screenshots, 'desktop-peer-sync.png') });
+    await apps[1].evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(940, 650));
+    assert.equal(await b.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await b.getByRole('button', { name: 'Revoke desktop', exact: true }).scrollIntoViewIfNeeded();
+    await b.screenshot({ path: path.join(screenshots, 'desktop-peer-sync-narrow.png') });
+    await b.getByRole('button', { name: 'Revoke desktop', exact: true }).click();
+    await b.getByText('No paired desktops.', { exact: true }).waitFor();
+    assert.equal(await b.evaluate(() => typeof window.require), 'undefined');
+    assert.deepEqual(errors, []);
+    console.log(`PASS two production Electron desktops: pairing/error recovery, live fleet/pin/note updates, pull tabs, narrow settings, revoke, isolated renderer; screenshots ${screenshots}`);
+  } finally { for (const app of apps.reverse()) await app.close(); fs.rmSync(directory, { recursive: true, force: true }); }
+})().catch((error) => { console.error(error); process.exitCode = 1; });

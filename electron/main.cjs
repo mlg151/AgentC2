@@ -5,11 +5,13 @@ const { tailscaleStatus, closeAction } = require('./platform.cjs');
 const { createService } = require('./service.cjs');
 const { createUpdates, createMainCheck } = require('./updates.cjs');
 const { Gateway } = require('./gateway.cjs');
+const { PeerSync } = require('./peer-sync.cjs');
 const { readClipboardPng } = require('./clipboard-image.cjs');
 const { assertWindowSender } = require('./window-sender.cjs');
 
 const desktop = { id: 'desktop', name: 'Desktop' };
-let mainWindow, overwatchWindow, service, gateway, tray, monitor, healthMonitor, cleanupMonitor;
+let mainWindow, overwatchWindow, service, gateway, peerSync, tray, monitor, healthMonitor, cleanupMonitor;
+let peerEpoch = 0;
 let quitting = false;
 let startupError = '';
 const icon = path.join(__dirname, '..', 'assets', process.platform === 'win32' ? 'app-icon.ico' : 'app-icon.png');
@@ -125,6 +127,10 @@ app.whenReady().then(async () => {
   try {
     service = createService({ directory, home: app.getPath('home'), specopsDirectory: process.env.AGENTC2_DATA_DIR || process.env.AGENT_HQ_DATA_DIR ? undefined : path.join(app.getPath('home'), '.agentc2', 'specops'), centcomDirectory: process.env.AGENTC2_DATA_DIR || process.env.AGENT_HQ_DATA_DIR ? undefined : path.join(app.getPath('home'), '.agentc2', 'centcom') });
     gateway = new Gateway({ directory, assets: path.join(__dirname, '..', 'dist'), service });
+    peerSync = new PeerSync({ directory, service });
+    peerSync.on('status', (value) => send('peer-sync:status', value));
+    peerSync.on('applied', (value) => send('peer-sync:applied', { ...value, peerEpoch: ++peerEpoch }));
+    await peerSync.start().catch((error) => { peerSync.error = error.message; });
     service.events.on('client', (clientId, event, value) => {
       if (clientId !== 'desktop') return;
       if (event === 'terminal:data') send(event, value.id, value.data, value.sequence);
@@ -164,8 +170,15 @@ app.whenReady().then(async () => {
     if (quitting || !mainWindow || mainWindow.isDestroyed()) throw new Error('Main window is unavailable');
     showWindow(); send('overwatch:selected', key);
   });
-  handle('state:get', () => service.store.data);
-  handle('settings:save', (input) => service.saveSettings(input));
+  handle('state:get', () => ({ ...service.store.data, peerEpoch }));
+  const assertPeerEpoch = (epoch) => { if (epoch !== peerEpoch) throw new Error('Desktop sync updated this workspace. Review the latest state before saving.'); };
+  handle('peer-sync:status', () => peerSync.status());
+  handle('peer-sync:save', (input) => peerSync.configure(input));
+  handle('peer-sync:pair', () => peerSync.pair());
+  handle('peer-sync:connect', (input) => peerSync.connect(input));
+  handle('peer-sync:revoke', (id) => peerSync.revoke(id));
+  handle('peer-sync:pull-tabs', (id) => peerSync.pullTabs(id));
+  handle('settings:save', (input, epoch) => { assertPeerEpoch(epoch); return service.saveSettings(input); });
   handle('oporder:preview', (order) => service.previewOpOrder(order));
   handle('oporder:enroll', (order, revision) => service.enrollOpOrder(order, revision));
   handle('sitrep:preview', (input) => service.previewSitrep(desktop, input));
@@ -199,7 +212,7 @@ app.whenReady().then(async () => {
   handle('flash:decide', (input) => service.flashDecide(desktop, input));
   handle('fault:interrupt-all', () => service.interruptFaults(desktop));
   handle('fault:reset', (key) => service.resetFault(key));
-  handle('workspace:save', (input) => { const result = service.saveWorkspace(input); send('overwatch:workspace', result); return result; });
+  handle('workspace:save', (input, epoch) => { assertPeerEpoch(epoch); const result = service.saveWorkspace(input); send('overwatch:workspace', result); return result; });
   handle('session:pin', (key, pinned) => service.setSessionPinned(key, pinned));
   const updater = !app.isPackaged
     ? new (require('./source-updater.cjs').SourceUpdater)({ revision: buildInfo.revision, directory: path.join(directory, 'source-updates'), app })
@@ -286,6 +299,7 @@ const notified = new Set();
 app.on('before-quit', () => {
   quitting = true;
   closeOverwatchWindow();
+  peerSync?.close();
   clearInterval(monitor); clearInterval(healthMonitor); clearInterval(cleanupMonitor);
   service?.specops.dispose(); service?.centcom.dispose(); void gateway?.dispose(); service?.terminals.closeAll(); service?.chats.closeAll(); tray?.destroy(); tray = null;
   service?.tunnels.closeAll();

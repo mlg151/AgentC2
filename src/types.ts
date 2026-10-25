@@ -254,6 +254,10 @@ export interface CentcomState {
 export interface AppUpdate { status: 'idle' | 'checking' | 'current' | 'pending' | 'available' | 'downloading' | 'ready' | 'installing' | 'error'; version: string; target: string | null; percent: number | null; error: string; source: boolean; mainAhead: boolean | null }
 export interface OverwatchWindowState { undocked: boolean; dockOpen?: boolean }
 
+export interface PeerSyncConfig { enabled: boolean; bindAddress: string; port: number; deviceName: string }
+export interface SyncedPeer { id: string; name: string; url: string; direction: 'inbound' | 'outbound'; connected: boolean; lastSyncedAt: string | null; remoteTabs: string[]; error: string }
+export interface PeerSyncStatus extends PeerSyncConfig { id: string; running: boolean; address: string; error: string; peers: SyncedPeer[] }
+export interface PeerSyncApplied { settings: Settings; workspace: Workspace; attention: AttentionItem[] }
 export interface AgentHQApi {
   overwatchWindowState(): Promise<OverwatchWindowState>;
   undockOverwatch(): Promise<OverwatchWindowState>;
@@ -262,6 +266,14 @@ export interface AgentHQApi {
   onOverwatchWindowState(callback: (state: OverwatchWindowState) => void): () => void;
   onOverwatchSelect(callback: (key: string) => void): () => void;
   onOverwatchWorkspace(callback: (workspace: Workspace) => void): () => void;
+  peerSyncStatus(): Promise<PeerSyncStatus>;
+  savePeerSync(input: PeerSyncConfig): Promise<PeerSyncStatus>;
+  issuePeerPairing(): Promise<{ code: string; url: string; expiresAt: number }>;
+  connectPeer(input: { url: string; code: string }): Promise<PeerSyncStatus>;
+  revokePeer(id: string): Promise<PeerSyncStatus>;
+  pullPeerTabs(id: string): Promise<Workspace>;
+  onPeerSyncStatus(callback: (state: PeerSyncStatus) => void): () => void;
+  onPeerSyncApplied(callback: (state: PeerSyncApplied) => void): () => void;
   centcomState(): Promise<CentcomState>;
   configureCentcom(config: CentcomConfig): Promise<CentcomState>;
   startCentcom(prompt?: string): Promise<CentcomState>;

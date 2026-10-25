@@ -1,15 +1,17 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Settings } from '../types';
 import { Modal } from './Modal';
 import { RemoteAccess } from './RemoteAccess';
+import { PeerSyncSettings } from './PeerSyncSettings';
 import { OpOrdersSettings } from './OpOrdersSettings';
 
 export function SettingsDialog({ settings, onSave, onExternalSettings, onSpecops, onClose }: { settings: Settings; onSave: (value: Settings) => Promise<void>; onExternalSettings: (value: Settings) => void; onSpecops?: () => void; onClose: () => void }) {
   const [draft, setDraft] = useState(() => structuredClone(settings));
-  const [section, setSection] = useState<'hosts' | 'presets' | 'oporders' | 'remote'>('hosts');
+  const [section, setSection] = useState<'hosts' | 'presets' | 'oporders' | 'remote' | 'peers'>('hosts');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [presetId, setPresetId] = useState(settings.presets[0]?.id || '');
+  useEffect(() => { setDraft(structuredClone(settings)); }, [settings]);
   const preset = draft.presets.find((p) => p.id === presetId);
   function updatePreset(patch: Partial<Settings['presets'][number]>) { setDraft((d) => ({ ...d, presets: d.presets.map((p) => p.id === presetId ? { ...p, ...patch } : p) })); }
   async function save() {
@@ -18,9 +20,9 @@ export function SettingsDialog({ settings, onSave, onExternalSettings, onSpecops
   }
   return <Modal title="Settings" onClose={onClose} wide>
     <div className="dialog-heading"><div><h2>Settings</h2><p>Connection profiles and repeatable agent launches.</p></div><button aria-label="Close settings" onClick={onClose} className="icon-button">×</button></div>
-    <div className="segmented"><button className={section === 'hosts' ? 'active' : ''} onClick={() => setSection('hosts')}>Hosts</button><button className={section === 'presets' ? 'active' : ''} onClick={() => setSection('presets')}>Launch presets</button><button className={section === 'oporders' ? 'active' : ''} onClick={() => setSection('oporders')}>OpOrders</button><button className={section === 'remote' ? 'active' : ''} onClick={() => setSection('remote')}>Remote access</button></div>
+    <div className="segmented"><button className={section === 'hosts' ? 'active' : ''} onClick={() => setSection('hosts')}>Hosts</button><button className={section === 'presets' ? 'active' : ''} onClick={() => setSection('presets')}>Launch presets</button><button className={section === 'oporders' ? 'active' : ''} onClick={() => setSection('oporders')}>OpOrders</button><button className={section === 'remote' ? 'active' : ''} onClick={() => setSection('remote')}>Remote access</button><button className={section === 'peers' ? 'active' : ''} onClick={() => setSection('peers')}>Desktop sync</button></div>
     <div className="settings-body">
-      {section === 'remote' ? <RemoteAccess /> : section === 'oporders' ? <OpOrdersSettings settings={draft} onSave={onSave} onApplied={(updated) => { setDraft(updated); onExternalSettings(updated); }} /> : section === 'hosts' ? <>
+      {section === 'peers' ? <PeerSyncSettings /> : section === 'remote' ? <RemoteAccess /> : section === 'oporders' ? <OpOrdersSettings settings={draft} onSave={onSave} onApplied={(updated) => { setDraft(updated); onExternalSettings(updated); }} /> : section === 'hosts' ? <>
         <p className="field-note">Add this computer to run agents locally, or use an SSH config alias or user@hostname. Local sessions need Python 3 and tmux; Windows uses the default WSL distribution. SSH keys, ProxyJump, and host-key verification come from OpenSSH.</p>
         {draft.hosts.map((h) => <fieldset key={h.id} className="host-editor"><legend>{h.name || 'New host'}</legend>
           <div className="form-grid"><label>Name<input value={h.name} onChange={(e) => setDraft({ ...draft, hosts: draft.hosts.map((item) => item.id === h.id ? { ...item, name: e.target.value } : item) })} /></label>{h.kind !== 'local' ? <><label>SSH target<input value={h.target} placeholder="user@server or ssh-alias" onChange={(e) => setDraft({ ...draft, hosts: draft.hosts.map((item) => item.id === h.id ? { ...item, target: e.target.value } : item) })} /></label><label>Port<input type="number" min="1" max="65535" value={h.port} onChange={(e) => setDraft({ ...draft, hosts: draft.hosts.map((item) => item.id === h.id ? { ...item, port: Number(e.target.value) } : item) })} /></label></> : <p className="field-note">This computer · no SSH connection{window.agentHQ?.platform === 'win32' ? ' · default WSL distribution' : ''}</p>}</div>
@@ -44,8 +46,8 @@ export function SettingsDialog({ settings, onSave, onExternalSettings, onSpecops
         </div> : <p>Add a preset to save a launch command.</p>}
       </>}
     </div>
-    {section !== 'oporders' ? <label className="checkbox-label"><input type="checkbox" checked={draft.notifications} onChange={(e) => setDraft({ ...draft, notifications: e.target.checked })} /> Desktop notifications for new attention items</label> : null}
+    {!['oporders', 'peers', 'remote'].includes(section) ? <label className="checkbox-label"><input type="checkbox" checked={draft.notifications} onChange={(e) => setDraft({ ...draft, notifications: e.target.checked })} /> Desktop notifications for new attention items</label> : null}
     {error ? <p role="alert" className="form-error">{error}</p> : null}
-    <div className="dialog-actions">{onSpecops ? <button className="button-secondary" onClick={onSpecops}>SPECOPS ranks and workflows</button> : null}<button className="button-secondary" disabled={busy} onClick={onClose}>{section === 'oporders' ? 'Close' : 'Cancel'}</button>{section !== 'oporders' ? <button className="button-primary" disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save settings'}</button> : null}</div>
+    <div className="dialog-actions">{onSpecops ? <button className="button-secondary" onClick={onSpecops}>SPECOPS ranks and workflows</button> : null}<button className="button-secondary" disabled={busy} onClick={onClose}>{['oporders', 'peers', 'remote'].includes(section) ? 'Close' : 'Cancel'}</button>{!['oporders', 'peers', 'remote'].includes(section) ? <button className="button-primary" disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save settings'}</button> : null}</div>
   </Modal>;
 }

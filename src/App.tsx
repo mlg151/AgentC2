@@ -110,6 +110,10 @@ export default function App() {
       setWorkspace((current) => withoutSessions(current, new Set(keys)));
       setKnown((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !deleted.has(key))));
     });
+    const offPeerSync = window.agentHQ.onPeerSyncApplied?.((state) => {
+      setSettings(state.settings); setWorkspace(state.workspace); setAttention(state.attention);
+      void refresh();
+    });
     const offPins = window.agentHQ.onSessionPinned((key, pinned) => {
       pins.set(key, pinned);
       setWorkspace((current) => applyPin(current, key, pinned));
@@ -123,7 +127,7 @@ export default function App() {
       await refresh();
     }).catch((cause) => { if (!cancelled) setError(String(cause)); });
     const off = window.agentHQ.onInventory(acceptInventory);
-    return () => { cancelled = true; off(); offPins(); offDeleted(); };
+    return () => { cancelled = true; off(); offPins(); offDeleted(); offPeerSync?.(); };
   }, [acceptInventory, refresh]);
   useEffect(() => {
     if (initialized.current) void window.agentHQ?.saveWorkspace(workspace).catch((cause) => setError(`Could not save workspace: ${String(cause)}`));
