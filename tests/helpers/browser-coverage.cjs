@@ -29,7 +29,10 @@ function normalize(entries) {
     if (inline) data = JSON.parse(Buffer.from(inline[1], 'base64').toString('utf8'));
     else if (fs.existsSync(`${file}.map`)) data = JSON.parse(fs.readFileSync(`${file}.map`, 'utf8'));
     if (data) {
-      data.sources = data.sources.map((source) => source.startsWith('file:') ? source : pathToFileURL(path.resolve(path.dirname(file), data.sourceRoot || '', source)).href);
+      // v8-to-istanbul passes multi-source paths directly to test-exclude. A
+      // file: URL there silently drops every function/branch while leaving
+      // default line counts at 1, producing a false 100% browser report.
+      data.sources = data.sources.map((source) => source.startsWith('file:') ? fileURLToPath(source) : path.resolve(path.dirname(file), data.sourceRoot || '', source));
       data.sourceRoot = '';
       maps[url] = { data, lineLengths: source.split('\n').map((line) => line.length) };
     }

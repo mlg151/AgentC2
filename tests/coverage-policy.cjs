@@ -34,6 +34,6 @@ const map = { version: 3, sources: ['chatClient.ts'], sourcesContent: ['export c
 const entry = { scriptId: 'fixture', url: pathToFileURL(source).href, source: `export const value = 1;\n//# sourceMappingURL=data:application/json;base64,${Buffer.from(JSON.stringify(map)).toString('base64')}`, functions: [] };
 const browser = normalize([entry, { ...entry, url: 'not a valid URL' }, { ...entry, url: 'https://fixture.invalid/../../etc/passwd.js' }]);
 assert.equal(browser.result.length, 1);
-assert.deepEqual(browser['source-map-cache'][entry.url].data.sources, [entry.url]);
+assert.deepEqual(browser['source-map-cache'][entry.url].data.sources, [source], 'Multi-source browser maps must use filesystem paths or C8 silently drops branch/function measurements');
 assert.deepEqual(normalize([{ ...entry, url: source }]), browser, 'Electron preload coverage may use a native path rather than a file URL');
 console.log('PASS exact-count coverage enforcement, missing/invalid metrics, empty reports, Python function accounting, declaration-only exclusions, and browser source-map attribution');

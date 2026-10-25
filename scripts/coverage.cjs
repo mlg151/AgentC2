@@ -111,9 +111,17 @@ function report() {
   const pythonData = pythonSummary(JSON.parse(fs.readFileSync(pythonFile, 'utf8')));
   const summary = { ...Object.fromEntries(Object.entries(javascript).filter(([file]) => file !== 'total').map(([file, value]) => [path.relative(root, file).replaceAll('\\', '/'), value])), ...pythonData };
   const declarations = new Set(declarationFiles());
+  const ts = require('typescript');
   for (const base of ['electron', 'src']) {
     const expected = fs.readdirSync(path.join(root, base), { recursive: true }).map((file) => `${base}/${file.replaceAll('\\', '/')}`).filter((file) => /\.(cjs|py|tsx?)$/.test(file) && !declarations.has(file));
-    for (const file of expected) if (!summary[file]) throw Error(`Production file missing from coverage: ${file}`);
+    for (const file of expected) {
+      if (!summary[file]) throw Error(`Production file missing from coverage: ${file}`);
+      if (file.endsWith('.py') || summary[file].functions.total > 0) continue;
+      let functions = false;
+      const visit = (node) => { if (ts.isFunctionLike(node) && node.body) functions = true; ts.forEachChild(node, visit); };
+      visit(ts.createSourceFile(file, fs.readFileSync(path.join(root, file), 'utf8'), ts.ScriptTarget.Latest, true));
+      if (functions) throw Error(`Function measurement was lost for ${file}; verify browser source maps before trusting this report`);
+    }
   }
   const gaps = check(summary);
   const totals = Object.fromEntries(metrics.map((metric) => {
