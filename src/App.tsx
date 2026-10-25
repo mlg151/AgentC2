@@ -64,6 +64,7 @@ export default function App() {
   const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
   const [showSwitcher, setShowSwitcher] = useState(false);
   const [showOverwatch, setShowOverwatch] = useState(false);
+  const [overwatchUndocked, setOverwatchUndocked] = useState(false);
   const [diffOpenKey, setDiffOpenKey] = useState<string | null>(null);
   const [showKeyboardHelp, setShowKeyboardHelp] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
@@ -235,6 +236,29 @@ export default function App() {
   const closeCleanup = useCallback(() => setCleanupTarget(undefined), []);
   const closeDelete = useCallback(() => setDeleteTarget(null), []);
   const closeSwitcher = useCallback(() => setShowSwitcher(false), []);
+  const openSessionRef = useRef(openSession);
+  openSessionRef.current = openSession;
+  const knownRef = useRef(known); knownRef.current = known;
+  useEffect(() => {
+    const api = window.agentHQ;
+    if (!api?.overwatchWindowState) return;
+    let cancelled = false, observed = false;
+    const offState = api.onOverwatchWindowState((state) => {
+      observed = true; setOverwatchUndocked(state.undocked);
+      if (state.undocked) setShowOverwatch(false);
+      else if (state.dockOpen) setShowOverwatch(true);
+    });
+    const offSelect = api.onOverwatchSelect((key) => {
+      const session = knownRef.current[key];
+      if (session) { openSessionRef.current(session); requestFocus(key); }
+    });
+    void api.overwatchWindowState().then((state) => { if (!cancelled && !observed) setOverwatchUndocked(state.undocked); }).catch((cause) => { if (!cancelled) setError(String(cause)); });
+    return () => { cancelled = true; offState(); offSelect(); };
+  }, []);
+  function showOverwatchView(toggle = false) {
+    if (overwatchUndocked) void window.agentHQ?.undockOverwatch().catch((cause) => setError(String(cause)));
+    else setShowOverwatch((current) => toggle ? !current : true);
+  }
   const closeOverwatch = useCallback(() => setShowOverwatch(false), []);
   const closeKeyboardHelp = useCallback(() => setShowKeyboardHelp(false), []);
   function requestFocus(key: string | null) {
@@ -281,7 +305,7 @@ export default function App() {
     else setFlashError('The target unit is not in inventory. Refresh its host.');
   }
   const commands: CommandActions = {
-    search: { run: () => setShowSwitcher((value) => !value) }, overwatch: { run: () => setShowOverwatch((value) => !value) },
+    search: { run: () => setShowSwitcher((value) => !value) }, overwatch: { run: () => showOverwatchView(true) },
     cycleNext: { run: () => cycleTarget(1) }, cyclePrevious: { run: () => cycleTarget(-1) },
     focusAnchor: { run: () => focusPane('anchor') }, focusTarget: { run: () => focusPane('target') },
     promote: { run: promoteTarget, available: Boolean(situation.targetKey), reason: 'Pane B is empty' },
@@ -306,7 +330,7 @@ export default function App() {
     {(inventory?.missions || []).filter((r) => r.state === 'halted').length ? <button className="specops-escalation" onClick={() => setShowSpecops(true)}>Immediate Flash Traffic · [!HALT] {(inventory?.missions || []).filter((r) => r.state === 'halted').length} SPECOPS missions require arbitration</button> : null}
     <SituationHeader onCentcom={window.agentHQ?.centcomState ? () => setShowCentcom(true) : undefined} centcomPendingCount={centcomPendingCount} onSpecops={() => setShowSpecops(true)} inventory={inventory} readiness={readiness} missionStartedAt={situation.missionStartedAt} hosts={settings?.hosts || []} hostFilter={hostFilter} onHostFilter={setHostFilter} onSearch={() => setShowSwitcher(true)} onSettings={() => setShowSettings(true)} onNew={() => setDialog(null)} collapsed={situation.rosterCollapsed || situation.zen} onToggleRoster={() => changeSituation({ rosterCollapsed: !situation.rosterCollapsed, zen: false })} />
     {inventory?.missions?.some((r) => !['completed', 'cancelled'].includes(r.state)) ? <nav className="specops-progress" aria-label="SPECOPS stage progress">{inventory.missions.filter((r) => !['completed', 'cancelled'].includes(r.state)).map((r) => <button key={r.id} onClick={() => setShowSpecops(true)}><strong>{r.repo}</strong> {r.workflow.stages.map((s) => s.id === r.stage ? `[*${s.id}*]` : `[${s.id}]`).join(' → ')}</button>)}</nav> : null}
-    <div className="workspace" inert={showOverwatch}>
+    <div className="workspace" inert={showOverwatch && !overwatchUndocked}>
       <SessionList sessions={scoped} selectedKey={workspace.selectedKey} onSelect={openSession} providerFilter={providerFilter} onProviderFilter={setProviderFilter} stateFilter={stateFilter} onStateFilter={setStateFilter} onRefresh={() => void refresh()} onNew={() => setDialog(null)} loading={loading} metadata={workspace.metadata} pinning={pinning} onPin={(session) => void togglePin(session)} situation={situation} onSituation={changeSituation} attention={attention} projects={projects} projectFilter={projectFilter} onProjectFilter={setProjectFilter} pinnedOnly={pinnedOnly} onPinnedOnly={() => setPinnedOnly((value) => !value)} onInbox={() => setInbox((value) => !value)} onCleanup={() => setCleanupTarget(null)} onSettings={() => setShowSettings(true)} />
       <main className="detail-panel">
         <div className="tab-strip" role="tablist" aria-label="Open sessions">{workspace.tabs.map((key) => <div className={`session-tab${workspace.selectedKey === key ? ' active' : ''}`} key={key}><button role="tab" aria-selected={workspace.selectedKey === key} title={known[key]?.title || key} onClick={() => { setInbox(false); setWorkspace((w) => openInPane(w, key)); }}>{known[key]?.title || key}</button><button aria-label={`Close tab ${known[key]?.title || key}`} onClick={() => closeTab(key)}><X size={12} /></button></div>)}</div>
@@ -324,7 +348,7 @@ export default function App() {
       </main>
     </div>
     {settings ? <HostMonitor hosts={settings.hosts} /> : null}
-    <footer className="statusbar"><span><span className={`connection-dot${inventory?.hosts.some((h) => !h.connected) || error ? ' offline' : ''}`} />{inventory ? `${inventory.hosts.filter((h) => h.connected).length}/${inventory.hosts.length} hosts connected` : 'Connecting…'}</span><span>{managedSessions.length.toLocaleString()} managed · {managedSessions.filter((s) => s.state === 'live' && !s.stale).length} live</span><span className="command-feedback" role="status" aria-live="polite">{commandKeys.prefix !== null ? `COMMAND: ${commandKeys.prefix || "_"} · Esc cancels` : commandKeys.status}</span><span className="status-fill" /><button className="text-button" onClick={() => setShowFlash((value) => !value)}>FLASH TRAFFIC {flashPending.filter((item) => item.state === 'pending').length}</button><button className="text-button" onClick={() => setShowKeyboardHelp(true)}><kbd>{commandBinding('commandMode', situation.shortcuts) || 'F1'}</kbd> COMMANDS</button><button className="text-button" onClick={() => cycleTarget(1)}><kbd>{commandBinding('cycleNext', situation.shortcuts)}</kbd> CYCLE B</button><button className="text-button" onClick={() => setShowOverwatch(true)}><kbd>{commandBinding('overwatch', situation.shortcuts)}</kbd> OVERWATCH</button></footer>
+    <footer className="statusbar"><span><span className={`connection-dot${inventory?.hosts.some((h) => !h.connected) || error ? ' offline' : ''}`} />{inventory ? `${inventory.hosts.filter((h) => h.connected).length}/${inventory.hosts.length} hosts connected` : 'Connecting…'}</span><span>{managedSessions.length.toLocaleString()} managed · {managedSessions.filter((s) => s.state === 'live' && !s.stale).length} live</span><span className="command-feedback" role="status" aria-live="polite">{commandKeys.prefix !== null ? `COMMAND: ${commandKeys.prefix || "_"} · Esc cancels` : commandKeys.status}</span><span className="status-fill" /><button className="text-button" onClick={() => setShowFlash((value) => !value)}>FLASH TRAFFIC {flashPending.filter((item) => item.state === 'pending').length}</button><button className="text-button" onClick={() => setShowKeyboardHelp(true)}><kbd>{commandBinding('commandMode', situation.shortcuts) || 'F1'}</kbd> COMMANDS</button><button className="text-button" onClick={() => cycleTarget(1)}><kbd>{commandBinding('cycleNext', situation.shortcuts)}</kbd> CYCLE B</button><button className="text-button" onClick={() => showOverwatchView()}><kbd>{commandBinding('overwatch', situation.shortcuts)}</kbd> OVERWATCH</button></footer>
     {error ? <div className="error-banner" role="alert"><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError('')}><X size={15} /></button></div> : null}
     {settings && dialog !== undefined ? <CreateDialog resume={dialog} settings={settings} hostId={hostFilter === 'all' ? settings.hosts.find((h) => h.enabled)?.id || '' : hostFilter} onClose={closeCreate} onSubmit={(input) => void create(input)} busy={busy} error={createError} /> : null}
     {settings && showSettings ? <SettingsDialog onSpecops={() => { setShowSettings(false); setShowSpecops(true); }} settings={settings} onSave={saveSettings} onExternalSettings={(updated) => { setSettings(updated); void refresh(); }} onClose={closeSettings} /> : null}
@@ -337,6 +361,6 @@ export default function App() {
     {deleteTarget ? <DeleteSessionDialog session={deleteTarget} onClose={closeDelete} onDeleted={() => { const keys = new Set([deleteTarget.key]); setWorkspace((current) => withoutSessions(current, keys)); setKnown((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !keys.has(key)))); setDeleteTarget(null); void refresh(); }} /> : null}
     {showSwitcher ? <QuickSwitcher sessions={sessions.filter((s) => isManagedSession(s) || s.kind === 'conversation' && s.canResume).map((s) => ({ ...s, cwd: `${s.cwd} ${projectFor(s, workspace.metadata)}` }))} callsigns={situation.callsigns} actions={commands} overrides={situation.shortcuts} onSelect={(s) => { openSession(known[s.key] || s); requestFocus(s.key); }} onSettings={() => setShowSettings(true)} onInbox={() => setInbox(true)} onClose={closeSwitcher} /> : null}
     {showKeyboardHelp ? <KeyboardHelp overrides={situation.shortcuts} actions={commands} onSave={(shortcuts) => changeSituation({ shortcuts })} onClose={closeKeyboardHelp} /> : null}
-    {showOverwatch ? <Overwatch sessions={managedSessions} situation={situation} attention={attention} onSelect={(session) => { setShowOverwatch(false); openSession(session); requestFocus(session.key); }} onClose={closeOverwatch} /> : null}
+    {showOverwatch && !overwatchUndocked ? <Overwatch onUndock={() => { void window.agentHQ?.undockOverwatch().catch((cause) => setError(String(cause))); }} sessions={managedSessions} situation={situation} attention={attention} onSelect={(session) => { setShowOverwatch(false); openSession(session); requestFocus(session.key); }} onClose={closeOverwatch} /> : null}
   </div>;
 }

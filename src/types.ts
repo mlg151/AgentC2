@@ -252,7 +252,16 @@ export interface CentcomState {
 }
 
 export interface AppUpdate { status: 'idle' | 'checking' | 'current' | 'pending' | 'available' | 'downloading' | 'ready' | 'installing' | 'error'; version: string; target: string | null; percent: number | null; error: string; source: boolean; mainAhead: boolean | null }
+export interface OverwatchWindowState { undocked: boolean; dockOpen?: boolean }
+
 export interface AgentHQApi {
+  overwatchWindowState(): Promise<OverwatchWindowState>;
+  undockOverwatch(): Promise<OverwatchWindowState>;
+  dockOverwatch(): Promise<OverwatchWindowState>;
+  selectOverwatchUnit(key: string): Promise<void>;
+  onOverwatchWindowState(callback: (state: OverwatchWindowState) => void): () => void;
+  onOverwatchSelect(callback: (key: string) => void): () => void;
+  onOverwatchWorkspace(callback: (workspace: Workspace) => void): () => void;
   centcomState(): Promise<CentcomState>;
   configureCentcom(config: CentcomConfig): Promise<CentcomState>;
   startCentcom(prompt?: string): Promise<CentcomState>;
