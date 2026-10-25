@@ -132,6 +132,22 @@
       "owner": "mlg151",
       "repo": "AgentC2",
       "releaseType": "release"
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0",
+        "tmux",
+        "python3 (>= 3.10)",
+        "openssh-client"
+      ]
     }
   },
   "author": "mlg151",

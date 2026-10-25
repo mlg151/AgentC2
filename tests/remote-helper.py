@@ -16,6 +16,23 @@ exec((Path(__file__).resolve().parents[1] / "electron" / "provider_telemetry.py"
 exec((Path(__file__).resolve().parents[1] / "electron" / "remote.py").read_text(), scope)
 
 
+class LocalRequirements(unittest.TestCase):
+    def test_missing_tmux_fails_before_inventory_or_launch_side_effects(self):
+        with tempfile.TemporaryDirectory(prefix="agentc2-no-tmux-") as directory:
+            helper = {"__name__": "local_requirements_fixture"}
+            exec((Path(__file__).resolve().parents[1] / "electron" / "remote.py").read_text(), helper)
+            exec((Path(__file__).resolve().parents[1] / "electron" / "worktrees.py").read_text(), helper)
+            home = Path(directory)
+            with patch.dict(os.environ, {"PATH": directory}), patch.dict(helper, {"HOME": home, "HOOK_ROOT": home / ".cache" / "agent-hq"}):
+                for local in (True, False):
+                    for action, transport in (("inventory", None), ("create", "terminal"), ("create", "chat"), ("worktree_launch", "terminal")):
+                        with self.subTest(local=local, action=action, transport=transport):
+                            payload = dict(localHost=local, provider="codex", cwd=directory, transport=transport, hookSource="# fixture")
+                            with self.assertRaisesRegex(ValueError, "tmux is required.*[Ii]nstall"):
+                                helper[action](payload)
+                            self.assertFalse((home / ".cache").exists(), "Preflight must precede hooks and chat reservations")
+
+
 class CentcomWorkspace(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="agentc2-centcom-workspace-")

@@ -40,3 +40,10 @@ let calls = 0;
 assert.equal(packageNative(['--mac'], signed, () => { calls++; return { status: 7 }; }), 7);
 assert.equal(calls, 1, 'Do not report a failed build as a successful package');
 console.log('PASS unsigned main/tag/PR packaging environments, optional signing preservation, and build failure propagation');
+
+const { default: FpmTarget } = require('app-builder-lib/out/targets/FpmTarget');
+const dependencies = require('../package.json').build.deb.depends;
+for (const requirement of [...FpmTarget.prototype.getDefaultDepends('deb'), 'tmux', 'python3 (>= 3.10)', 'openssh-client']) {
+  assert.ok(dependencies.includes(requirement), `Debian package must require ${requirement}`);
+}
+console.log('PASS Debian local-session requirements preserve Electron runtime dependencies');

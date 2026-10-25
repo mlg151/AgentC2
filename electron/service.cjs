@@ -160,7 +160,7 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
   async function runRemote(payload, hostId) {
     if (payload.action === 'inventory' && !payload.sourceDigest) payload = { ...payload, sourceDigest: chatDigest, chatFiles, allowUpgrade: true };
     const host = getHost(hostId);
-    if (host.kind === 'local') payload = await localPayload(payload);
+    if (host.kind === 'local') payload = { ...await localPayload(payload), localHost: true };
     payload = assertDispatchScope(getHost(hostId), payload, store.data.settings);
     return new Promise((resolve, reject) => {
       const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
@@ -183,7 +183,7 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
       child.stderr.on('data', (chunk) => { errors += chunk.toString(); });
       child.stdin.on('error', () => {});
       child.on('error', (error) => {
-        if (!settled) { settled = true; clearTimeout(timeout); reject(error); }
+        if (!settled) { settled = true; clearTimeout(timeout); reject(host.kind === 'local' && error.code === 'ENOENT' ? new Error('Local execution requires Python 3.10+ and tmux. Install them on this computer (inside the default WSL distribution on Windows), then retry.', { cause: error }) : error); }
       });
       child.on('close', (code) => {
         if (settled) return;
@@ -329,6 +329,7 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
     const transport = isTerminal || input.agentId || customCommand ? 'terminal' : input.transport || 'chat';
     validateRoeLaunch(provider, preset, roeProfile, transport);
     if (input.transport === 'chat' && transport !== 'chat') throw new Error('This launch requires terminal mode because it uses a custom command or an existing background agent');
+    if (host.kind === 'local') await runRemote({ action: 'requirements' }, host.id);
     if (transport === 'chat') {
       const capability = (await chats.capabilities(host.id, provider)).find((item) => item.provider === provider);
       if (capability?.status !== 'supported') throw new Error(`${capability?.reason || 'Structured chat is unavailable'}. Select Terminal in the launch dialog to use the existing CLI flow.`);

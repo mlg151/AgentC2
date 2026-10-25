@@ -17,6 +17,8 @@ Linux targets GNOME and KDE Plasma with X11 or XWayland available. Native Waylan
 
 Install the Debian package with `sudo apt install ./AgentC2-<version>-linux-amd64.deb`. Launch **AgentC2** from the applications menu or run `agentc2`.
 
+Local sessions require Python 3.10+ and tmux on Linux. On Debian/Ubuntu, run `sudo apt install python3 tmux openssh-client`; the Debian package declares these dependencies. AppImage and source installs require you to install them separately. If inventory reports a missing dependency, install it and refresh; restarting AgentC2 is unnecessary. SSH sessions need Python 3.10+ and tmux on the remote execution host.
+
 For AppImage, run `chmod +x AgentC2-<version>-linux-x86_64.AppImage`, then execute it as your normal user. AppImages need FUSE 2 (`libfuse2` on Ubuntu 22.04, `libfuse2t64` on newer Ubuntu). If FUSE is unavailable, use `--appimage-extract`, then run `squashfs-root/AppRun`. AppImage does not install its own applications-menu shortcut. The Debian package registers its launcher and PNG icon.
 
 Notifications need `libnotify4` and a running desktop notification service; see [Electron notifications](https://www.electronjs.org/docs/latest/tutorial/notifications). Install `openssh-client`; the system also needs Electron's GTK/NSS/X11 libraries (the Debian package declares runtime dependencies). In a Wayland desktop, use the XWayland compatibility session when native Wayland integration causes clipboard or input differences. Do not run AgentC2 as root or disable Chromium's sandbox to work around an installation problem. Ubuntu policies restricting unprivileged user namespaces may require administrator configuration of an AppArmor profile; use the Debian package and your distribution's Electron application guidance.

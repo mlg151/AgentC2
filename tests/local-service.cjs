@@ -47,9 +47,11 @@ const local = require('../electron/local.cjs');
     assert.equal(calls.find((call) => call.payload.transport === 'chat').payload.cwd, '/custom/c/Users/Example Folder/');
     await service.create(input);
     assert.equal(calls.find((call) => call.payload.action === 'create').payload.cwd, '/custom/c/Users/Example Folder/');
+    assert.equal(calls.find((call) => call.payload.action === 'create').payload.localHost, true);
     assert.equal(input.cwd, 'C:\\Users\\Example Folder\\');
     const count = conversions.length;
     await service.create({ ...input, hostId: 'ssh' });
+    assert.equal(calls.filter((call) => call.payload.action === 'create').at(-1).payload.localHost, undefined);
     assert.equal(conversions.length, count, 'SSH must not perform local path conversion');
     assert.equal(calls.filter((call) => call.payload.action === 'create').at(-1).payload.cwd, input.cwd);
     // Let the background inventory settle before deliberately failing a child.

@@ -426,6 +426,11 @@
       "env": {
         "AGENTC2_CHAT_TEST_LOCAL": "1"
       }
+    },
+    {
+      "id": "local-lifecycle",
+      "file": "tests/local-lifecycle.cjs",
+      "group": "linux-python"
     }
   ],
   "nested": {

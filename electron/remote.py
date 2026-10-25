@@ -413,7 +413,15 @@ def chat_inventory_events(journal_events, chat):
     return events
 
 
+def require_tmux(payload=None):
+    if shutil.which("tmux"):
+        return
+    location = "this computer (the default WSL distribution on Windows)" if (payload or {}).get("localHost") else "the execution host"
+    raise ValueError(f"tmux is required on {location}. Install tmux (Debian/Ubuntu: sudo apt install tmux; macOS: brew install tmux), then refresh and retry.")
+
+
 def inventory(payload=None):
+    require_tmux(payload)
     sessions = (
         tmux_sessions() + codex_sessions()
         + claude_sessions() + antigravity_sessions() + opencode_sessions()
@@ -616,6 +624,7 @@ def agent_command(provider, conversation_id=None, agent_id=None, preset=None, in
 
 
 def create(payload):
+    require_tmux(payload)
     provider = payload.get("provider")
     if provider not in SESSION_PROVIDERS:
         raise ValueError("Unsupported provider")
@@ -827,7 +836,12 @@ def main():
         raise ValueError("Missing remote request")
     payload = json.loads(base64.b64decode(encoded).decode("utf-8"))
     action = payload.get("action")
-    if action == "inventory":
+    if action in ("inventory", "create", "worktree_launch", "configure"):
+        require_tmux(payload)
+    if action == "requirements":
+        require_tmux(payload)
+        result = {"tmux": True}
+    elif action == "inventory":
         result = inventory(payload)
     elif action == "github":
         result = github_request(payload)
