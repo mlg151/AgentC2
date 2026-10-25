@@ -26,7 +26,7 @@ async function until(check, detail) { for (let n = 0; n < 150; n++) { if (check(
     assert.deepEqual(receiver.open(JSON.parse(wire)), { notes: 'private fixture notes' }); assert.throws(() => receiver.open(JSON.parse(wire)), /replayed/);
     const next = JSON.parse(sender.seal({ a: 1 })); next.tag = '0'.repeat(32); assert.throws(() => receiver.open(next));
     assert.throws(() => channel(secret, 'another-handshake', false).open(JSON.parse(wire)));
-    const a = make('A'), b = make('B');
+    const a = make('A'); let b = make('B');
     await a.configure({ ...a.data.config, enabled: true, port: 0 }); await b.configure({ ...b.data.config, enabled: true, port: 0 });
     const pairing = a.pair();
     await assert.rejects(b.connect({ url: pairing.url, code: 'b'.repeat(64) }), /authentication/);
@@ -83,6 +83,10 @@ async function until(check, detail) { for (let n = 0; n < 150; n++) { if (check(
     b.service.chats.sessions.set('fixture', { hostId: 'remote', handles: new Set() });
     await a.service.saveSettings({ ...a.store.data.settings, hosts: a.store.data.settings.hosts.map((h) => h.id === 'remote' ? { ...h, target: 'changed.invalid' } : h) });
     await until(() => b.error.includes('Close this host'), 'active connection guard'); assert.equal(b.store.data.settings.hosts.find((h) => h.id === 'remote').target, 'fixture.invalid');
+    const pendingRecords = structuredClone(b.data.records), pendingService = b.service, pendingDirectory = path.dirname(b.file);
+    b.close(); b = new PeerSync({ directory: pendingDirectory, service: pendingService }); peers.push(b);
+    assert.deepEqual(b.data.records, pendingRecords, 'Restart must retain unapplied incoming revisions');
+    await b.start(); await b.apply(); assert.ok(b.error.includes('Close this host'));
     b.service.chats.sessions.clear(); await b.apply(); assert.equal(b.store.data.settings.hosts.find((h) => h.id === 'remote').target, 'changed.invalid');
     // Restart retains credentials, records, and tombstones, without replaying mutations.
     const records = structuredClone(b.data.records), dir = path.dirname(b.file); b.close();

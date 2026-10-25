@@ -157,6 +157,7 @@ class PeerSync extends EventEmitter {
         if (!verify(secret, 'client:' + transcript, request.proof)) throw new Error('Peer authentication failed');
         const credential = request.pair ? derive(secret, transcript, 'paired credential').toString('hex') : secret;
         if (request.pair) { this.pairing = null; this.data.peers[request.id] = { name: request.name, secret: credential, url: '' }; this.persist(); }
+        else if (existing.name !== request.name) { existing.name = request.name; this.persist(); }
         ws.send(JSON.stringify({ proof: mac(secret, 'server:' + transcript) }));
         authenticated(); this.attach(ws, request.id, channel(credential, transcript, false));
       } catch { ws.close(1008, 'Peer authentication rejected'); }
@@ -190,6 +191,7 @@ class PeerSync extends EventEmitter {
             if (!verify(secret, 'server:' + transcript, response.proof)) throw new Error('Peer authentication failed');
             const credential = code ? derive(secret, transcript, 'paired credential').toString('hex') : secret;
             if (code) { this.data.peers[hello.id] = { name: hello.name, url, secret: credential }; this.persist(); }
+            else if (this.data.peers[hello.id]?.name !== hello.name) { this.data.peers[hello.id].name = hello.name; this.persist(); }
             if (!this.data.peers[hello.id] || !this.data.config.enabled || this.closed) throw new Error('Desktop sync disabled');
             complete = true; authenticated(); ws.off('message', handler);
             this.attach(ws, hello.id, channel(credential, transcript, true)); resolve();
