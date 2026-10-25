@@ -135,52 +135,52 @@ Local sessions: **Settings → Hosts → Add this computer** runs agents without
 
 OpenCode setup, verified versions, session renaming, and update detection: [OpenCode and desktop updates](docs/opencode.md).
 
-## Documentation references and examples
+## Screenshots and examples
 
-### Screenshots
+The screenshots below show the app using isolated test fixtures. Click an image to inspect the full-size view.
 
-Implementation screenshots, each generated from isolated Electron/display, SSH, Git, and tmux fixtures with no provider prompts or real conversations:
+### Monitor your fleet
 
-- [Situation Room at 1600 by 1000](docs/screenshots/situation-room.png) and the [narrow window](docs/screenshots/situation-room-narrow.png) view of full terminal panes, grouped 220px roster, shared host/command strips, and Overwatch command keys.
-- [Overwatch at 1600 by 1000](docs/screenshots/overwatch.png) and its concept reference ([overwatch-concept.png](docs/screenshots/overwatch-concept.png)): paged read-only snapshot grid, jump-key hints, and arrow-key paging.
-- [Structured chat (desktop)](docs/screenshots/structured-chat-desktop.png), [phone](docs/screenshots/structured-chat-phone.png), and local-desktop variant ([structured-chat-local-desktop.png](docs/screenshots/structured-chat-local-desktop.png)): Markdown transcript, requests, control and detach states, and usage line.
-- [SPECOPS](docs/screenshots/specops-desktop.png) and narrow variant ([specops-narrow.png](docs/screenshots/specops-narrow.png)); [SitRep preview](docs/screenshots/sitrep-preview.png); [Worktree launch](docs/screenshots/worktree-launch.png) and diff drawer ([worktree-diff.png](docs/screenshots/worktree-diff.png), [worktree-diff-narrow.png](docs/screenshots/worktree-diff-narrow.png)).
-- [Exercise review](docs/screenshots/exercise-review.png), [exercise promotion](docs/screenshots/exercise-promotion.png); [Fleet readiness](docs/screenshots/fleet-readiness.png); [Flash Traffic](docs/screenshots/flash-traffic.png); [Managed roster session names](docs/screenshots/managed-roster-session-names.png).
-- [Situation Room approval scope](docs/screenshots/centcom-approval-scope.png), [CENTCOM console](docs/screenshots/centcom-console.png) and narrow variant ([centcom-console-narrow.png](docs/screenshots/centcom-console-narrow.png)), [CENTCOM automation preview](docs/screenshots/centcom-automation-preview.png), and [CENTCOM automation outcomes](docs/screenshots/centcom-automation-outcomes.png).
-- [Application updates](docs/screenshots/application-updates.png) and pending-update state ([updates-main-pending.png](docs/screenshots/updates-main-pending.png)); [Session rename update](docs/screenshots/session-rename-update.png); [Delete session confirmation](docs/screenshots/delete-session-confirmation.png).
-- [Companion rename](docs/screenshots/companion-rename.png) and remote-access launch error ([companion-launch-error.png](docs/screenshots/companion-launch-error.png)).
+![Situation Room with a grouped roster, two session panes, and host resources](docs/screenshots/situation-room.png)
 
-### Examples
+Configure a host in **Settings → SSH hosts**, then choose **New** to launch a session. Select a unit in the roster to open it, pin a unit to Pane A, and use Alt+J/K to cycle through other units in Pane B. Press Ctrl+G for the read-only Overwatch grid.
 
-Build from source:
+![Overwatch grid showing multiple session snapshots](docs/screenshots/overwatch.png)
 
-```sh
-npm ci
-npm run dev        # Vite on 127.0.0.1:5173 plus Electron
-npm run build      # TypeScript check and renderer build
-npm start          # launch Electron against the built app
-npm run dist       # package the current native platform into release/
-```
+See [Situation Room](docs/situation-room.md) for shortcuts and narrow-window examples.
 
-Run host-independent checks first, then the full CI suite:
+### Work in a structured chat
 
-```sh
-npm run test:ci            # build + gateway, platform, and host-independent checks
-npm run test:terminal       # live desktop terminal regression (isolated SSH fixture)
-npm run test:desktop       # Electron native behavior on the current platform (Xvfb on Linux)
-npm run test:launch-modes  # verifies installed provider argv, resume, and tmux history sets
-```
+![Desktop structured chat transcript and controls](docs/screenshots/structured-chat-desktop.png)
 
-Launch a structured chat with a configured host; Select **Terminal** in the agent launch dialog for custom commands:
+Choose **New → Structured chat**, select a supported provider and configured host, and enter a working directory. Send a task in the composer and inspect tool results and any requests in the transcript. Choose **Terminal** in the launch dialog for custom commands. See [unified chat](docs/unified-chat.md) for provider setup and recovery.
+
+For local execution, choose **Settings → Hosts → Add this computer** first. Linux needs Python 3 and tmux; Windows uses the default WSL distribution. The [local-session guide](docs/unified-chat.md#local-sessions) explains setup.
+
+### Review isolated work
+
+![Worktree launch form for an isolated Git task](docs/screenshots/worktree-launch.png)
+
+Launch a task in an isolated worktree, inspect its [live diff](docs/worktree-diffs.md), and review the changes before integrating them. For competing approaches, use Joint Exercises to choose a base ref and contestants, run a test command, and compare captured evidence before promotion.
+
+![Exercise review with contestant results](docs/screenshots/exercise-review.png)
+
+See [worktrees](docs/worktrees.md), [SPECOPS](docs/specops.md), and [SitRep](docs/sitrep.md) for related workflows.
+
+### Validate a source build
 
 ```sh
-# Configure one SSH host in Settings → SSH hosts, or set AGENTC2_HOST before first launch.
-# Local execution: Settings → Hosts → Add this computer (Linux Python 3/tmux; Windows default WSL).
-npm run dev
+npm run test:ci       # renderer build and host-independent checks
+npm run test:desktop  # native Electron checks; use xvfb-run -a on headless Linux
+npm run dist          # package the current native platform into release/
+npm run test:package  # smoke-test the packaged app
 ```
 
-Exercise an isolated Git task through the app’s Joint Exercises flow: select base ref and contestants in the Exercise dialog, run the test command, and compare captured evidence before promotion. Optional live SSH QA needs an explicit `AGENTC2_HOST`; rows use isolated fixtures and restore the clipboard on completion.
+Live SSH checks need an explicit test environment; they are separate from the host-independent suite:
 
-See [platform setup and validation limits](docs/platforms.md), [unified chat](docs/unified-chat.md), [worktrees](docs/worktrees.md), [SPECOPS](docs/specops.md), [SitRep](docs/sitrep.md), and [Situation Room](docs/situation-room.md) for the feature-specific behaviors behind these references and examples.
+```sh
+AGENTC2_HOST=your-test-host npm run test:terminal
+AGENTC2_HOST=your-test-host npm run test:launch-modes
+```
 
-## Safety and scope
+Terminal tests create isolated sessions and restore the clipboard. Launch-mode tests require installed provider CLIs. See [platform setup](docs/platforms.md) and [live SSH QA](docs/releases.md#live-ssh-qa) for prerequisites and validation limits.
