@@ -1,6 +1,7 @@
 """Joint Exercise isolation, verification, promotion and retry fixtures."""
 
 from pathlib import Path
+from helpers.python_sources import exec_sources
 import subprocess
 import tempfile
 import unittest
@@ -8,7 +9,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1] / "electron"
 scope = {"__name__": "exercise_fixture"}
 for name in ("worktrees.py", "worktree-diff.py", "sitrep.py", "exercises.py", "provider_telemetry.py", "remote.py"):
-    exec((ROOT / name).read_text(), scope)
+    exec_sources(scope, (ROOT / name))
 
 
 class Exercises(unittest.TestCase):

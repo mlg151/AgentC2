@@ -1,13 +1,6 @@
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const ts = require('typescript');
-
-const source = fs.readFileSync(path.join(__dirname, '../src/readiness.ts'), 'utf8');
-const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
-const moduleLike = { exports: {} };
-new Function('module', 'exports', 'require', compiled)(moduleLike, moduleLike.exports, require);
-const { fleetReadiness, elapsedClock } = moduleLike.exports;
+const { loadRenderer } = require('./helpers/load-renderer.cjs');
+const { fleetReadiness, elapsedClock } = loadRenderer('readiness.ts');
 const cjsReadiness = require('../electron/readiness.cjs');
 assert.equal(typeof cjsReadiness.fleetReadiness, 'function');
 assert.equal(typeof cjsReadiness.elapsedClock, 'function');

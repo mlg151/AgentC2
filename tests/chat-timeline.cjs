@@ -1,15 +1,5 @@
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const ts = require('typescript');
-
-function load(file) {
-  const source = fs.readFileSync(path.join(__dirname, '..', 'src', file), 'utf8');
-  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
-  const exports = {};
-  new Function('exports', compiled)(exports);
-  return exports;
-}
+const { loadRenderer: load } = require('./helpers/load-renderer.cjs');
 const { emptyChatTimeline: empty, reduceChatTimeline: reduce } = load('chatTimeline.ts');
 const { chatLink, chatCommandId, companionChatApi } = load('chatClient.ts');
 function event(sequence, type, data, itemId = 'message-one') {

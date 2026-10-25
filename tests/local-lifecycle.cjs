@@ -33,7 +33,7 @@ const local = require('../electron/local.cjs');
     } };
     return load(name);
   };
-  vm.runInNewContext('(function(require,module,__dirname){' + fs.readFileSync(filename, 'utf8') + '\n})', { process, console, Buffer, setTimeout, clearTimeout })(fixtureRequire, moduleFixture, path.dirname(filename));
+  vm.compileFunction(fs.readFileSync(filename, 'utf8'), ['require', 'module', '__dirname'], { filename, parsingContext: vm.createContext({ process, console, Buffer, setTimeout, clearTimeout }) })(fixtureRequire, moduleFixture, path.dirname(filename));
   let service;
   try {
     service = moduleFixture.exports.createService({ directory: path.join(directory, 'store'), home });

@@ -36,7 +36,7 @@ const local = require('../electron/local.cjs');
     return child;
   };
   const requireFixture = (name) => name === 'node:child_process' ? { spawn } : name === 'node-pty' ? {} : name === './local.cjs' ? { ...local, localPayload: (payload) => local.localPayload(payload, options) } : load(name);
-  vm.runInNewContext('(function(require,module,__dirname){' + fs.readFileSync(filename, 'utf8') + '\n})', { process, console, Buffer, setTimeout, clearTimeout })(requireFixture, exports, path.dirname(filename));
+  vm.compileFunction(fs.readFileSync(filename, 'utf8'), ['require', 'module', '__dirname'], { filename, parsingContext: vm.createContext({ process, console, Buffer, setTimeout, clearTimeout }) })(requireFixture, exports, path.dirname(filename));
   try {
     service = exports.exports.createService({ directory, home: os.homedir() });
     assert.ok(fs.existsSync(path.join(directory, 'centcom/centcom.json')), 'Commander state must stay inside the isolated service directory');

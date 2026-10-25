@@ -1,15 +1,9 @@
 // Pure invariants shared by workspace navigation and command dispatch.
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const ts = require('typescript');
+const { loadRenderer } = require('./helpers/load-renderer.cjs');
 const { validateWorkspace } = require('../electron/config.cjs');
 function load(name) {
-  const source = fs.readFileSync(path.join(__dirname, '../src', `${name}.ts`), 'utf8');
-  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
-  const module = { exports: {} };
-  new Function('module', 'exports', 'require', compiled)(module, module.exports, require);
-  return module.exports;
+  return loadRenderer(`${name}.ts`);
 }
 const { situationFor, updateSituation, openInPane, closeWorkspaceTab, assignCallsigns, unitState } = load('workspace');
 const { normalizeBinding, resolvedBinding, bindingMatches, validateShortcuts } = load('commands');

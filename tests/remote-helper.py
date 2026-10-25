@@ -1,5 +1,6 @@
 """Exit evidence must stay authoritative when tmux lacks a wait status."""
 from pathlib import Path
+from helpers.python_sources import exec_sources
 import json
 import os
 import sqlite3
@@ -12,16 +13,16 @@ from unittest.mock import patch
 
 
 scope = {"__name__": "agentc2_helper_test"}
-exec((Path(__file__).resolve().parents[1] / "electron" / "provider_telemetry.py").read_text(), scope)
-exec((Path(__file__).resolve().parents[1] / "electron" / "remote.py").read_text(), scope)
+exec_sources(scope, (Path(__file__).resolve().parents[1] / "electron" / "provider_telemetry.py"))
+exec_sources(scope, (Path(__file__).resolve().parents[1] / "electron" / "remote.py"))
 
 
 class LocalRequirements(unittest.TestCase):
     def test_missing_tmux_fails_before_inventory_or_launch_side_effects(self):
         with tempfile.TemporaryDirectory(prefix="agentc2-no-tmux-") as directory:
             helper = {"__name__": "local_requirements_fixture"}
-            exec((Path(__file__).resolve().parents[1] / "electron" / "remote.py").read_text(), helper)
-            exec((Path(__file__).resolve().parents[1] / "electron" / "worktrees.py").read_text(), helper)
+            exec_sources(helper, (Path(__file__).resolve().parents[1] / "electron" / "remote.py"))
+            exec_sources(helper, (Path(__file__).resolve().parents[1] / "electron" / "worktrees.py"))
             home = Path(directory)
             with patch.dict(os.environ, {"PATH": directory}), patch.dict(helper, {"HOME": home, "HOOK_ROOT": home / ".cache" / "agent-hq"}):
                 for local in (True, False):
@@ -79,7 +80,7 @@ class CentcomWorkspace(unittest.TestCase):
 class StructuredInventory(unittest.TestCase):
     def setUp(self):
         self.helper = {"__name__": "structured_inventory_fixture"}
-        exec((Path(__file__).resolve().parents[1] / "electron" / "remote.py").read_text(), self.helper)
+        exec_sources(self.helper, (Path(__file__).resolve().parents[1] / "electron" / "remote.py"))
 
     def test_worker_descendants_are_managed_but_unrelated_processes_remain_visible(self):
         rows = "200 1 python3 ?\n201 200 codex ?\n202 201 claude ?\n300 1 codex pts/1\n400 1 tmux:server ?\n401 400 agy ?\n"
@@ -238,7 +239,7 @@ class Cleanup(unittest.TestCase):
         self.home = Path(self.temporary.name)
         self.helper = {"__name__": "cleanup_test"}
         root = Path(__file__).resolve().parents[1] / "electron"
-        exec((root / "antigravity-cleanup.py").read_text() + "\n" + (root / "session-cleanup.py").read_text() + "\n" + (root / "provider_telemetry.py").read_text() + "\n" + (root / "remote.py").read_text(), self.helper)
+        exec_sources(self.helper, *(root / name for name in ("antigravity-cleanup.py", "session-cleanup.py", "provider_telemetry.py", "remote.py")))
         self.helper["HOME"] = self.home
         environment = patch.dict(os.environ, {"CODEX_HOME": str(self.home / '.codex'), "CODEX_SQLITE_HOME": str(self.home / '.codex')})
         environment.start()

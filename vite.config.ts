@@ -11,5 +11,5 @@ export default defineConfig({
   plugins: [react(), { name: 'agentc2-build-info', generateBundle() { this.emitFile({ type: 'asset', fileName: 'build-info.json', source: JSON.stringify({ version, revision }) }); } }],
   base: './',
   server: { host: '127.0.0.1', port: 5173, strictPort: true },
-  build: { rollupOptions: { input: { desktop: 'index.html', companion: 'companion.html' } } },
+  build: { sourcemap: process.env.AGENTC2_COVERAGE === '1', rollupOptions: { input: { desktop: 'index.html', companion: 'companion.html' } } },
 });

@@ -1,6 +1,41 @@
 {
   "suites": [
     {
+      "id": "coverage-sources-python",
+      "file": "tests/coverage-sources.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "centcom-boundary",
+      "file": "tests/centcom-boundary.cjs",
+      "group": "core"
+    },
+    {
+      "id": "tmux-control",
+      "file": "tests/tmux-control.cjs",
+      "group": "core"
+    },
+    {
+      "id": "renderer-contract",
+      "file": "tests/renderer-contract.cjs",
+      "group": "core"
+    },
+    {
+      "id": "coverage-policy",
+      "file": "tests/coverage-policy.cjs",
+      "group": "core"
+    },
+    {
+      "id": "terminal-scroll",
+      "file": "tests/terminal-scroll.cjs",
+      "group": "core"
+    },
+    {
+      "id": "bridge-contract",
+      "file": "tests/bridge-contract.cjs",
+      "group": "core"
+    },
+    {
       "id": "auto-version",
       "file": "tests/auto-version.cjs",
       "group": "core"

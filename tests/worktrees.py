@@ -1,6 +1,7 @@
 """Disposable Git repository checks for owned worktree lifecycle."""
 
 from pathlib import Path
+from helpers.python_sources import exec_sources
 import base64
 import hashlib
 import json
@@ -29,7 +30,7 @@ class Worktrees(unittest.TestCase):
         git("commit", "-qm", "Base")
         source = (Path(__file__).resolve().parents[1] / "electron")
         self.scope = {"__name__": "worktree_fixture"}
-        exec((source / "worktrees.py").read_text() + "\n" + (source / "provider_telemetry.py").read_text() + "\n" + (source / "remote.py").read_text(), self.scope)
+        exec_sources(self.scope, *(source / name for name in ("worktrees.py", "provider_telemetry.py", "remote.py")))
         self.scope["WORKTREE_ROOT"] = self.root / "owned"
         self.created = Mock(side_effect=lambda payload: {"name": payload["managedName"]})
         self.scope["create"] = self.created
