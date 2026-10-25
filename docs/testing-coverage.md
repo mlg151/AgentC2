@@ -13,7 +13,7 @@ Windows). The collector is copied into a test-only bootstrap directory so child
 processes in private SDK virtual environments use the same pinned collector
 without importing system SDK packages.
 
-`npm run test:coverage -- core` builds with source maps, runs the selected group,
+`npm run test:coverage -- core` builds without minification and with source maps, runs the selected group,
 and reports both languages. Additional group names are accepted in order, for
 example `npm run test:coverage -- core linux-python`. The default group is
 `core`; this is a partial collection and must not be described as full workflow
@@ -48,6 +48,8 @@ not executable code. Declaration-only exclusions are derived from the AST;
 adding a runtime export puts the file back into the denominator. Dependencies,
 fixtures, generated bundles, and test infrastructure are not application
 source. Browser bundle execution is mapped back to original production files.
+Coverage builds retain generated statement boundaries for accurate source-map
+remapping; ordinary production builds keep their existing minification.
 
 Python reports use the standard Coverage.py statement/line and branch metrics.
 Named function regions are covered only when their bodies execute. Copied

@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { createHash } = require('node:crypto');
 const root = path.resolve(__dirname, '..');
 const directory = path.join(root, 'test-results/coverage');
 const metrics = ['statements', 'branches', 'functions', 'lines'];
@@ -13,10 +14,23 @@ function preparePython(environment) {
   if (probe.status !== 0) throw Error('Install Python test dependencies with python3 -m pip install -r tests/requirements.txt');
   const [version, source] = JSON.parse(probe.stdout);
   if (version !== '7.16.0') throw Error(`Coverage.py 7.16.0 is required; found ${version}`);
-  pythonBootstrap = path.join(directory, 'python-bootstrap');
+  const base = path.join(directory, 'python-bootstrap');
+  if (source.startsWith(base + path.sep)) { pythonBootstrap = path.dirname(source); return pythonBootstrap; }
+  const identity = createHash('sha256').update(version + source).digest('hex').slice(0, 12);
+  pythonBootstrap = path.join(base, identity);
   // Private SDK venvs deliberately have no system site packages. Copy only the
   // test collector so coverage follows children without exposing host SDKs.
-  fs.cpSync(source, path.join(pythonBootstrap, 'coverage'), { recursive: true, filter: (file) => !file.split(path.sep).includes('__pycache__') });
+  // Publish a completed copy atomically. Parallel suites must never truncate a
+  // collector extension that another Python process has memory-mapped.
+  if (!fs.existsSync(pythonBootstrap)) {
+    fs.mkdirSync(base, { recursive: true });
+    const staging = fs.mkdtempSync(path.join(base, 'staging-'));
+    try {
+      fs.cpSync(source, path.join(staging, 'coverage'), { recursive: true, filter: (file) => !file.split(path.sep).includes('__pycache__') });
+      try { fs.renameSync(staging, pythonBootstrap); }
+      catch (error) { if (!['EEXIST', 'ENOTEMPTY', 'EPERM'].includes(error.code) || !fs.existsSync(pythonBootstrap)) throw error; }
+    } finally { fs.rmSync(staging, { recursive: true, force: true }); }
+  }
   return pythonBootstrap;
 }
 
@@ -64,7 +78,7 @@ function c8Arguments() {
     '--include', 'electron/**/*.cjs', '--include', 'src/**/*.{ts,tsx}', '--include', 'dist/**/*.js',
     '--exclude-after-remap', '--exclude', '**/node_modules/**',
     ...declarationFiles().flatMap((file) => ['--exclude', file]),
-    '--temp-directory', path.join(directory, 'v8'), '--reports-dir', path.join(directory, 'javascript'),
+    '--temp-directory', path.join(directory, 'v8-normalized'), '--reports-dir', path.join(directory, 'javascript'),
     '--reporter', 'json-summary', '--reporter', 'json', '--reporter', 'html', '--reporter', 'text-summary',
   ];
 }
@@ -99,14 +113,25 @@ function pythonSummary(report) {
 
 function report() {
   if (!fs.existsSync(path.join(directory, 'v8')) || !fs.readdirSync(path.join(directory, 'v8')).some((file) => file.endsWith('.json'))) throw Error('JavaScript coverage data is missing; collect suites first');
+  fs.rmSync(path.join(directory, 'v8-normalized'), { recursive: true, force: true });
+  require('./normalize-v8.cjs').normalize(path.join(directory, 'v8'), path.join(directory, 'v8-normalized'));
   if (!run(process.execPath, c8Arguments())) return false;
   const python = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
-  const env = { ...process.env, PYTHONPATH: [path.join(root, 'tests/helpers/coverage-python'), preparePython(process.env), process.env.PYTHONPATH].filter(Boolean).join(path.delimiter) };
-  // --keep permits repeated reporting without discarding raw process evidence.
-  if (!run(python, ['-m', 'coverage', 'combine', '--append', '--keep'], { env })) return false;
+  const reportData = path.join(directory, 'python-report/.coverage');
+  fs.mkdirSync(path.dirname(reportData), { recursive: true });
+  const env = { ...process.env, COVERAGE_PROCESS_START: '', COVERAGE_FILE: reportData, PYTHONPATH: [path.join(root, 'tests/helpers/coverage-python'), preparePython(process.env), process.env.PYTHONPATH].filter(Boolean).join(path.delimiter) };
+  const normalized = path.join(directory, 'python-normalized');
+  fs.rmSync(normalized, { recursive: true, force: true });
+  fs.rmSync(reportData, { force: true });
+  if (!run(python, ['scripts/normalize-coverage.py', path.join(directory, 'python'), normalized], { env })) return false;
+  const reportConfig = path.join(directory, 'report.coveragerc');
+  fs.writeFileSync(reportConfig, fs.readFileSync(path.join(root, '.coveragerc'), 'utf8').replace(/^plugins = agentc2_coverage\r?$/m, ''));
+  // Rebuild from every retained raw process report. No execution is discarded
+  // when reporting repeatedly, and incompatible tracer labels cannot mix.
+  if (!run(python, ['-m', 'coverage', 'combine', '--rcfile', reportConfig, '--keep', normalized], { env })) return false;
   const pythonFile = path.join(directory, 'python/coverage.json');
-  if (!run(python, ['-m', 'coverage', 'json', '-o', pythonFile], { env })) return false;
-  if (!run(python, ['-m', 'coverage', 'html'], { env })) return false;
+  if (!run(python, ['-m', 'coverage', 'json', '--rcfile', reportConfig, '-o', pythonFile], { env })) return false;
+  if (!run(python, ['-m', 'coverage', 'html', '--rcfile', reportConfig], { env })) return false;
   const javascript = JSON.parse(fs.readFileSync(path.join(directory, 'javascript/coverage-summary.json'), 'utf8'));
   const pythonData = pythonSummary(JSON.parse(fs.readFileSync(pythonFile, 'utf8')));
   const summary = { ...Object.fromEntries(Object.entries(javascript).filter(([file]) => file !== 'total').map(([file, value]) => [path.relative(root, file).replaceAll('\\', '/'), value])), ...pythonData };
@@ -139,7 +164,7 @@ function report() {
 async function main() {
   if (process.argv[2] === 'report') { if (!report()) process.exitCode = 1; return; }
   if (process.argv[2] === 'reset') {
-    for (const file of ['v8', 'python', 'javascript', 'summary.json']) fs.rmSync(path.join(directory, file), { recursive: true, force: true });
+    for (const file of ['v8', 'v8-normalized', 'python', 'python-normalized', 'python-report', 'javascript', 'summary.json']) fs.rmSync(path.join(directory, file), { recursive: true, force: true });
     return;
   }
   const env = coverageEnvironment();

@@ -1,6 +1,11 @@
 {
   "suites": [
     {
+      "id": "coverage-normalization-python",
+      "file": "tests/coverage-normalization.py",
+      "group": "linux-python"
+    },
+    {
       "id": "coverage-sources-python",
       "file": "tests/coverage-sources.py",
       "group": "linux-python"
