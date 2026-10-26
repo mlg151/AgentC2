@@ -335,11 +335,17 @@ class CodexAdapter:
     def stop(self):
         self.stopping = True
         if self.process is not None and self.process.poll() is None:
-            os.killpg(self.process.pid, signal.SIGTERM)
+            try:
+                os.killpg(self.process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass  # The child may exit after poll; wait still confirms it.
             try:
                 self.process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                os.killpg(self.process.pid, signal.SIGKILL)
+                try:
+                    os.killpg(self.process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
                 self.process.wait(timeout=5)
         for thread in (self.reader, self.importer):
             if thread is not None and thread is not threading.current_thread():

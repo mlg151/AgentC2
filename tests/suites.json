@@ -746,6 +746,11 @@
       "id": "centcom-persisted-targets",
       "file": "tests/centcom-persisted-targets.cjs",
       "group": "core"
+    },
+    {
+      "id": "chat-codex-boundaries-python",
+      "file": "tests/chat-codex-boundaries.py",
+      "group": "linux-python"
     }
   ],
   "nested": {
