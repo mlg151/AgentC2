@@ -1,6 +1,11 @@
 {
   "suites": [
     {
+      "id": "component-ui.e2e",
+      "file": "tests/component-ui.e2e.cjs",
+      "group": "linux-web"
+    },
+    {
       "id": "main-contract",
       "file": "tests/main-contract.cjs",
       "group": "core"
