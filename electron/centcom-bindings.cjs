@@ -15,7 +15,7 @@ function identity(unit) {
 }
 
 function createBindings({ service: s, state, resolve, request }) {
-  async function capture(entry, input, pre, controlling, admissionUnknowns = [], worktreeRecoveries = []) {
+  async function capture(entry, input, pre, controlling, admissionUnknowns, worktreeRecoveries) {
     const startScope = fingerprint({ hosts: s.store.data.settings.hosts, roe: s.store.data.settings.roe, authority: state.config.authority, commander: state.session?.chatSessionId });
     const target = await resolve(entry, input, pre);
     const units = target ? (Array.isArray(target) ? target : [target]) : [];

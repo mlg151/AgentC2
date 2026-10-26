@@ -123,13 +123,12 @@ def codex_sessions():
         return []
     rows = []
     try:
-        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT id, title, cwd, updated_at_ms, archived FROM threads "
-            "ORDER BY updated_at_ms DESC"
-        ).fetchall()
-        conn.close()
+        with closing(sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT id, title, cwd, updated_at_ms, archived FROM threads "
+                "ORDER BY updated_at_ms DESC"
+            ).fetchall()
     except sqlite3.Error:
         return []
     return [
@@ -499,9 +498,9 @@ def resource_constraints(proc_root="/proc", cgroup_root="/sys/fs/cgroup"):
         result.update(status="reported", version=2, groupPressure=pressure(group))
         memory_limits, headrooms, cpu_limits = [], [], []
         memory_known, cpu_known = True, True
-        for ancestor in [group, *group.parents]:
-            if ancestor != root and root not in ancestor.parents:
-                break
+        # Include the mounted root, without reading limits from its parents.
+        ancestors = [group, *group.parents]
+        for ancestor in ancestors[:ancestors.index(root) + 1]:
             try:
                 maximum = (ancestor / "memory.max").read_text().strip()
                 if maximum != "max":
@@ -518,8 +517,6 @@ def resource_constraints(proc_root="/proc", cgroup_root="/sys/fs/cgroup"):
             except (OSError, ValueError, ZeroDivisionError):
                 if ancestor != root or (ancestor / "cpu.max").exists():
                     cpu_known = False
-            if ancestor == root:
-                break
         result.update(memoryLimitBytes=min(memory_limits) if memory_limits else None,
                       memoryHeadroomBytes=min(headrooms) if headrooms else None,
                       memoryLimitStatus="limited" if memory_known and memory_limits else "unlimited" if memory_known else "unknown",

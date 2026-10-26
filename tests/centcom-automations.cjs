@@ -70,6 +70,40 @@ const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agentc2-centcom-automat
     fs.writeFileSync(store.file, JSON.stringify(file));
     assert.equal((await automations.read(ignored)).artifact, null, 'Readback reads persisted bytes, not the stale in-memory store');
 
+    for (const payload of [null, [], 'invalid']) assert.throws(() => automations.validate('preset', payload), /Automation payload must be an object/);
+    for (const invalid of [null, { kind: 'invented' }]) await assert.rejects(automations.read(invalid), /Unknown automation draft/);
+    await assert.rejects(automations.apply(null), /not found or already resolved/);
+    await assert.rejects(automations.apply({ state: 'proposed' }), /predates revision-bound previews/);
+    const originalFile = store.file;
+    store.file = undefined;
+    await assert.rejects(automations.read({ kind: 'preset', payload: preset }), /Persisted settings readback is unavailable/);
+    store.file = originalFile;
+
+    const order = { version: 1, id: 'legacy-order', hostId: store.data.settings.hosts[0].id, repository: '/fixture/repository' };
+    for (const invalid of [{}, { order: null }, { order, unexpected: true }, { order, revision: 'not-a-revision' }, { order, revision: 'x'.repeat(64) }]) assert.throws(() => automations.validate('oporder', invalid), { code: 'invalid_schema' });
+    // Older settings can omit OpOrders. Validation creates a draft without
+    // adding or persisting that optional field in the caller's settings.
+    const orders = store.data.settings.opOrders;
+    delete store.data.settings.opOrders;
+    const legacy = automations.validate('oporder', { order });
+    assert.equal(legacy.before, null); assert.equal(legacy.payload.order.enabled, true);
+    assert.equal(Object.hasOwn(store.data.settings, 'opOrders'), false);
+    store.data.settings.opOrders = orders;
+
+    const beforeRace = fs.readFileSync(store.file, 'utf8');
+    const originalSettings = store.data.settings;
+    let concurrentBytes;
+    service.previewOpOrder = async () => {
+      store.save('settings', { ...originalSettings, hosts: originalSettings.hosts.map((host) => ({ ...host, name: host.name + ' changed during preview' })) });
+      concurrentBytes = fs.readFileSync(store.file, 'utf8');
+      return { ready: true, revision: 'a'.repeat(64), changes: [] };
+    };
+    await assert.rejects(automations.preview('oporder', { order }), /configuration changed during preview/);
+    assert.equal(fs.readFileSync(store.file, 'utf8'), concurrentBytes, 'A racing read-only preview cannot overwrite a concurrent settings save');
+    assert.notEqual(concurrentBytes, beforeRace);
+    fs.writeFileSync(store.file, beforeRace);
+    store.data.settings = originalSettings;
+
     // Exercise the production envelope, registry, durable drafts, and both C2
     // authority modes using the real persistence validators and adapters.
     f.service.store.file = store.file;

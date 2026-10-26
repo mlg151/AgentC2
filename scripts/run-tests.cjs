@@ -46,7 +46,9 @@ async function run(group) {
     let tail = '';
     console.log(`\nRUN ${suite.id}`);
     const result = await new Promise((resolve) => {
-      const child = spawn(command, args, { cwd: root, env: { ...process.env, ...suite.env, AGENTC2_SUITE_ARTIFACTS: directory }, stdio: ['ignore', 'pipe', 'pipe'] });
+      const environment = { ...process.env, ...suite.env, AGENTC2_SUITE_ARTIFACTS: directory };
+      const env = process.env.AGENTC2_COVERAGE === '1' ? require('./coverage.cjs').coverageEnvironment(environment) : environment;
+      const child = spawn(command, args, { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
       for (const [stream, destination] of [[child.stdout, process.stdout], [child.stderr, process.stderr]]) stream.on('data', (chunk) => {
         log.write(chunk); destination.write(chunk); tail = (tail + chunk.toString()).slice(-100000);
       });

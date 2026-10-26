@@ -17,7 +17,7 @@ class LoopBreaker {
       const old = next[session.key] || { cursor: '', signature: '', count: 0, firstAt: 0, lastFaultAt: 0, fault: null, headCommit: null };
       const state = { ...old };
       const events = Array.isArray(session.events) ? session.events : [];
-      const cursor = events.findIndex((event) => event.id === state.cursor);
+      const cursor = events.findIndex((event) => event?.id === state.cursor);
       // If the hook ring wrapped while disconnected, start fresh rather than
       // treating an incomplete sequence as consecutive evidence.
       const revisionChanged = session.worktreeOperation && session.headCommit && state.headCommit && session.headCommit !== state.headCommit;

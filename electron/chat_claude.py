@@ -125,13 +125,7 @@ class ClaudeAdapter:
         # The pinned public history helpers resolve CLAUDE_CONFIG_DIR from the
         # process environment, unlike ClaudeAgentOptions.env. Read in a short
         # subprocess so concurrent profiles never mutate the worker's globals.
-        source = """import json,sys
-from claude_agent_sdk import get_session_info,get_session_messages
-identifier,directory=sys.argv[1:]
-info=get_session_info(identifier,directory=directory)
-print(json.dumps(None if info is None else [dict(uuid=m.uuid,type=m.type,message=m.message) for m in get_session_messages(identifier,directory=directory)]))
-"""
-        result = subprocess.run([sys.executable, "-c", source, self.native_id, self.session["cwd"]], env={**os.environ, **self.env}, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=self.timeout, check=True)
+        result = subprocess.run([sys.executable, str(Path(__file__).with_name("chat_claude_history.py")), self.native_id, self.session["cwd"]], env={**os.environ, **self.env}, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=self.timeout, check=True)
         messages = json.loads(result.stdout)
         return None if messages is None else [SimpleNamespace(**message) for message in messages]
 

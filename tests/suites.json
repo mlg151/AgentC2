@@ -1,6 +1,281 @@
 {
   "suites": [
     {
+      "id": "navigation-boundaries.e2e",
+      "file": "tests/navigation-boundaries.e2e.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "peer-settings-recovery.e2e",
+      "file": "tests/peer-settings-recovery.e2e.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "chat-lifecycle.e2e",
+      "file": "tests/chat-lifecycle.e2e.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "chat-command-recovery.e2e",
+      "file": "tests/chat-command-recovery.e2e.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "chat-recovery.e2e",
+      "file": "tests/chat-recovery.e2e.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "centcom-snapshot",
+      "file": "tests/centcom-snapshot.cjs",
+      "group": "core"
+    },
+    {
+      "id": "centcom-fleet-boundaries",
+      "file": "tests/centcom-fleet-boundaries.cjs",
+      "group": "core"
+    },
+    {
+      "id": "centcom-state-boundaries",
+      "file": "tests/centcom-state-boundaries.cjs",
+      "group": "core"
+    },
+    {
+      "id": "app-recovery.e2e",
+      "file": "tests/app-recovery.e2e.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "service-lifecycle",
+      "file": "tests/service-lifecycle.cjs",
+      "group": "core"
+    },
+    {
+      "id": "service-events",
+      "file": "tests/service-events.cjs",
+      "group": "core"
+    },
+    {
+      "id": "service-faults",
+      "file": "tests/service-faults.cjs",
+      "group": "core"
+    },
+    {
+      "id": "service-handoffs",
+      "file": "tests/service-handoffs.cjs",
+      "group": "core"
+    },
+    {
+      "id": "service-boundaries",
+      "file": "tests/service-boundaries.cjs",
+      "group": "core"
+    },
+    {
+      "id": "terminal-touch",
+      "file": "tests/terminal-touch.cjs",
+      "group": "core"
+    },
+    {
+      "id": "phone-terminal-touch.e2e",
+      "file": "tests/phone-terminal-touch.e2e.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "app-workflows.e2e",
+      "file": "tests/app-workflows.e2e.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "centcom-support-boundaries",
+      "file": "tests/centcom-support-boundaries.cjs",
+      "group": "core"
+    },
+    {
+      "id": "chat-helper-sources-python",
+      "file": "tests/chat-helper-sources.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "image-upload-boundaries",
+      "file": "tests/image-upload-boundaries.cjs",
+      "group": "core"
+    },
+    {
+      "id": "image-upload-python",
+      "file": "tests/image-upload.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "pair-companion-cli",
+      "file": "tests/pair-companion-cli.cjs",
+      "group": "core"
+    },
+    {
+      "id": "coverage-source-browser.e2e",
+      "file": "tests/coverage-source-browser.e2e.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "coverage-source",
+      "file": "tests/coverage-source.cjs",
+      "group": "core"
+    },
+    {
+      "id": "centcom-bindings-boundaries",
+      "file": "tests/centcom-bindings-boundaries.cjs",
+      "group": "core"
+    },
+    {
+      "id": "centcom-launch-boundaries",
+      "file": "tests/centcom-launch-boundaries.cjs",
+      "group": "core"
+    },
+    {
+      "id": "chat-timeline-boundaries",
+      "file": "tests/chat-timeline-boundaries.cjs",
+      "group": "core"
+    },
+    {
+      "id": "sitrep-boundaries-python",
+      "file": "tests/sitrep-boundaries.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "worktree-diff-boundaries-python",
+      "file": "tests/worktree-diff-boundaries.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "worktree-boundaries-python",
+      "file": "tests/worktree-boundaries.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "coverage-aggregate-cli",
+      "file": "tests/coverage-aggregate-cli.cjs",
+      "group": "core"
+    },
+    {
+      "id": "coverage-compilations",
+      "file": "tests/coverage-compilations.cjs",
+      "group": "core"
+    },
+    {
+      "id": "coverage-artifacts",
+      "file": "tests/coverage-artifacts.cjs",
+      "group": "core"
+    },
+    {
+      "id": "coverage-artifacts-python",
+      "file": "tests/coverage-artifacts.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "session-cleanup-boundaries-python",
+      "file": "tests/session-cleanup-boundaries.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "antigravity-cleanup-boundaries-python",
+      "file": "tests/antigravity-cleanup-boundaries.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "component-ui.e2e",
+      "file": "tests/component-ui.e2e.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "main-contract",
+      "file": "tests/main-contract.cjs",
+      "group": "core"
+    },
+    {
+      "id": "config-boundaries",
+      "file": "tests/config-boundaries.cjs",
+      "group": "core"
+    },
+    {
+      "id": "remote-boundaries-python",
+      "file": "tests/remote-boundaries.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "chat-runtime-unit-python",
+      "file": "tests/chat-runtime-unit.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "chat-provider-contracts-python",
+      "file": "tests/chat-provider-contracts.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "centcom-dispatch",
+      "file": "tests/centcom-dispatch.cjs",
+      "group": "core"
+    },
+    {
+      "id": "commander-unit",
+      "file": "tests/commander-unit.cjs",
+      "group": "core"
+    },
+    {
+      "id": "oporders-unit",
+      "file": "tests/oporders-unit.cjs",
+      "group": "core"
+    },
+    {
+      "id": "attention",
+      "file": "tests/attention.cjs",
+      "group": "core"
+    },
+    {
+      "id": "mac-update-unit",
+      "file": "tests/mac-update-unit.cjs",
+      "group": "core"
+    },
+    {
+      "id": "coverage-normalization-python",
+      "file": "tests/coverage-normalization.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "coverage-sources-python",
+      "file": "tests/coverage-sources.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "centcom-boundary",
+      "file": "tests/centcom-boundary.cjs",
+      "group": "core"
+    },
+    {
+      "id": "tmux-control",
+      "file": "tests/tmux-control.cjs",
+      "group": "core"
+    },
+    {
+      "id": "renderer-contract",
+      "file": "tests/renderer-contract.cjs",
+      "group": "core"
+    },
+    {
+      "id": "coverage-policy",
+      "file": "tests/coverage-policy.cjs",
+      "group": "core"
+    },
+    {
+      "id": "terminal-scroll",
+      "file": "tests/terminal-scroll.cjs",
+      "group": "core"
+    },
+    {
+      "id": "bridge-contract",
+      "file": "tests/bridge-contract.cjs",
+      "group": "core"
+    },
+    {
       "id": "auto-version",
       "file": "tests/auto-version.cjs",
       "group": "core"
@@ -456,6 +731,26 @@
       "id": "peer-sync-ui",
       "file": "tests/peer-sync.e2e.cjs",
       "group": "desktop"
+    },
+    {
+      "id": "centcom-target-boundaries",
+      "file": "tests/centcom-target-boundaries.cjs",
+      "group": "core"
+    },
+    {
+      "id": "chat-worker-boundaries-python",
+      "file": "tests/chat-worker-boundaries.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "centcom-persisted-targets",
+      "file": "tests/centcom-persisted-targets.cjs",
+      "group": "core"
+    },
+    {
+      "id": "chat-codex-boundaries-python",
+      "file": "tests/chat-codex-boundaries.py",
+      "group": "linux-python"
     }
   ],
   "nested": {

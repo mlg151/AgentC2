@@ -31,7 +31,7 @@ function activeFleet(inventory, deleted = [], commanders = []) {
     if (typeof value === 'string') {
       let result = value;
       for (const id of secrets) result = result.split(id).join('[Excluded session]');
-      return result.replace(/[\w-]+\/tmux:[\w-]+|\bhq-[a-f0-9]{12}\b|\bchat-[a-f0-9]{32}\b/g,
+      return result.replace(/(?<![\w-])[\w-]+\/tmux:[\w-]+|\bhq-[a-f0-9]{12}\b|\bchat-[a-f0-9]{32}\b/g,
         (id) => find(id, hostId) ? id : '[Excluded session]');
     }
     if (Array.isArray(value)) return value.map((v) => clean(v, hostId)).filter((v) => v !== undefined);

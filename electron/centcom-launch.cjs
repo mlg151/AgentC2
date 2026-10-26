@@ -33,9 +33,11 @@ function createLaunchGuard({ service, evidence, authority, legacyPolicy = () => 
     const previous = hosts.get(hostId) || Promise.resolve();
     let release;
     const held = new Promise((resolve) => { release = resolve; });
-    const queued = previous.catch(() => {}).then(() => held);
+    // Queue entries contain only the preceding release barrier. Dispatch
+    // rejection never enters this chain, and finally always releases it.
+    const queued = previous.then(() => held);
     hosts.set(hostId, queued);
-    await previous.catch(() => {});
+    await previous;
     try {
       if (policy.version !== 1) throw Object.assign(new Error('Unknown workflow launch authorization; review the mission again'), { beforeMutation: true, launchPolicy: policy });
       const current = mutationContext.getStore();
@@ -44,7 +46,7 @@ function createLaunchGuard({ service, evidence, authority, legacyPolicy = () => 
         const host = service.store.data.settings.hosts.find((item) => item.id === hostId);
         if (!host?.enabled) throw Object.assign(new Error('Launch host is unavailable'), { beforeMutation: true });
         // The production remote dispatcher repeats this after its own awaits.
-        assertDispatchScope(service.store.data.settings.hosts.find((item) => item.id === hostId) || { id: hostId }, { action: 'create' }, service.store.data.settings);
+        assertDispatchScope(host, { action: 'create' }, service.store.data.settings);
         const admission = await evidence.admission({ hostId, cwd: input.cwd, worktree: input.worktree }, { reuse: workflow?.details?.reuse, recovery: workflow?.details?.recovery });
         const reviewedUnknown = Boolean(current?.directive?.approvedAt) && admission.unknowns.every((reason) => current.directive.binding.evidence.admissionUnknowns?.includes(reason));
         if (admission.status === 'blocked' || (admission.status === 'unknown' && !reviewedUnknown)) {

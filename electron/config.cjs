@@ -142,7 +142,6 @@ function validateWorkspace(w) {
     used.add(value);
     return [text(key, 300), value];
   }));
-  if (used.size > 99) throw new Error('At most 99 callsigns can be assigned');
   const shortcuts = Object.fromEntries(Object.entries(source.shortcuts || {}).map(([key, value]) => [text(key, 60), text(value, 80)]));
   if (Object.keys(shortcuts).length > 50) throw new Error('Too many keyboard overrides');
   const focusedPane = source.focusedPane === 'target' && targetKey || !anchorKey && targetKey ? 'target' : 'anchor';
@@ -241,11 +240,10 @@ class Store extends EventEmitter {
     workspace.tabs = workspace.tabs.filter((key) => !deleted.has(key));
     if (deleted.has(workspace.selectedKey)) workspace.selectedKey = workspace.tabs.at(-1) || null;
     if (deleted.has(workspace.splitKey)) workspace.splitKey = null;
-    if (workspace.situation) {
-      if (deleted.has(workspace.situation.anchorKey)) workspace.situation.anchorKey = null;
-      if (deleted.has(workspace.situation.targetKey)) workspace.situation.targetKey = null;
-      for (const key of deleted) delete workspace.situation.callsigns[key];
-    }
+    // validateWorkspace always constructs the situation, including legacy input.
+    if (deleted.has(workspace.situation.anchorKey)) workspace.situation.anchorKey = null;
+    if (deleted.has(workspace.situation.targetKey)) workspace.situation.targetKey = null;
+    for (const key of deleted) delete workspace.situation.callsigns[key];
     // Pin mutations have their own API. An older desktop snapshot must not undo
     // a companion change, even when that snapshot predates the metadata entry.
     for (const [key, metadata] of Object.entries(workspace.metadata)) {

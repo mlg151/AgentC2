@@ -1,0 +1,287 @@
+// Browser plugin is unavailable: use real Chromium and the production renderer.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { chromium } = require('playwright-core');
+const { createServer } = require('vite');
+const { defaults } = require('../electron/config.cjs');
+const { defaults: commanderDefaults } = require('../electron/centcom.cjs');
+const { installAppBridge } = require('./fixtures/app-bridge.cjs');
+const screenshots = process.env.AGENTC2_SUITE_ARTIFACTS || fs.mkdtempSync(path.join(os.tmpdir(), 'agentc2-app-workflows-'));
+const viteCache = fs.mkdtempSync(path.join(os.tmpdir(), 'agentc2-vite-qa-'));
+let server, browser, page;
+const errors = [];
+const call = (page, name) => page.evaluate((name) => window.qa.calls.filter((row) => row[0] === name), name);
+async function until(page, predicate) { await page.waitForFunction(predicate); }
+async function command(page, chord) { await page.evaluate(() => document.activeElement?.blur()); await page.keyboard.press('Control+Space'); await page.keyboard.press(chord); }
+async function switcher(page, query) { await page.getByRole('button', { name: 'Search units, hosts, and repositories' }).click(); await page.getByRole('textbox', { name: 'Quick switcher search' }).fill(query); }
+async function closeDialog(page) { await page.keyboard.press('Escape'); await page.getByRole('dialog').waitFor({ state: 'hidden' }); }
+(async () => {
+  try {
+    fs.mkdirSync(screenshots, { recursive: true });
+    const settings = defaults(); settings.hosts = [{ id: 'alpha', name: 'Alpha theater', target: 'alpha.invalid', enabled: true, port: 22 }, { id: 'beta', name: 'Beta theater', target: 'beta.invalid', enabled: true, port: 22 }]; settings.notifications = false;
+    server = await createServer({ root: path.resolve(__dirname, '..'), cacheDir: viteCache, server: { host: '127.0.0.1', port: 0, strictPort: false } }); await server.listen();
+    browser = await chromium.launch({ executablePath: process.env.AGENTC2_CHROMIUM || chromium.executablePath(), headless: true, args: ['--no-sandbox'] });
+    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+    await context.addInitScript(installAppBridge, { settings, commander: commanderDefaults() });
+    page = await context.newPage(); page.setDefaultTimeout(10000); page.setDefaultNavigationTimeout(60000); page.on('pageerror', (error) => { errors.push(error.message); fs.appendFileSync(path.join(screenshots, 'page-errors.log'), String(error.stack) + '\n'); });
+    page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+    await page.route('**/favicon.ico', (route) => route.fulfill({ status: 204 }));
+    const url = `http://127.0.0.1:${server.httpServer.address().port}/`;
+    await page.goto(url); await page.locator('.session-row').filter({ hasText: 'Alpha unit' }).waitFor();
+    await page.locator('.session-row').filter({ hasText: 'Bravo unit' }).click();
+    await page.locator('.session-row').filter({ hasText: 'Charlie unit' }).click();
+    assert.equal(await page.getByRole('tab').count(), 3);
+    await page.getByRole('button', { name: 'Close tab Bravo unit', exact: true }).click();
+    assert.equal(await page.getByRole('tab', { name: 'Bravo unit', exact: true }).count(), 0);
+    await page.locator('.session-row').filter({ hasText: 'Bravo unit' }).click();
+    await page.getByRole('button', { name: 'Pin to A', exact: true }).filter({ visible: true }).click();
+    await until(page, () => window.qa.workspace.situation.anchorKey === window.qa.units[1].key);
+    await page.getByRole('button', { name: 'Unpin anchor', exact: true }).click();
+    await until(page, () => window.qa.workspace.situation.anchorKey === null);
+    await page.getByRole('combobox', { name: 'Split terminal' }).selectOption('');
+    await page.evaluate(() => document.activeElement?.blur());
+    await page.keyboard.press('Alt+J'); await page.keyboard.press('Alt+K'); await page.keyboard.press('Alt+L'); await page.keyboard.press('Alt+H');
+    await command(page, 'z'); assert.equal(await page.locator('.app-shell').evaluate((node) => node.classList.contains('is-zen')), true);
+    await command(page, 'z');
+    await page.locator('.session-row').filter({ hasText: 'Alpha unit' }).click();
+    await page.getByRole('combobox', { name: 'Session project', exact: true }).fill('Workflow fixture');
+    await page.getByRole('button', { name: 'Notes & handoff', exact: true }).click();
+    await page.getByRole('textbox', { name: 'Session notes and handoff', exact: true }).fill('Reviewed objective\nNext verified step');
+    await page.getByRole('button', { name: 'Copy handoff', exact: true }).click(); await until(page, () => window.qa.clipboard?.includes('Next verified step'));
+    await page.evaluate(() => { window.qa.fail.writeClipboard = 'Clipboard fixture refused'; });
+    await page.getByRole('button', { name: 'Copy handoff', exact: true }).click(); await page.getByRole('alert').filter({ hasText: 'Clipboard fixture refused' }).waitFor();
+    await page.getByRole('button', { name: 'Dismiss error' }).click();
+    await page.evaluate(() => { window.qa.fail = { saveWorkspace: 'Workspace fixture refused' }; });
+    await page.getByRole('combobox', { name: 'Session project', exact: true }).fill('Save failure fixture');
+    await page.getByRole('alert').filter({ hasText: 'Could not save workspace' }).waitFor(); await page.getByRole('button', { name: 'Dismiss error' }).click();
+    await page.evaluate(() => { window.qa.fail = { setSessionPinned: 'Pin fixture refused' }; });
+    await page.getByRole('button', { name: 'Pin Alpha unit', exact: true }).click();
+    await page.getByRole('alert').filter({ hasText: 'Pin fixture refused' }).waitFor(); await page.getByRole('button', { name: 'Dismiss error' }).click();
+    await page.evaluate(() => { window.qa.fail = {}; });
+    await page.getByRole('button', { name: 'Pin Alpha unit', exact: true }).click(); await page.getByRole('button', { name: 'Unpin Alpha unit', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Pinned sessions', exact: true }).click(); assert.equal(await page.locator('.session-row').count(), 1);
+    await page.getByRole('button', { name: 'Pinned sessions', exact: true }).click();
+    await page.getByRole('button', { name: 'Collapse ORBAT roster' }).click(); await page.getByRole('button', { name: 'Show ORBAT roster' }).click();
+
+    await switcher(page, 'Settings'); await page.getByRole('option').filter({ hasText: 'Local/Hosts and launch presets' }).click();
+    const dialog = page.getByRole('dialog'); await dialog.getByRole('heading', { name: 'Settings', exact: true }).waitFor();
+    await page.evaluate(() => { window.qa.fail.saveSettings = 'Settings fixture refused'; });
+    await dialog.getByRole('button', { name: 'Save settings', exact: true }).click(); await dialog.getByRole('alert').filter({ hasText: 'Settings fixture refused' }).waitFor();
+    await page.evaluate(() => { window.qa.fail.saveSettings = ''; });
+    await dialog.getByRole('button', { name: 'Save settings', exact: true }).click(); await dialog.waitFor({ state: 'hidden' });
+    await page.getByRole('button', { name: 'Session cleanup', exact: true }).click(); await dialog.getByRole('heading', { name: 'Session cleanup', exact: true }).waitFor(); await closeDialog(page);
+    await command(page, 'c'); await dialog.getByText('CENTCOM COMMAND CONSOLE', { exact: true }).waitFor(); await closeDialog(page);
+    await command(page, 'b'); await dialog.getByRole('heading', { name: 'Joint Exercises', exact: true }).waitFor(); await closeDialog(page);
+    await page.getByRole('button', { name: 'SPECOPS', exact: true }).click(); await dialog.getByRole('heading', { name: 'SPECOPS / GitHub', exact: true }).waitFor(); await closeDialog(page);
+    await page.keyboard.press('F1'); await dialog.getByRole('textbox', { name: 'Shortcut Inspect next confirmed urgent unit' }).fill('Alt+Shift+U');
+    await dialog.getByRole('button', { name: 'Save shortcuts', exact: true }).click(); await dialog.waitFor({ state: 'hidden' });
+    await until(page, () => window.qa.workspace.situation.shortcuts.urgent === 'Alt+Shift+U');
+    await page.keyboard.press('Alt+Shift+U'); await page.locator('.command-feedback').filter({ hasText: 'No confirmed urgent units' }).waitFor();
+    await page.screenshot({ path: path.join(screenshots, 'app-workspace-notes-shortcuts.png') });
+    await page.evaluate(() => {
+      const [alpha, bravo] = window.qa.units;
+      window.qa.attention = [alpha, bravo].map((unit, index) => ({ id: 'attention-' + index, sessionKey: unit.key, hostId: unit.hostId, kind: 'input', confidence: 'confirmed', title: unit.title + ' requests input', detail: 'Verified fixture approval', createdAt: index ? '2026-01-01T01:00:00.000Z' : '2026-01-01T02:00:00.000Z', acknowledged: false }));
+      window.qa.faults = [alpha, bravo].map((unit, index) => ({ id: 'fault-' + index, sessionKey: unit.key, at: '2026-01-01T00:00:00.000Z', label: 'Repeated tool failure', count: 3, status: index ? 'unknown' : 'review', detail: 'Fixture failure evidence', autoInterrupt: false }));
+      window.qa.emit('onInventory', window.qa.inventory());
+    });
+    await page.evaluate(() => document.activeElement?.blur()); await page.keyboard.press('Alt+Shift+U');
+    await until(page, () => window.qa.workspace.selectedKey === window.qa.units[1].key);
+    await page.evaluate(() => window.qa.emit('onAttentionOpen', 'missing-fixture-key'));
+    await page.getByRole('heading', { name: 'Attention inbox', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Interrupt eligible units' }).click();
+    await page.getByRole('status').filter({ hasText: 'confirmed fixture stop' }).waitFor();
+    await page.evaluate(() => { window.qa.fail.interruptFaults = 'Interrupt fixture refused'; });
+    await page.getByRole('button', { name: 'Interrupt eligible units' }).click(); await page.getByRole('status').filter({ hasText: 'Interrupt fixture refused' }).waitFor();
+    await page.evaluate(() => { window.qa.fail.resetFault = 'Reset fixture refused'; });
+    await page.getByRole('button', { name: 'Reset fault', exact: true }).first().click(); await page.getByRole('status').filter({ hasText: 'Reset fixture refused' }).waitFor();
+    await page.evaluate(() => { window.qa.fail = {}; });
+    await page.getByRole('button', { name: 'Reset fault', exact: true }).first().click(); await until(page, () => window.qa.faults.length === 1);
+    await page.getByRole('checkbox', { name: 'Show acknowledged', exact: true }).check();
+    await page.getByRole('button', { name: 'Acknowledge', exact: true }).first().click();
+    await page.getByRole('button', { name: 'Acknowledged', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Review unit', exact: true }).click(); await page.getByRole('heading', { name: 'Attention inbox', exact: true }).waitFor({ state: 'hidden' });
+    await switcher(page, 'Attention inbox'); await page.getByRole('option').filter({ hasText: 'Review input requests and results' }).click();
+    await page.evaluate(() => { window.qa.fail.acknowledge = 'Acknowledge fixture refused'; });
+    await page.getByRole('button', { name: 'Acknowledge all', exact: true }).click(); await page.getByRole('alert').filter({ hasText: 'Acknowledge fixture refused' }).waitFor();
+    await page.getByRole('button', { name: 'Dismiss error' }).click(); await page.evaluate(() => { window.qa.fail = {}; });
+    await page.getByRole('button', { name: 'Acknowledge all', exact: true }).click();
+    await page.getByRole('button', { name: 'Acknowledge all', exact: true }).waitFor({ state: 'visible' });
+    await page.getByRole('checkbox', { name: 'Show acknowledged', exact: true }).uncheck(); await page.getByRole('heading', { name: 'You’re caught up', exact: true }).waitFor();
+    await page.evaluate(() => window.qa.emit('onAttentionOpen', window.qa.units[0].key));
+    await page.getByRole('heading', { name: 'Attention inbox', exact: true }).waitFor({ state: 'hidden' });
+
+    await page.evaluate(() => {
+      window.qa.flash = [1, 9].map((index) => ({ id: String(index).repeat(32), name: 'hq-' + String(index).padStart(12, '0'), provider: 'claude', tool: 'Bash', action: 'echo reviewed-fixture-' + index, session: 'fixture', turn: 'fixture-turn', createdAt: 1, expiresAt: 9999999999, state: 'pending', decision: null, hostId: 'alpha', hostName: 'Alpha theater', connected: true, branch: 'fixture-branch' }));
+    });
+    await page.getByRole('button', { name: 'FLASH TRAFFIC 2', exact: true }).waitFor(); await page.getByRole('button', { name: 'FLASH TRAFFIC 2', exact: true }).click();
+    const flash = page.locator('.flash-traffic');
+    await flash.getByRole('button', { name: 'Jump' }).click();
+    await flash.getByRole('option').nth(1).click(); await flash.getByRole('button', { name: 'Jump' }).click();
+    await flash.getByRole('alert').filter({ hasText: 'not in inventory' }).waitFor();
+    await flash.getByRole('option').first().click(); await page.evaluate(() => { window.qa.fail.decideFlashTraffic = 'Decision fixture refused'; });
+    await flash.getByRole('button', { name: 'Approve once' }).click(); await flash.getByRole('alert').filter({ hasText: 'Decision fixture refused' }).waitFor();
+    await page.evaluate(() => { window.qa.fail = {}; }); await flash.getByRole('button', { name: 'Approve once' }).click();
+    await until(page, () => window.qa.flash[0].state === 'submitted');
+    assert.deepEqual((await call(page, 'decideFlashTraffic')).at(-1)[1], { hostId: 'alpha', name: 'hq-000000000001', id: '1'.repeat(32), decision: 'allow' });
+    await flash.getByRole('option').nth(1).click(); await flash.getByRole('button', { name: 'Deny' }).click();
+    await until(page, () => window.qa.flash[1].decision === 'deny');
+    await page.evaluate(() => { window.qa.fail.listFlashTraffic = 'Flash polling fixture refused'; });
+    await flash.getByRole('option').first().filter({ hasText: 'disconnected' }).waitFor();
+    await page.screenshot({ path: path.join(screenshots, 'app-flash-disconnected.png') });
+    await flash.getByRole('button', { name: 'Close Flash Traffic', exact: true }).click();
+    await page.evaluate(() => { window.qa.fail = {}; });
+
+    await page.locator('.session-row').filter({ hasText: 'Alpha unit' }).click();
+    await page.evaluate(() => document.activeElement?.blur()); await page.keyboard.press('Alt+D');
+    await page.getByRole('region', { name: 'Worktree diff', exact: true }).getByText('No changed files.', { exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Close worktree diff', exact: true }).click();
+    await command(page, 'r');
+    await dialog.getByRole('heading', { name: 'SitRep handoff', exact: true }).waitFor();
+    await dialog.getByRole('button', { name: 'Preview SitRep and target', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Send and launch recipient', exact: true }).click();
+    await dialog.waitFor({ state: 'hidden' });
+    await page.getByRole('tab', { name: 'SitRep recipient', exact: true }).waitFor();
+    assert.equal((await call(page, 'launchSitrep')).length, 1, 'Delayed inventory must not resend an acknowledged handoff');
+
+    await page.getByRole('button', { name: 'New unit', exact: true }).click();
+    await dialog.getByLabel('Session name', { exact: true }).fill('Created desktop fixture');
+    await page.evaluate(() => { window.qa.fail.create = 'Launch fixture refused'; });
+    await dialog.getByRole('button', { name: 'Start session', exact: true }).click();
+    await dialog.getByRole('alert').filter({ hasText: 'Launch fixture refused' }).waitFor();
+    await page.evaluate(() => { window.qa.fail = {}; });
+    await dialog.getByRole('button', { name: 'Start session', exact: true }).click();
+    await dialog.waitFor({ state: 'hidden' }); await page.getByRole('tab', { name: 'Created desktop fixture', exact: true }).waitFor();
+    assert.equal((await call(page, 'create')).length, 2, 'One rejected attempt and one acknowledged attempt must not be automatically replayed');
+    await page.getByRole('button', { name: 'New unit', exact: true }).click();
+    await dialog.getByLabel('Session name', { exact: true }).fill('Acknowledged hidden fixture');
+    await page.evaluate(() => { window.qa.failInventoryAfterCreate = true; });
+    await dialog.getByRole('button', { name: 'Start session', exact: true }).click();
+    await dialog.waitFor({ state: 'hidden' });
+    await page.getByRole('alert').filter({ hasText: 'Inventory is unavailable after acknowledgement' }).waitFor();
+    assert.equal((await call(page, 'create')).length, 3);
+    await page.getByRole('button', { name: 'Dismiss error', exact: true }).click();
+    await page.evaluate(() => { window.qa.fail = {}; window.qa.failInventoryAfterCreate = false; });
+    await page.getByRole('button', { name: 'Refresh sessions', exact: true }).click();
+    await page.getByRole('button', { name: 'Refresh sessions', exact: true }).click();
+    await page.locator('.session-row').filter({ hasText: 'Acknowledged hidden fixture' }).waitFor();
+    assert.equal((await call(page, 'create')).length, 3, 'Refresh after an acknowledged launch failure cannot resend create');
+
+    // Independent dashboard routes must reach the same workflows and retain
+    // selection, pins, and errors when host state changes underneath them.
+    await page.goto(url + '?scenario=dashboard-routes'); await page.locator('.session-row').first().waitFor();
+    await command(page, 'n'); await dialog.getByRole('heading', { name: 'New session', exact: true }).waitFor(); await closeDialog(page);
+    await page.getByRole('navigation', { name: 'Workspace navigation' }).getByRole('button', { name: 'New session', exact: true }).click(); await closeDialog(page);
+    await page.getByRole('button', { name: 'Workspace settings', exact: true }).click();
+    await dialog.getByRole('button', { name: 'SPECOPS ranks and workflows', exact: true }).click();
+    await dialog.getByRole('heading', { name: 'SPECOPS / GitHub', exact: true }).waitFor(); await closeDialog(page);
+    await page.locator('.session-row').filter({ hasText: 'Bravo unit' }).click();
+    await page.getByRole('tab', { name: 'Alpha unit', exact: true }).click();
+    await until(page, () => window.qa.workspace.selectedKey === window.qa.units[0].key);
+    await page.locator('.workspace-tools').getByRole('button', { name: 'Pin', exact: true }).click();
+    await page.getByRole('button', { name: 'Unpin Alpha unit', exact: true }).waitFor();
+    await page.locator('.workspace-tools').getByRole('button', { name: 'Unpin', exact: true }).click();
+    await command(page, '0'); await page.keyboard.press('2');
+    await until(page, () => window.qa.workspace.selectedKey === window.qa.units[1].key);
+    await command(page, '9'); await page.keyboard.press('9');
+    await page.locator('.command-feedback').filter({ hasText: 'No available unit has callsign 99' }).waitFor();
+    await page.getByRole('button', { name: /CYCLE B/ }).click();
+    await page.getByRole('button', { name: /COMMANDS/ }).click(); await closeDialog(page);
+    await page.evaluate(() => {
+      window.qa.hosts = [{ id: 'alpha', name: 'Alpha theater', connected: false, error: 'Fixture SSH connection lost' }];
+      window.qa.emit('onInventory', window.qa.inventory());
+    });
+    await page.locator('.host-errors').getByText('Alpha theater: Fixture SSH connection lost', { exact: true }).waitFor();
+    await page.evaluate(() => { window.qa.hosts = undefined; });
+    await page.locator('.host-errors').getByRole('button', { name: 'Retry', exact: true }).click();
+    await page.locator('.host-errors').waitFor({ state: 'hidden' });
+    await page.evaluate(() => {
+      const unit = window.qa.units[0];
+      window.qa.attention = [{ id: 'dashboard-attention', sessionKey: unit.key, hostId: unit.hostId, kind: 'completed', confidence: 'confirmed', title: 'Reviewed dashboard result', detail: 'Verified fixture result', createdAt: '2026-01-01T00:00:00Z', acknowledged: false }];
+      window.qa.emit('onInventory', window.qa.inventory());
+      window.qa.emit('onAttentionOpen', 'missing-dashboard-unit');
+    });
+    await page.getByRole('heading', { name: 'Attention inbox', exact: true }).waitFor();
+    await page.locator('.attention-card').getByRole('button', { name: 'Open session', exact: true }).click();
+    await page.getByRole('heading', { name: 'Attention inbox', exact: true }).waitFor({ state: 'hidden' });
+    await page.evaluate(() => {
+      window.qa.missions = [{ id: 'fixture-mission', repo: 'fixture/repository', state: 'halted', stage: 'review', workflow: { stages: [{ id: 'work' }, { id: 'review' }] } }];
+      window.qa.emit('onInventory', window.qa.inventory());
+    });
+    await page.getByRole('button', { name: /Immediate Flash Traffic/ }).click(); await closeDialog(page);
+    await page.getByRole('navigation', { name: 'SPECOPS stage progress' }).getByRole('button').click(); await closeDialog(page);
+    await page.evaluate(() => { window.qa.fail.undockOverwatch = 'Dashboard undock fixture refused'; });
+    await page.getByRole('button', { name: /OVERWATCH/ }).click();
+    await dialog.getByRole('button', { name: 'Undock window', exact: true }).click();
+    await page.getByRole('alert').filter({ hasText: 'Dashboard undock fixture refused' }).waitFor();
+    await closeDialog(page); await page.getByRole('button', { name: 'Dismiss error', exact: true }).click();
+    await page.evaluate(() => {
+      window.qa.fail = {};
+      window.qa.flash = [1, 2].map((index) => ({ id: String(index).repeat(32), name: 'hq-' + String(index).padStart(12, '0'), provider: 'claude', tool: 'Bash', action: 'echo dashboard-' + index, createdAt: 1, expiresAt: 9999999999, state: 'pending', decision: null, hostId: 'alpha', hostName: 'Alpha theater', connected: true }));
+    });
+    await page.getByRole('button', { name: 'FLASH TRAFFIC 2', exact: true }).waitFor();
+    await page.evaluate(() => document.activeElement?.blur()); await page.keyboard.press('Alt+Shift+Space');
+    await page.getByRole('complementary', { name: 'Flash Traffic permission queue', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Close Flash Traffic', exact: true }).click();
+    await page.evaluate(() => document.activeElement?.blur()); await page.keyboard.press('Alt+Shift+Space');
+    assert.equal(await page.locator('.flash-traffic [aria-selected="true"]').getAttribute('role'), 'option');
+    await page.getByRole('button', { name: 'Close Flash Traffic', exact: true }).click();
+    while (await page.getByRole('tab').count()) await page.locator('.tab-strip button[aria-label^="Close tab "]').first().click();
+    await page.getByRole('heading', { name: 'Select a session', exact: true }).waitFor();
+    await page.locator('.no-selection').getByRole('button', { name: 'New session', exact: true }).click(); await closeDialog(page);
+    await page.screenshot({ path: path.join(screenshots, 'app-dashboard-routes-empty-workspace.png') });
+
+    await page.goto(url + '?scenario=initial-events');
+    await until(page, () => window.qa.calls.filter((row) => row[0] === 'getState').length >= 2);
+    await page.evaluate(() => {
+      const [alpha, bravo] = window.qa.units;
+      window.qa.emit('onSessionPinned', bravo.key, true);
+      window.qa.units = window.qa.units.filter((unit) => unit.key !== alpha.key);
+      window.qa.emit('onSessionsDeleted', [alpha.key]);
+      window.qa.release('getState');
+    });
+    await page.getByRole('button', { name: 'Unpin Bravo unit', exact: true }).waitFor();
+    assert.equal(await page.getByRole('tab', { name: 'Alpha unit', exact: true }).count(), 0);
+    await page.evaluate(() => {
+      const removed = window.qa.units[1].key;
+      window.qa.units = window.qa.units.filter((unit) => unit.key !== removed);
+      window.qa.emit('onSessionsDeleted', [removed]);
+    });
+    await until(page, () => !window.qa.workspace.situation.callsigns['alpha/tmux:hq-000000000003']);
+    await page.evaluate(() => {
+      const settings = structuredClone(window.qa.settings); settings.hosts[0].name = 'Synced theater';
+      const workspace = structuredClone(window.qa.workspace); workspace.metadata[window.qa.units[0].key].notes = 'Peer-synchronized fixture note';
+      window.qa.emit('onPeerSyncApplied', { settings, workspace, attention: [] });
+    });
+    await page.getByRole('combobox', { name: 'Filter SSH host', exact: true }).getByRole('option', { name: 'Synced theater', exact: true }).waitFor({ state: 'attached' });
+    await page.getByRole('button', { name: 'Notes & handoff', exact: true }).click();
+    assert.equal(await page.getByRole('textbox', { name: 'Session notes and handoff', exact: true }).inputValue(), 'Peer-synchronized fixture note');
+    await page.screenshot({ path: path.join(screenshots, 'app-initial-pin-delete-peer-sync.png') });
+
+    await page.goto(url + '?scenario=late-window'); await page.locator('.session-row').first().waitFor();
+    await page.evaluate(() => { window.qa.emit('onOverwatchWindowState', { undocked: true }); window.qa.release('overwatchWindowState'); });
+    await page.getByRole('button', { name: /OVERWATCH/ }).click(); await until(page, () => window.qa.calls.some((row) => row[0] === 'undockOverwatch'));
+    assert.equal(await page.getByRole('dialog', { name: 'Overwatch', exact: true }).count(), 0, 'A delayed initial window reply cannot overwrite a newer native event');
+    await page.evaluate(() => { window.qa.fail.undockOverwatch = 'Window focus fixture refused'; });
+    await page.getByRole('button', { name: /OVERWATCH/ }).click(); await page.getByRole('alert').filter({ hasText: 'Window focus fixture refused' }).waitFor();
+    await page.getByRole('button', { name: 'Dismiss error', exact: true }).click();
+    await page.evaluate(() => { window.qa.fail = {}; window.qa.emit('onOverwatchWindowState', { undocked: false, dockOpen: true }); });
+    const overwatch = page.getByRole('dialog', { name: 'Overwatch', exact: true }); await overwatch.waitFor();
+    await overwatch.getByRole('button', { name: /Close Overwatch/ }).click();
+    await page.evaluate(() => window.qa.emit('onOverwatchSelect', window.qa.units[1].key));
+    await until(page, () => window.qa.workspace.selectedKey === window.qa.units[1].key);
+    await page.evaluate(() => window.qa.emit('onOverwatchSelect', 'missing-key'));
+    await page.goto(url + '?scenario=failed-window');
+    await page.getByRole('alert').filter({ hasText: 'Window fixture unavailable' }).waitFor();
+    await page.getByRole('button', { name: 'Dismiss error', exact: true }).click();
+    await page.goto(url + '?scenario=failed-initial');
+    await until(page, () => window.qa.calls.filter((row) => row[0] === 'getState').length >= 2);
+    await page.evaluate(() => window.qa.release('getState', true));
+    await page.getByRole('alert').filter({ hasText: 'Late fixture failure' }).waitFor();
+    await page.screenshot({ path: path.join(screenshots, 'app-initial-state-failure.png') });
+
+    assert.deepEqual(errors, []);
+    console.log('PASS desktop tab/pane transitions, anchor swap/release, keyboard cycling/focus/zen, notes, clipboard/workspace/pin failures, settings recovery, real dialog routing, shortcut persistence, urgent/inbox/fault/Flash decisions, delayed launch/handoff acknowledgement, and initial/peer/window event races');
+  } catch (error) { if (page && !page.isClosed()) { await page.screenshot({ path: path.join(screenshots, 'app-workflows-failure.png') }).catch(() => {}); fs.writeFileSync(path.join(screenshots, 'failure-body.txt'), await page.locator('body').innerText().catch(() => 'Page unavailable')); } throw error; } finally { await browser?.close(); await server?.close(); fs.rmSync(viteCache, { recursive: true, force: true }); }
+})().catch((error) => { console.error(error); process.exitCode = 1; });

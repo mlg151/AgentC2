@@ -101,8 +101,13 @@ class CodexTests(unittest.TestCase):
 
     def test_model_change_reaches_next_turn_in_same_thread(self):
         self.start(model="fixture-first")
-        self.send("plain")
-        poll(self.page, lambda value: value["session"]["state"] == "idle")
+        first_turn, _ = self.send("plain")
+        # The journal can still show its initial idle state after the provider
+        # acknowledges turn/start but before turn/started reaches the reader.
+        poll(self.page, lambda value: value["session"]["state"] == "idle" and any(
+            event["type"] == "turn.completed" and event["turnId"] == first_turn["turnId"]
+            for event in value["events"]
+        ))
         native = self.adapter.thread_id
         self.adapter.set_model("fixture-second")
         self.send("plain")

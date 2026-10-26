@@ -5,8 +5,9 @@ import sys
 
 root = Path(__file__).resolve().parents[2]
 scope = {"__name__": "centcom_oporder_fixture"}
-exec((root / "electron" / "remote.py").read_text(), scope)
-exec((root / "electron" / "oporders.py").read_text(), scope)
+for name in ("remote.py", "oporders.py"):
+    source = root / "electron" / name
+    exec(compile(source.read_text(), str(source), "exec"), scope)
 request = json.load(sys.stdin)
 scope["HOME"] = Path(request.pop("fixtureHome"))
 assert Path(request["order"]["repository"]).is_relative_to(scope["HOME"])

@@ -1,0 +1,20 @@
+[run]
+branch = True
+core = ctrace
+parallel = True
+source = electron
+relative_files = True
+data_file = test-results/coverage/python/.coverage
+plugins = agentc2_coverage
+
+[report]
+show_missing = True
+skip_empty = False
+exclude_lines =
+partial_branches =
+
+[json]
+pretty_print = True
+
+[html]
+directory = test-results/coverage/python/html

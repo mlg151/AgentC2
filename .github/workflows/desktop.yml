@@ -35,6 +35,9 @@ jobs:
             arch: arm64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
+    env:
+      AGENTC2_COVERAGE: '1'
+      AGENTC2_SOURCE_COVERAGE: '1'
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.1.0
@@ -42,6 +45,12 @@ jobs:
           node-version-file: .nvmrc
           architecture: ${{ matrix.arch }}
           cache: npm
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.11'
+          architecture: ${{ matrix.arch }}
+          cache: pip
+          cache-dependency-path: tests/requirements.txt
       - name: Verify version and native runner architecture
         shell: bash
         env:
@@ -56,6 +65,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libarchive-tools libfuse2 xvfb
       - run: npm ci
+      - name: Install pinned Python coverage (Windows)
+        if: runner.os == 'Windows'
+        run: python -m pip install -r tests/requirements.txt
+      - name: Install pinned Python coverage (Linux and macOS)
+        if: runner.os != 'Windows'
+        run: python3 -m pip install -r tests/requirements.txt
+      - run: node scripts/coverage.cjs reset
       - run: npm run test:ci
       - name: Desktop regression checks
         if: runner.os != 'Linux'
@@ -76,6 +92,10 @@ jobs:
       - name: Windows local path startup regressions (requires WSL)
         if: runner.os == 'Windows'
         run: node scripts/run-tests.cjs windows
+      - name: Build optimized release renderer
+        env:
+          AGENTC2_COVERAGE: '0'
+        run: npm run build
       - name: Package native application
         shell: bash
         env:
@@ -95,6 +115,15 @@ jobs:
       - name: Packaged startup and native PTY smoke (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run -a npm run test:package
+      - name: Export native coverage with suite evidence
+        run: node scripts/coverage.cjs export desktop-${{ matrix.platform }}-${{ matrix.arch }}
+      - name: Upload native coverage shard
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: Coverage-desktop-${{ matrix.platform }}-${{ matrix.arch }}
+          path: test-results/coverage/artifact/*.json
+          if-no-files-found: error
+          retention-days: 14
       - name: Upload packages
         uses: actions/upload-artifact@v7.0.2
         with:
@@ -127,15 +156,24 @@ jobs:
     timeout-minutes: 40
     env:
       AGENTC2_HOST: agentc2-ci
+      AGENTC2_COVERAGE: '1'
+      AGENTC2_SOURCE_COVERAGE: '1'
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.1.0
         with:
           node-version-file: .nvmrc
           cache: npm
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: tests/requirements.txt
       - name: Provision an isolated SSH account on the disposable runner
         run: bash .github/scripts/setup-linux-ssh.sh
       - run: npm ci
+      - run: python3 -m pip install -r tests/requirements.txt
+      - run: node scripts/coverage.cjs reset
       - run: npm run build
       - run: node scripts/run-tests.cjs linux-python
       - run: npx playwright-core install chromium
@@ -143,6 +181,15 @@ jobs:
       - run: xvfb-run -a node scripts/run-tests.cjs linux-chat
       - name: Terminal, workspace, SPECOPS, and companion regressions
         run: xvfb-run -a dbus-run-session -- bash .github/scripts/test-linux-ssh.sh
+      - name: Export isolated SSH coverage with suite evidence
+        run: node scripts/coverage.cjs export linux-ssh
+      - name: Upload isolated SSH coverage shard
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: Coverage-linux-ssh
+          path: test-results/coverage/artifact/*.json
+          if-no-files-found: error
+          retention-days: 14
       - name: Upload Linux suite diagnostics
         if: always()
         uses: actions/upload-artifact@v7.0.2
@@ -161,16 +208,34 @@ jobs:
     env:
       AGENTC2_HOST: agentc2-ci
       AGENTC2_CLEANUP_QA_HOME: /tmp/agentc2-cleanup-ssh-ci/remote-home
+      AGENTC2_COVERAGE: '1'
+      AGENTC2_SOURCE_COVERAGE: '1'
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.1.0
         with:
           node-version-file: .nvmrc
           cache: npm
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: tests/requirements.txt
       - run: bash .github/scripts/setup-linux-ssh.sh
       - run: npm ci
+      - run: python3 -m pip install -r tests/requirements.txt
+      - run: node scripts/coverage.cjs reset
       - run: npm run build
       - run: xvfb-run -a node scripts/run-tests.cjs cleanup
+      - name: Export isolated cleanup coverage with suite evidence
+        run: node scripts/coverage.cjs export linux-cleanup
+      - name: Upload isolated cleanup coverage shard
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: Coverage-linux-cleanup
+          path: test-results/coverage/artifact/*.json
+          if-no-files-found: error
+          retention-days: 14
       - name: Upload cleanup diagnostics
         if: always()
         uses: actions/upload-artifact@v7.0.2
@@ -180,11 +245,46 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  coverage:
+    name: Production coverage acceptance
+    if: always()
+    needs: [desktop, linux-ssh, linux-cleanup]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: tests/requirements.txt
+      - run: npm ci --ignore-scripts
+      - run: python3 -m pip install -r tests/requirements.txt
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: Coverage-*
+          path: test-results/coverage-input
+          merge-multiple: true
+      - name: Require all native shards and acceptance coverage floors
+        run: node scripts/coverage.cjs aggregate test-results/coverage-input --acceptance
+      - name: Upload combined coverage and provenance
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: Complete-coverage-QA
+          path: test-results/coverage/
+          if-no-files-found: ignore
+          retention-days: 14
+
   quality-gate:
     name: Quality gate
     timeout-minutes: 5
     if: always()
-    needs: [desktop, linux-ssh, linux-cleanup]
+    needs: [desktop, linux-ssh, linux-cleanup, coverage]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7.0.1

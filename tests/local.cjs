@@ -17,6 +17,11 @@ const { Tunnels } = require('../electron/tunnels.cjs');
   assert.deepEqual([linux.binary, ...linux.args], ['python3', '-', 'payload']);
   assert.equal(linux.env.PRIVATE_TEST, 'preserved');
   assert.ok(linux.env.PATH.startsWith('/fixture/bin:'));
+  const { loadCommonJs } = require('./helpers/load-commonjs.cjs');
+  const fallbackModule = loadCommonJs('electron/local.cjs', { 'node:os': { homedir: () => '/fallback-home' } });
+  const fallback = fallbackModule.localCommand('python3', [], 'linux', {});
+  assert.ok(fallback.env.PATH.split(':').includes('/fallback-home/.local/bin'));
+  assert.equal(fallback.env.PATH.split(':').includes(''), false);
   for (const platform of ['linux', 'darwin']) {
     const execution = localCommand('python3', [], platform, { HOME: '/fixture', PATH: '/usr/bin:/fixture/bin:/usr/bin' });
     const entries = execution.env.PATH.split(':');
@@ -59,7 +64,7 @@ const { Tunnels } = require('../electron/tunnels.cjs');
     const input = { cwd: 'C:\\' };
     assert.equal(await localPayload(input, { ...noConversion, platform }), input);
   }
-  for (const [error, output] of [[Error('WSL unavailable'), ''], [null, ''], [null, 'relative/path\n'], [null, '/path\nextra\n']]) {
+  for (const [error, output] of [[Error('WSL unavailable'), ''], [null, undefined], [null, ''], [null, 'relative/path\n'], [null, '/path\nextra\n']]) {
     await assert.rejects(localPayload({ cwd: 'C:\\' }, { ...options, execute: (_binary, _args, _settings, callback) => callback(error, output) }), /Could not resolve local cwd in WSL/);
   }
   await assert.rejects(localPayload({ cwd: 'C:\\\0bad' }, noConversion), /null characters/);

@@ -42,5 +42,33 @@ try {
   breaker.observe([session([...events, event(9, 'tool_failed', b)], { worktreeOperation: 'a'.repeat(32), headCommit: '1'.repeat(40) })]);
   assert.equal(breaker.observe([session([...events, event(9, 'tool_failed', b), event(10, 'tool_failed', b)], { worktreeOperation: 'a'.repeat(32), headCommit: '2'.repeat(40) })]).length, 0, 'Revision progress resets a streak');
   assert.equal(store.data.loopState[key].count, 0);
+  for (const id of ['missing-session', key]) {
+    assert.throws(() => breaker.record(id, 'interrupted', 'No verified fault'), /No current confirmed fault/);
+    assert.throws(() => breaker.reset(id), /No current confirmed fault/);
+  }
+  const unknownKey = 'default/tmux:hq-cccccccccccc';
+  for (const events of [undefined, null, {}]) assert.deepEqual(breaker.observe([session(events, { key: unknownKey })]), []);
+  const cursorBefore = store.data.loopState[alternate].cursor;
+  assert.deepEqual(breaker.observe([session([], { key: alternate })]), []);
+  assert.equal(store.data.loopState[alternate].cursor, cursorBefore);
+  assert.equal(store.data.loopState[alternate].count, 0, 'A missing ring cursor cannot prove a consecutive streak');
+  const invalidEvents = [null,
+    { ...event(10, 'failed', a), source: 'codex' }, { ...event(11, 'failed', a), id: 42 }, { ...event(12, 'failed', a), id: 'invalid' },
+    { ...event(13, 'failed', a), at: undefined }, { ...event(14, 'failed', a), at: 'invalid' },
+    { ...event(15, 'failed', a), at: new Date(Date.now() + 120000).toISOString() },
+  ];
+  assert.deepEqual(breaker.observe([session(invalidEvents, { key: unknownKey })]), [], 'Malformed and future events must not become confirmed failure evidence');
+  assert.deepEqual(breaker.observe([session([event(16, 'failed', a), { ...event(17, 'failed', a), at: new Date(Date.now() - 11 * 60000).toISOString() }], { key: unknownKey })]), []);
+  assert.equal(store.data.loopState[unknownKey].count, 0);
+  store.save('settings', { ...store.data.settings, presets: store.data.settings.presets.map((preset) => preset.id === 'claude' ? { ...preset, loopBreaker: { ...preset.loopBreaker, threshold: 2, autoInterrupt: true } } : preset) });
+  const auto = breaker.observe([session([18, 19].map((index) => ({ ...event(index, 'failed', a), failureLabel: undefined })), { key: 'default/tmux:hq-dddddddddddd' })])[0];
+  assert.equal(auto.status, 'pending'); assert.equal(auto.autoInterrupt, true); assert.equal(auto.label, 'Repeated confirmed failure');
+  assert.deepEqual(breaker.observe([session([event(20, 'failed', a)], { presetId: 'missing-preset' })]), []);
+  const noticeKey = 'default/tmux:hq-eeeeeeeeeeee', notice = event(23, 'notice');
+  assert.deepEqual(breaker.observe([session([event(22, 'failed', a), notice], { key: noticeKey })]), []);
+  assert.equal(store.data.loopState[noticeKey].cursor, notice.id);
+  assert.equal(store.data.loopState[noticeKey].count, 1, 'An unrelated event cannot establish failure or progress');
+  store.save('settings', { ...store.data.settings, presets: store.data.settings.presets.map((preset) => preset.id === 'claude' ? { ...preset, attentionHooks: false } : preset) });
+  assert.deepEqual(breaker.observe([session([event(21, 'failed', a)])]), [], 'Disabled attention hooks cannot authorize automatic interruption');
   console.log('PASS repeated confirmed failures, progress and signature resets, scope, restart deduplication, and cooldown');
 } finally { fs.rmSync(directory, { recursive: true, force: true }); }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { PeerSyncConfig, PeerSyncStatus } from '../types';
 
 export function PeerSyncSettings() {
@@ -10,23 +10,44 @@ export function PeerSyncSettings() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [now, setNow] = useState(Date.now());
+  const draftRevision = useRef(0);
+  const statusRevision = useRef(0);
+  const fieldRevisions = useRef<Partial<Record<keyof PeerSyncConfig, number>>>({});
+  function edit(patch: Partial<PeerSyncConfig>) {
+    const revision = ++draftRevision.current;
+    for (const key of Object.keys(patch) as (keyof PeerSyncConfig)[]) fieldRevisions.current[key] = revision;
+    setDraft((current) => ({ ...current, ...patch }));
+  }
+  function receiveDraft(value: PeerSyncConfig, revision: number) {
+    setDraft((current) => {
+      const fields = ['enabled', 'deviceName', 'bindAddress', 'port'] as const;
+      const edited = Object.fromEntries(fields.filter((key) => (fieldRevisions.current[key] || 0) > revision).map((key) => [key, current[key]]));
+      return { enabled: value.enabled, deviceName: value.deviceName, bindAddress: value.bindAddress, port: value.port, ...edited };
+    });
+  }
   useEffect(() => {
     let active = true;
-    void window.agentHQ!.peerSyncStatus().then((value) => { if (active) { setStatus(value); setDraft(value); } }).catch((cause) => { if (active) setError(String(cause)); });
-    const off = window.agentHQ!.onPeerSyncStatus((value) => { setStatus(value); setPairing(null); });
+    const initialDraft = draftRevision.current, initialStatus = statusRevision.current;
+    void window.agentHQ!.peerSyncStatus().then((value) => {
+      if (!active || statusRevision.current !== initialStatus) return;
+      setStatus(value);
+      receiveDraft(value, initialDraft);
+    }).catch((cause) => { if (active && statusRevision.current === initialStatus) setError(String(cause)); });
+    const off = window.agentHQ!.onPeerSyncStatus((value) => { statusRevision.current++; setStatus(value); setPairing(null); });
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => { active = false; off(); clearInterval(timer); };
   }, []);
   async function run(action: () => Promise<void>) {
+    statusRevision.current++;
     setBusy(true); setError('');
     try { await action(); } catch (cause) { setError(String(cause)); } finally { setBusy(false); }
   }
   return <div className="dialog-form peer-sync-settings">
     <p className="field-note">Pair trusted desktops on your LAN or VPN to share SSH hosts, presets, Rules of Engagement, enrolled OpOrders, cleanup policies, notes, pins, callsigns, and attention acknowledgements. Each desktop keeps its own panes and local sessions. SSH and provider credentials stay on each computer.</p>
-    <label className="checkbox-label"><input type="checkbox" checked={draft.enabled} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} />Enable desktop sync</label>
-    <div className="form-grid"><label>Device name<input value={draft.deviceName} maxLength={80} onChange={(event) => setDraft({ ...draft, deviceName: event.target.value })} /></label><label>LAN / VPN bind address<input value={draft.bindAddress} onChange={(event) => setDraft({ ...draft, bindAddress: event.target.value })} /></label><label>Sync port<input type="number" min={0} max={65535} value={draft.port} onChange={(event) => setDraft({ ...draft, port: Number(event.target.value) })} /></label></div>
+    <label className="checkbox-label"><input type="checkbox" checked={draft.enabled} onChange={(event) => edit({ enabled: event.target.checked })} />Enable desktop sync</label>
+    <div className="form-grid"><label>Device name<input value={draft.deviceName} maxLength={80} onChange={(event) => edit({ deviceName: event.target.value })} /></label><label>LAN / VPN bind address<input value={draft.bindAddress} onChange={(event) => edit({ bindAddress: event.target.value })} /></label><label>Sync port<input type="number" min={0} max={65535} value={draft.port} onChange={(event) => edit({ port: Number(event.target.value) })} /></label></div>
     <p className="field-note">Use this computer’s private IPv4 address, including a Tailscale address, or 127.0.0.1 with a tunnel. Allow the selected port through your firewall. Paired traffic is encrypted.</p>
-    <button className="button-primary" disabled={busy} onClick={() => void run(async () => { setPairing(null); const value = await window.agentHQ!.savePeerSync(draft); setStatus(value); setDraft(value); })}>Apply desktop sync</button>
+    <button className="button-primary" disabled={busy} onClick={() => void run(async () => { const revision = draftRevision.current; setPairing(null); const value = await window.agentHQ!.savePeerSync(draft); setStatus(value); receiveDraft(value, revision); })}>Apply desktop sync</button>
     <p role="status">{status?.running ? `Listening at ${status.address}` : 'Desktop sync is off'}</p>
     {status?.running ? <>
       <button className="button-secondary" disabled={busy} onClick={() => void run(async () => setPairing(await window.agentHQ!.issuePeerPairing()))}>Generate pairing code</button>

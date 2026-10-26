@@ -65,7 +65,7 @@ def main():
         parser.error("--profile requires Claude")
     if args.ssh:
         repo = Path(__file__).resolve().parents[1]
-        names = ["chat_runtime.py", "chat_antigravity_cli.py", "chat_adapters.py", "chat_antigravity.py", "chat_claude.py", "chat_opencode.py", "chat_codex.py", "chat_codex_schema.py", "chat-codex-schema.json", "chat_format.py", "chat_journal.py", "chat_protocol.py", "chat-protocol.json"]
+        names = ["chat_runtime.py", "chat_antigravity_cli.py", "chat_adapters.py", "chat_antigravity.py", "chat_claude.py", "chat_claude_history.py", "chat_opencode.py", "chat_codex.py", "chat_codex_schema.py", "chat-codex-schema.json", "chat_format.py", "chat_journal.py", "chat_protocol.py", "chat-protocol.json"]
         files = {"electron/" + name: (repo / "electron" / name).read_text() for name in names}
         files["tests/chat-live.py"] = Path(__file__).read_text()
         encoded = base64.b64encode(json.dumps(files).encode()).decode()

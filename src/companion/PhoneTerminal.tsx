@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { enableTerminalLinks } from '../terminalLinks';
+import { enableTerminalTouchScroll } from '../terminalTouch';
 import type { Session, TerminalSnapshot, TerminalState } from '../types';
 import { CompanionClient } from './client';
 
@@ -50,6 +51,7 @@ export function PhoneTerminal({ client, session, connected, onResume, onRefresh 
     const offState = client.on('terminal:state', (value) => { const state = value as TerminalState; if (state.id === handle.current) apply(state); });
     const offExit = client.on('terminal:exit', (value) => { const exit = value as { id: string; code: number }; if (exit.id === handle.current) { writable.current = false; setError(`Terminal connection closed (${exit.code}). Reattach to reconnect.`); onRefresh(); } });
     const input = term.onData((data) => { if (writable.current && handle.current) void client.request('terminal:write', handle.current, data).catch(showError); });
+    const disposeTouch = enableTerminalTouchScroll(term, node);
     const resize = new ResizeObserver(() => {
       if (!writable.current || !handle.current || !node?.clientWidth || !node?.clientHeight) return;
       addon.fit(); void client.request('terminal:resize', handle.current, term.cols, term.rows).catch(showError);
@@ -65,6 +67,7 @@ export function PhoneTerminal({ client, session, connected, onResume, onRefresh 
       snapshotReady = true;
     }).catch((cause) => { if (!cancelled) showError(cause); });
     return () => {
+      disposeTouch();
       cancelled = true; offData(); offState(); offExit(); input.dispose(); resize.disconnect();
       if (handle.current) void client.request('terminal:close', handle.current).catch(() => {});
       handle.current = null; terminal.current = null; fit.current = null; term.dispose();

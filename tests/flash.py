@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+from helpers.python_sources import exec_sources
 import re
 import shutil
 import subprocess
@@ -25,7 +26,7 @@ class Flash(unittest.TestCase):
         shutil.copyfile(SOURCE / "session-hook.py", self.hook)
         self.scope = {"__name__": "flash_fixture", "TMUX_RE": re.compile(r"^hq-[a-f0-9]{12}$"), "HOOK_ROOT": self.root,
                       "run": lambda *_args, **_kwargs: types.SimpleNamespace(returncode=0, stdout=""), "tmux_option": lambda *_args: "claude"}
-        exec((SOURCE / "flash.py").read_text(), self.scope)
+        exec_sources(self.scope, (SOURCE / "flash.py"))
         self.processes = []
         self.addCleanup(self.stop_processes)
 

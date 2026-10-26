@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { createUpdates, createMainCheck } = require('../electron/updates.cjs');
+const { loadCommonJs } = require('./helpers/load-commonjs.cjs');
 class FixtureUpdater extends EventEmitter {
   checks = 0; downloads = 0; installs = 0;
   async checkForUpdates() {
@@ -75,5 +76,41 @@ class FixtureUpdater extends EventEmitter {
   const requested = queued.download(); resolveMain(true);
   await Promise.all([checking, requested]);
   assert.equal(queuedNative.downloads, 1, 'An update click during the parallel main check is not lost');
+  for (const percent of [NaN, Infinity, undefined]) { native.emit('download-progress', { percent }); assert.equal(updates.state().percent, null); }
+  native.emit('download-progress', { percent: -1 }); assert.equal(updates.state().percent, 0);
+  native.emit('download-progress', { percent: 101 }); assert.equal(updates.state().percent, 100);
+  native.emit('error', 'plain upstream failure'); assert.equal(updates.state().error, 'plain upstream failure');
+  native.emit('update-downloaded');
+  native.quitAndInstall = () => { throw new Error('Synchronous installer failure'); };
+  assert.equal(updates.install().status, 'error');
+  assert.match(updates.state().error, /Synchronous installer failure/);
+  const transport = [];
+  let ok = true;
+  const { createMainCheck: requestMain } = loadCommonJs('electron/updates.cjs', {}, { fetch: async (url, options) => {
+    transport.push({ url, options });
+    return { ok, json: async () => ({ status: 'ahead', ahead_by: 1 }) };
+  } });
+  assert.equal(await requestMain(sha)(), true);
+  assert.equal(transport[0].url, `https://api.github.com/repos/mlg151/AgentC2/compare/${sha}...main`);
+  assert.deepEqual(transport[0].options.headers, { Accept: 'application/vnd.github+json', 'User-Agent': 'AgentC2' });
+  assert.ok(transport[0].options.signal instanceof AbortSignal);
+  ok = false; await assert.rejects(requestMain(sha)(), /Could not check the latest main build/);
+  const observerNative = new FixtureUpdater();
+  let reentered;
+  const observed = createUpdates({ updater: observerNative, version: '0.4.1', notify: (state) => {
+    if (state.status === 'downloading') reentered = observed.check();
+  } });
+  await observed.check();
+  const observedOperation = observed.download();
+  assert.equal(observedOperation, reentered, 'Reentrant observers must share the operation they already started, without overlapping updater commands');
+  await observedOperation;
+  assert.equal(observerNative.checks, 2);
+  for (const fail of [false, true]) {
+    const asyncNative = new FixtureUpdater();
+    asyncNative.quitAndInstall = async () => { if (fail) throw Error('Async installer failure'); };
+    const asyncController = createUpdates({ updater: asyncNative, version: '0.4.1' });
+    asyncNative.emit('update-downloaded');
+    assert.equal((await asyncController.install()).status, fail ? 'error' : 'installing');
+  }
   console.log('PASS update lifecycle, explicit download/install, progress, duplicate actions, concurrent checks, failures, retries, and no-update state');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

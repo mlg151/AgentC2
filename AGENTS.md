@@ -29,7 +29,7 @@ Match existing code: two-space indentation, single quotes, and semicolons in Typ
 
 ## Testing Guidelines
 
-Tests are standalone `.cjs` scripts using Node assertions and Playwright where needed; `python3 tests/remote-helper.py` checks Linux helper exit-evidence parsing; no coverage threshold is configured. Live suites require local OpenSSH, key-based access, and remote Python 3/tmux; launch-mode checks also require provider CLIs. Set `AGENTC2_HOST` to the intended SSH test host; no host is hardcoded. Tests create remote sessions and clean up their fixtures. Preserve fixture isolation and terminal-test clipboard restoration. Run relevant suites for terminal, lifecycle, or launch changes and report any skipped checks.
+Tests are standalone `.cjs` scripts using Node assertions and Playwright where needed; `python3 tests/remote-helper.py` checks Linux helper exit-evidence parsing; CI enforces aggregate acceptance floors of 93% statements, 89% branches, 93% functions, and 96% lines, with all six coverage shards and no unobserved production modules. Strict local coverage commands retain the unfinished per-file 100% target; see `docs/testing-coverage.md`. Live suites require local OpenSSH, key-based access, and remote Python 3/tmux; launch-mode checks also require provider CLIs. Set `AGENTC2_HOST` to the intended SSH test host; no host is hardcoded. Tests create remote sessions and clean up their fixtures. Preserve fixture isolation and terminal-test clipboard restoration. Run relevant suites for terminal, lifecycle, or launch changes and report any skipped checks.
 
 ## Commit & Pull Request Guidelines
 

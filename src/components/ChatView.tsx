@@ -59,6 +59,7 @@ export function ChatView({ api, sessionId, hostId, enabled = true, connected = t
   const generation = useRef(0);
   const cursor = useRef(0);
   const viewport = useRef<HTMLDivElement>(null);
+  const content = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
   const preserve = useRef<{ height: number; top: number } | null>(null);
   const canControl = connected && wanted && control?.canControl && control.connection === 'connected';
@@ -78,6 +79,8 @@ export function ChatView({ api, sessionId, hostId, enabled = true, connected = t
     let cancelled = false, id: string | null = null, ready = false;
     const buffered: ChatUpdate[] = [];
     setConnecting(true); setControl(null); setError('');
+    // Work from a closed attachment must not keep the new view busy.
+    setLoadingHistory(false); setTaking(false); setPruning(false);
     const offEvents = api.onEvents((page) => {
       if (page.id !== id || cancelled) return;
       if (!ready) buffered.push(page);
@@ -124,6 +127,15 @@ export function ChatView({ api, sessionId, hostId, enabled = true, connected = t
   }, [api, pending?.command.commandId, pending?.phase === 'submitting', pending?.receipt?.state, connected, control?.id, control?.connection, receiptAttempt, onRefresh]);
 
   useLayoutEffect(() => {
+    const node = viewport.current!;
+    // Deferred transcript layout can grow after the initial commit. Observe its
+    // content and viewport while retaining the user's choice to browse history.
+    const observer = new ResizeObserver(() => { if (follow.current) node.scrollTop = node.scrollHeight; });
+    observer.observe(node); observer.observe(content.current!);
+    return () => observer.disconnect();
+  }, []);
+
+  useLayoutEffect(() => {
     const node = viewport.current;
     if (!node) return;
     if (preserve.current) { node.scrollTop = preserve.current.top + node.scrollHeight - preserve.current.height; preserve.current = null; }
@@ -149,9 +161,18 @@ export function ChatView({ api, sessionId, hostId, enabled = true, connected = t
     void submit({ protocolVersion: 1, commandId: chatCommandId(), sessionId, operation: 'respond', payload: { requestId: request.requestId, turnId: request.turnId, itemId: request.itemId, ...response } });
   }, [api, sessionId, pending, canControl]);
 
+  async function takeControl() {
+    if (!handle.current) return;
+    const epoch = generation.current;
+    setTaking(true);
+    try { const state = await api.take(handle.current); if (epoch === generation.current) setControl(state); }
+    catch (cause) { if (epoch === generation.current) setError(String(cause)); }
+    finally { if (epoch === generation.current) setTaking(false); }
+  }
+
   async function loadEarlier() {
     if (!handle.current || loadingHistory || !timeline.firstSequence) return;
-    setLoadingHistory(true);
+    setLoadingHistory(true); follow.current = false; setFollowing(false);
     const epoch = generation.current;
     try {
       const page = await api.history(handle.current, Math.max(timeline.retainedFrom - 1, timeline.firstSequence - 201), 200);
@@ -171,21 +192,21 @@ export function ChatView({ api, sessionId, hostId, enabled = true, connected = t
       if (epoch === generation.current) apply(page);
     } catch (cause) {
       if (epoch === generation.current) setError(`Transcript removal could not be confirmed. Reopen chat to check retained content. ${String(cause)}`);
-    } finally { setPruning(false); }
+    } finally { if (epoch === generation.current) setPruning(false); }
   }
 
   const active = session?.state === 'running' || session?.state === 'waiting';
   const sendable = writable && session?.state === 'idle' && !pending && Boolean(draft.trim());
   const unknown = pendingCommands.filter((receipt) => receipt.state === 'unknown');
   return <div className="structured-chat" aria-label="Structured agent chat">
-    <div className="chat-controls"><span className="chat-live-state" role="status">{!wanted ? 'Detached' : !connected || control?.connection === 'reconnecting' ? 'Reconnecting' : connecting ? 'Connecting…' : session?.state || 'Waiting for chat'}</span><span className="chat-controller">{control?.canControl ? 'You control this chat' : control?.controller ? `${control.controller.name} has control` : 'Read only'}</span><div className="chat-control-buttons">{!wanted || (!connecting && !control && connected) ? <button onClick={() => { setWanted(true); setAttempt((value) => value + 1); }}>Attach chat</button> : null}{wanted && !control?.canControl ? <button disabled={!connected || !control || control.connection !== 'connected' || taking} onClick={() => { if (!handle.current) return; setTaking(true); void api.take(handle.current).then(setControl).catch((cause) => setError(String(cause))).finally(() => setTaking(false)); }}>Take control</button> : null}<button disabled={!canControl || !active || !session?.capabilities.interrupt || Boolean(pending)} onClick={() => void submit({ protocolVersion: 1, commandId: chatCommandId(), operation: 'interrupt', sessionId, payload: {} })}><Zap size={14} />Interrupt</button><button disabled={!control || !wanted} onClick={() => { setWanted(false); setControl(null); }}><Link2Off size={14} />Detach</button><button className="danger" disabled={!canControl || !session || session.canStop === false || session.state === 'stopped' || (Boolean(pending) && pending?.phase !== 'uncertain')} onClick={() => { if (window.confirm(`Stop “${session?.title}”? This ends its managed remote process.`)) void submit({ protocolVersion: 1, commandId: chatCommandId(), operation: 'stop', sessionId, payload: {} }); }}><Square size={13} />Stop</button></div></div>
+    <div className="chat-controls"><span className="chat-live-state" role="status">{!wanted ? 'Detached' : !connected || control?.connection === 'reconnecting' ? 'Reconnecting' : connecting ? 'Connecting…' : session?.state || 'Waiting for chat'}</span><span className="chat-controller">{control?.canControl ? 'You control this chat' : control?.controller ? `${control.controller.name} has control` : 'Read only'}</span><div className="chat-control-buttons">{!wanted || (!connecting && !control && connected) ? <button onClick={() => { setWanted(true); setAttempt((value) => value + 1); }}>Attach chat</button> : null}{wanted && !control?.canControl ? <button disabled={!connected || !control || control.connection !== 'connected' || taking} onClick={() => void takeControl()}>Take control</button> : null}<button disabled={!canControl || !active || !session?.capabilities.interrupt || Boolean(pending)} onClick={() => void submit({ protocolVersion: 1, commandId: chatCommandId(), operation: 'interrupt', sessionId, payload: {} })}><Zap size={14} />Interrupt</button><button disabled={!control || !wanted} onClick={() => { setWanted(false); setControl(null); }}><Link2Off size={14} />Detach</button><button className="danger" disabled={!canControl || !session || session.canStop === false || session.state === 'stopped' || (Boolean(pending) && pending?.phase !== 'uncertain')} onClick={() => { if (window.confirm(`Stop “${session?.title}”? This ends its managed remote process.`)) void submit({ protocolVersion: 1, commandId: chatCommandId(), operation: 'stop', sessionId, payload: {} }); }}><Square size={13} />Stop</button></div></div>
     {error ? <p className="chat-local-error" role="alert">{error}<button aria-label="Dismiss chat error" onClick={() => setError('')}>×</button></p> : null}
     {receiptError ? <div className="chat-uncertain" role="alert"><p>{receiptError}</p><button disabled={!connected || !control} onClick={() => setReceiptAttempt((value) => value + 1)}>Check action status</button><small>The prompt will not be resent automatically.</small>{pending?.phase === 'uncertain' && pending.receipt?.state !== 'unknown' ? <button disabled={!canControl} title="Reuses the original action ID so an accepted command is deduplicated" onClick={() => void submit(pending.command, true)}>Retry same action</button> : null}</div> : null}
     {unknown.length || pending?.receipt?.state === 'unknown' ? <div className="chat-uncertain" role="status"><strong>A previous action has an uncertain outcome.</strong><p>Review this conversation and native provider history before repeating the action.</p></div> : null}
     <div className="chat-transcript" ref={viewport} role="log" aria-label="Conversation messages" aria-live="off" onScroll={(event) => { const node = event.currentTarget; const next = node.scrollHeight - node.scrollTop - node.clientHeight < 80; follow.current = next; setFollowing(next); }}>
       {timeline.firstSequence > timeline.retainedFrom ? <button className="chat-earlier" disabled={loadingHistory || !control || !connected} onClick={() => void loadEarlier()}>{loadingHistory ? 'Loading earlier messages…' : 'Load earlier managed messages'}</button> : null}
       {timeline.retainedFrom > 1 ? <p className="chat-history-note">Earlier transcript content was removed under the retention policy.</p> : null}
-      {!timeline.items.length ? <div className="chat-empty"><strong>{connecting ? 'Connecting to remote chat…' : 'A clear view of your agent’s work.'}</strong><p>Messages, tools, and requests will appear here.</p></div> : <Transcript items={timeline.items} />}
+      <div ref={content}>{!timeline.items.length ? <div className="chat-empty"><strong>{connecting ? 'Connecting to remote chat…' : 'A clear view of your agent’s work.'}</strong><p>Messages, tools, and requests will appear here.</p></div> : <Transcript items={timeline.items} />}</div>
     </div>
     {!following ? <button className="chat-latest" onClick={() => { follow.current = true; setFollowing(true); if (viewport.current) viewport.current.scrollTop = viewport.current.scrollHeight; }}><ArrowDown size={14} />Latest</button> : null}
     {requests.length ? <div className="chat-pending" aria-label="Pending agent requests">{requests.map((request) => <RequestCard key={request.requestId} request={request} disabled={!writable || Boolean(pending)} onRespond={respond} />)}</div> : null}

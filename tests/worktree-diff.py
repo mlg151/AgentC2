@@ -2,6 +2,7 @@
 
 import hashlib
 from pathlib import Path
+from helpers.python_sources import exec_sources
 import subprocess
 import tempfile
 import unittest
@@ -25,7 +26,7 @@ class DiffActions(unittest.TestCase):
         self.git("commit", "-qm", "Base")
         source = Path(__file__).resolve().parents[1] / "electron"
         self.scope = {"__name__": "diff_fixture"}
-        exec("\n".join((source / name).read_text() for name in ("worktrees.py", "worktree-diff.py", "provider_telemetry.py", "remote.py")), self.scope)
+        exec_sources(self.scope, *(source / name for name in ("worktrees.py", "worktree-diff.py", "provider_telemetry.py", "remote.py")))
         self.scope["WORKTREE_ROOT"] = self.root / "owned"
         self.scope["create"] = lambda payload: {"name": payload["managedName"]}
         self.operation = "a" * 32

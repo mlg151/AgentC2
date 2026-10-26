@@ -3,6 +3,7 @@ from contextlib import closing
 import json
 import os
 from pathlib import Path
+from helpers.python_sources import exec_sources
 import sqlite3
 import subprocess
 import tempfile
@@ -13,7 +14,7 @@ from unittest.mock import patch
 root = Path(__file__).resolve().parents[1]
 scope = {"__name__": "agentc2_opencode_test"}
 for name in ("antigravity-cleanup.py", "session-cleanup.py", "oporders.py", "provider_telemetry.py", "remote.py"):
-    exec((root / "electron" / name).read_text(), scope)
+    exec_sources(scope, (root / "electron" / name))
 
 
 class OpenCodeHelperTests(unittest.TestCase):

@@ -142,7 +142,7 @@ def cleanup_codex(session_id):
     if not db.exists():
         return [], {}, None, []
     cleanup_file(db)
-    with sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2) as conn:
+    with closing(sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)) as conn:
         conn.row_factory = sqlite3.Row
         columns = {row[1] for row in conn.execute("PRAGMA table_info(threads)")}
         if not {"id", "rollout_path", "updated_at_ms"}.issubset(columns):
@@ -313,7 +313,7 @@ def cleanup_delete_one(payload, picker=None):
             deleted = run(["codex", "delete", "--force", session_id], timeout=max(1, min(10, int(payload["deadline"] - time.monotonic()))))
             if deleted.returncode != 0:
                 return {"id": session_id, "status": "unknown" if deleted.returncode == 124 else "failed", "detail": "Codex did not confirm deletion. Preview again; it may retain live or referenced history"}
-            with sqlite3.connect(f"file:{HOME / '.codex' / 'state_5.sqlite'}?mode=ro", uri=True, timeout=2) as conn:
+            with closing(sqlite3.connect(f"file:{HOME / '.codex' / 'state_5.sqlite'}?mode=ro", uri=True, timeout=2)) as conn:
                 if conn.execute("SELECT 1 FROM threads WHERE id = ?", (session_id,)).fetchone():
                     raise ValueError("Provider still lists the conversation")
             if any(path.exists() for path in files):
