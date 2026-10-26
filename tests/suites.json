@@ -6,6 +6,11 @@
       "group": "linux-web"
     },
     {
+      "id": "chat-command-recovery.e2e",
+      "file": "tests/chat-command-recovery.e2e.cjs",
+      "group": "linux-web"
+    },
+    {
       "id": "chat-recovery.e2e",
       "file": "tests/chat-recovery.e2e.cjs",
       "group": "linux-web"

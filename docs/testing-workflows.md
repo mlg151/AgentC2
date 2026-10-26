@@ -237,3 +237,5 @@ manual scroll retention, Latest, and observer disposal on parent unmount. These
 are public API/DOM tests; real service/provider/SSH suites remain separate evidence.
 Five remaining service statements have focused cache-write failure, bootstrap
 cache invalidation on a failed read, and scoped terminal URL routing cases.
+
+`chat-command-recovery.e2e` verifies exact stop/interrupt envelopes, confirmation cancellation, foreign-handle event/state rejection, keyboard guards, explicit same-ID retries, late submit acknowledgements and draft preservation across reconnect, stale receipt polls, and direct unknown acknowledgements without automatic polling/replay. All command envelopes pass the production protocol validator; deterministic public ChatApi promises isolate the renderer races. Actual SSH/provider/native bridge suites remain required.
