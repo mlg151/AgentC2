@@ -151,25 +151,25 @@ for skips and platform limitations.
 
 ## Current status
 
-The 100% target is not yet met. The [six-shard original-source run for c57ee63](https://github.com/mlg151/AgentC2/actions/runs/40272481774)
+The 100% target is not yet met. The [six-shard original-source run for 615448c](https://github.com/mlg151/AgentC2/actions/runs/40278347126)
 passed all four native package jobs and both isolated Linux jobs. Its verified
-aggregate measured 14935/16439 statements (90.85%), 11106/12914 branches (86.00%),
-2911/3265 functions (89.16%), and 11713/12295 lines (95.27%). It measured 121
-production files, with 50 complete files, 222 file/metric gaps, and no unobserved
+aggregate measured 15203/16478 statements (92.26%), 11314/12926 branches (87.53%),
+3013/3268 functions (92.20%), and 11796/12325 lines (95.71%). It measured 122
+production files, with 54 complete files, 211 file/metric gaps, and no unobserved
 modules. Coverage and Quality gate correctly failed the exact target. The
 retained artifact includes all six source/suite manifests and regenerated
 HTML/JSON reports.
 
-The largest remaining branch gaps in that baseline are service (172), CENTCOM
-(158), App (107), ChatView (78), and TerminalView (57). App has 165/242 covered
-functions; all 242 original functions are included, including callbacks V8 had
-omitted. The [workflow audit](testing-workflows.md) remains unfinished.
+CENTCOM has 158 remaining branch gaps, service has 86, and App has 55.
+All 242 original App functions now execute in the verified aggregate, including
+callbacks V8 had omitted. The [workflow audit](testing-workflows.md) remains unfinished.
 
 Image upload (JavaScript and Python), approval bindings, the Electron main
 process, the companion service worker, pairing CLI, and extracted Claude history
 reader/launcher reach all four thresholds in that aggregate. Focused follow-up
 collections reach all four thresholds for capability/support discovery and
-automation validation. The latter removes three duplicated checks already
+automation validation. The support and automation modules and the touch adapter
+also reach all four thresholds in the verified six-shard aggregate. The latter removes three duplicated checks already
 performed by the published JSON-schema validator; rejection still precedes any
 persistence. These focused results do not replace a final native aggregate.
 
@@ -192,3 +192,20 @@ Those figures are diagnostic only: V8 omitted 31 callbacks in App and duplicated
 other compiler-generated function identities. They cannot be compared directly
 with the fixed original-source counts. Do not merge as satisfying the target
 until every final-revision metric and workflow requirement passes.
+
+
+The next focused service collection covers handoff/fault/lifecycle and event
+recovery; all 70 core suites pass at b096c2d. The post-save OpOrder loop uses its
+validated array rather than a redundant missing-field fallback. The additional
+browser recovery suite passes with source instrumentation for cross-host late
+inventory, deletion, callsign capacity and overlapping poll suppression. These
+follow-ups require fresh final-revision native evidence.
+
+A bounded-metadata test reproduced quadratic regex scanning in fleet identity
+redaction on a million-character plain word. The identity matcher now begins at
+the start of each word/hyphen run, preserving its exclusions while avoiding
+repeated suffix scans. The before-fix child times out; a required isolated
+watchdog checks the fixed path and identity boundaries. The unchanged snapshot
+bounding function is extracted into `centcom-snapshot.cjs` for independent
+normal/overflow, urgent/fault ordering, UTF-8, and input-immutability tests. The
+engine still bounds the same evidence before writing its remote workspace.

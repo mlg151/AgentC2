@@ -212,3 +212,15 @@ and uncertain deletion without tombstones or mutation replay. The post-save
 OpOrder loop reads the already validated `settings.opOrders` array; the unused
 legacy fallback is removed after proving normalization on missing input. The
 remaining legacy inventory/reconciliation fallbacks are still exercised.
+
+
+`centcom-fleet-boundaries` checks identity redaction and million-character plain
+word/hyphen metadata in a child with a ten-second watchdog. The old greedy regex
+stalls; anchoring each candidate at its word/hyphen boundary preserves matching
+while avoiding quadratic rescans. `centcom-snapshot` tests the extracted pure
+bounding helper, including active and inactive candidate ordering, transcript
+omission, UTF-8 byte limits, omission accounting, and immutable inputs.
+`centcom-state-boundaries` tests configuration limits/legacy defaults,
+operation/automation schema-definition selectors, persisted pause, failed wake
+without stale dispatch, and real bounded engine snapshots. No provider calls or
+worker protocol/journal changes are introduced.

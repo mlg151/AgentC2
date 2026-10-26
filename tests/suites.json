@@ -1,6 +1,21 @@
 {
   "suites": [
     {
+      "id": "centcom-snapshot",
+      "file": "tests/centcom-snapshot.cjs",
+      "group": "core"
+    },
+    {
+      "id": "centcom-fleet-boundaries",
+      "file": "tests/centcom-fleet-boundaries.cjs",
+      "group": "core"
+    },
+    {
+      "id": "centcom-state-boundaries",
+      "file": "tests/centcom-state-boundaries.cjs",
+      "group": "core"
+    },
+    {
       "id": "app-recovery.e2e",
       "file": "tests/app-recovery.e2e.cjs",
       "group": "linux-web"
