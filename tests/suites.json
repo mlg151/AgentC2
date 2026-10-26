@@ -1,6 +1,16 @@
 {
   "suites": [
     {
+      "id": "centcom-bindings-boundaries",
+      "file": "tests/centcom-bindings-boundaries.cjs",
+      "group": "core"
+    },
+    {
+      "id": "centcom-launch-boundaries",
+      "file": "tests/centcom-launch-boundaries.cjs",
+      "group": "core"
+    },
+    {
       "id": "chat-timeline-boundaries",
       "file": "tests/chat-timeline-boundaries.cjs",
       "group": "core"

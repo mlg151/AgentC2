@@ -59,6 +59,16 @@ submitted-request expiry, retained decisions and missing-ID fallbacks. Prefix
 flushes use their established message-map invariant; no event can remove those
 rows or change their kind during the synchronous reduction.
 
+Focused collections also reach all four code metrics for approval bindings
+(143 statements/lines, 250 branch counters, 37 functions), launch admission
+(76, 70, 20), and attention classification (65, 94, 15). New cases cover host
+removal during admission, freshly reviewed recovery revisions, queued dispatch
+and inventory failures, target/control/request changes, unsupported structured
+responses, stale workflow stages, missing outcome citations and malformed or old
+provider events. The complete core group passes with these additions. Queue
+entries contain release barriers only; failed dispatches cannot reject them.
+Host routes are revalidated again after the asynchronous admission check.
+
 ## Remaining documentation and candidate evidence
 
 The following is a routing index for the unfinished audit. Test names are

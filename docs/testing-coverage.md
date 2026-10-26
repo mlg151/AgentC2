@@ -125,10 +125,10 @@ for skips and platform limitations.
 
 ## Current status
 
-The 100% target is not yet met. The [six-shard CI run for 6b134dc](https://github.com/mlg151/AgentC2/actions/runs/40259659594)
+The 100% target is not yet met. The [six-shard CI run for 6e5ac4e](https://github.com/mlg151/AgentC2/actions/runs/40261948716)
 passed all four native package jobs and both isolated Linux jobs. Its verified
-aggregate measured 15786/16385 statements and lines (96.34%), 11476/13333 branch
-exits (86.07%), and 2910/3284 functions (88.61%). There were 197 production
+aggregate measured 15807/16387 statements and lines (96.46%), 11654/13411 branch
+exits (86.90%), and 2910/3284 functions (88.61%). There were 211 production
 file/metric gaps. The aggregate and Quality gate correctly failed the exact
 100% requirement. The combined HTML/JSON reports and source/suite provenance
 are retained in `Complete-coverage-QA` for 14 days.

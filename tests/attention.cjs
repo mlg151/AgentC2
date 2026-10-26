@@ -45,4 +45,18 @@ assert.equal(requests.store.data.attention[1].acknowledged, false);
 assert.deepEqual(requests.saved, ['flashResolved', 'attention']);
 requests.saved.length = 0;
 requests.attention.resolveRequests(['request']); assert.deepEqual(requests.saved, [], 'A repeated resolution must not create another persisted mutation');
+for (const transport of ['chat', 'terminal']) {
+  const completed = fixture();
+  const events = completed.attention.update([{ ...session, transport, events: [{ id: 'completed-' + transport, kind: 'completed', at: '2026-10-21T18:00:00Z' }] }]);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].confidence, 'confirmed');
+  assert.equal(events[0].detail, `The provider reported that its turn finished. Review the result in ${transport === 'chat' ? 'chat' : 'the terminal'}.`);
+}
+const stale = fixture({ attentionCursors: { [key]: { id: 'no-longer-retained', at: '2026-10-21T18:00:00Z' } } });
+assert.deepEqual(stale.attention.update([{ ...session, events: [{ id: 'old', kind: 'completed', at: '2026-10-21T17:00:00Z' }] }]), []);
+assert.equal(stale.store.data.attention.length, 0, 'Old provider events cannot resurrect an acknowledged attention stream');
+assert.equal(stale.store.data.attentionCursors[key].at, '2026-10-21T18:00:00.000Z');
+const chatInput = fixture().attention.update([{ ...session, transport: 'chat', events: [{ id: 'input', kind: 'input', at: '2026-10-21T18:00:00Z' }] }]);
+assert.equal(chatInput[0].detail, 'The provider needs your input. Open chat to review the exact request.');
+for (const event of [{ kind: 'unsupported', id: 'one' }, { kind: 'completed', id: 3 }]) assert.deepEqual(fixture().attention.update([{ ...session, events: [event] }]), []);
 console.log('PASS legacy cursor migration, malformed/missing event timestamps, confirmed failure alerts, recent-only terminal prompts, structured lifecycle isolation, and idempotent request resolution');
