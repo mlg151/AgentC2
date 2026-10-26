@@ -1,6 +1,11 @@
 {
   "suites": [
     {
+      "id": "chat-lifecycle.e2e",
+      "file": "tests/chat-lifecycle.e2e.cjs",
+      "group": "linux-web"
+    },
+    {
       "id": "chat-recovery.e2e",
       "file": "tests/chat-recovery.e2e.cjs",
       "group": "linux-web"

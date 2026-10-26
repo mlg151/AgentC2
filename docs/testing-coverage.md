@@ -151,18 +151,19 @@ for skips and platform limitations.
 
 ## Current status
 
-The 100% target is not yet met. The [six-shard original-source run for 615448c](https://github.com/mlg151/AgentC2/actions/runs/40278347126)
+The 100% target is not yet met. The [six-shard original-source run for 06ff33a](https://github.com/mlg151/AgentC2/actions/runs/40282582265)
 passed all four native package jobs and both isolated Linux jobs. Its verified
-aggregate measured 15203/16478 statements (92.26%), 11314/12926 branches (87.53%),
-3013/3268 functions (92.20%), and 11796/12325 lines (95.71%). It measured 122
-production files, with 54 complete files, 211 file/metric gaps, and no unobserved
+aggregate measured 15303/16480 statements (92.86%), 11438/12924 branches (88.50%),
+3029/3268 functions (92.69%), and 11830/12327 lines (95.97%). It measured 123
+production files, with 55 complete files, 208 file/metric gaps, and no unobserved
 modules. Coverage and Quality gate correctly failed the exact target. The
 retained artifact includes all six source/suite manifests and regenerated
 HTML/JSON reports.
 
-CENTCOM has 158 remaining branch gaps, service has 86, and App has 55.
-All 242 original App functions now execute in the verified aggregate, including
-callbacks V8 had omitted. The [workflow audit](testing-workflows.md) remains unfinished.
+CENTCOM has 130 remaining branch gaps and App has 43. The service reaches
+158/158 functions and 635/635 branches, with five statements still unobserved
+in that aggregate. App reaches 242/242 functions and 268/268 lines, including
+callbacks V8 had omitted; ten statements remain within covered lines. The [workflow audit](testing-workflows.md) remains unfinished.
 
 Image upload (JavaScript and Python), approval bindings, the Electron main
 process, the companion service worker, pairing CLI, and extracted Claude history
@@ -209,3 +210,16 @@ watchdog checks the fixed path and identity boundaries. The unchanged snapshot
 bounding function is extracted into `centcom-snapshot.cjs` for independent
 normal/overflow, urgent/fault ordering, UTF-8, and input-immutability tests. The
 engine still bounds the same evidence before writing its remote workspace.
+
+
+Chat recovery browser cases cover single/multiple/written question answers,
+submitted approvals, rejected action receipts, preserved edits, steering, manual
+status checks without resend, uncertain outcomes, and guarded transcript removal.
+Lifecycle cases reproduce and fix history/take/prune busy flags surviving an
+attachment, late ownership results changing a new read-only view, and old prune
+completions clearing a current request's busy state. Response handling is fenced
+by the existing generation; only view state changes, never worker ownership or
+command replay policy. A content/viewport observer also keeps following after
+deferred transcript layout while manual/history browsing retains its position.
+Before-fix traces/screenshots and the five missed service callback statements
+have additional focused regression cases; final native aggregation is required.

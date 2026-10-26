@@ -224,3 +224,16 @@ omission, UTF-8 byte limits, omission accounting, and immutable inputs.
 operation/automation schema-definition selectors, persisted pause, failed wake
 without stale dispatch, and real bounded engine snapshots. No provider calls or
 worker protocol/journal changes are introduced.
+
+
+`chat-recovery.e2e` drives the production ChatView through a validated ChatApi
+fixture: attachment/take failures, rendered outcomes/tools/usage, single/multiple/
+written answers, submitted approvals, actual receipt polls, manual status checks
+without resend, draft restoration versus newer edits, steering, unknown receipts,
+and transcript-removal confirmation/failure. `chat-lifecycle.e2e` covers cancelled
+open/ready promises, stream buffering, old history/take/prune responses and errors,
+reconnection busy flags, overlapping old/new requests, deferred-layout following,
+manual scroll retention, Latest, and observer disposal on parent unmount. These
+are public API/DOM tests; real service/provider/SSH suites remain separate evidence.
+Five remaining service statements have focused cache-write failure, bootstrap
+cache invalidation on a failed read, and scoped terminal URL routing cases.
