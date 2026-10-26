@@ -34,7 +34,12 @@ home.
 Run `npm run test:coverage:report` to combine retained Python process data and
 Node/Electron/browser V8 data. It does not clear prior collection. Do not combine
 data from different source revisions or instrumentation versions. Use `reset`
-before establishing a new baseline after changing the collector. Raw data,
+before establishing a new baseline after changing the collector. Collection
+pins the Git revision and hashes of application source, test code, workflows,
+dependencies, and collectors. A source or collector edit requires a reset; a
+report cannot silently reuse measurements from the earlier snapshot. Local
+uncommitted snapshots can be measured, but CI artifact export requires a clean
+checkout. Raw data,
 HTML reports, per-file summaries, and the exact remaining file/metric gaps are
 written under the ignored `test-results/coverage/` directory. Existing suite
 reports, process logs, traces, and screenshots remain under `test-results/`.
@@ -62,6 +67,54 @@ only when their bytes match; frozen v1 workers and modified fixtures cannot
 contribute coverage for the current worker. The deployed-v1 compatibility and
 upgrade tests remain required independently of these metrics.
 
+Each compiled JavaScript layout keeps its own V8 offset space and source map.
+Node unit transpilation, Vite development transforms, and built browser bundles
+cannot overwrite one another's maps merely because they share an original
+TypeScript filename. Source counters merge only at identical locations; an
+uncalled child function or branch cannot borrow a containing range's count.
+Only explicit unexecuted-file placeholders yield to measured execution. C8 is
+pinned to 12.0.0 because the adapter uses its raw V8 parser and source mapper;
+real subprocess regressions guard that interface and callback attribution.
+
+## Required cross-platform CI result
+
+Each native/isolated job exports one portable artifact after all of its required
+suite groups pass:
+
+| Shard | Required groups |
+| --- | --- |
+| Windows x64 | core, desktop, updater, windows, packaged |
+| Linux x64 | core, desktop, updater, packaged |
+| macOS Intel | core, desktop, updater, packaged |
+| macOS Apple Silicon | core, desktop, updater, packaged |
+| Isolated Linux SSH | linux-python, linux-web, linux-chat, linux-ui |
+| Separate disposable cleanup account | cleanup |
+
+`node scripts/coverage.cjs export <shard>` writes
+`test-results/coverage/artifact/<shard>.json`. Shard names are
+`desktop-win-x64`, `desktop-linux-x64`, `desktop-mac-x64`,
+`desktop-mac-arm64`, `linux-ssh`, and `linux-cleanup`. An export is partial
+evidence and does not pass the complete coverage target. It retains suite
+durations, skip messages, exact JavaScript counters, and Python branch arcs and
+contexts. The cleanup shard can have no local Python execution; its helper runs
+over SSH, and all Python source remains in the combined denominator.
+
+`node scripts/coverage.cjs aggregate <artifact-directory>` requires exactly one
+artifact from every shard, matching revision/source/collector hashes and the
+complete successful suite inventory for each job. It rejects failed, duplicate,
+missing, cancelled, or malformed suite evidence, wrong native architectures,
+missing branch collection, and skipped deployed-worker upgrade regressions.
+Ordinary duplicate system-SDK skips remain visible alongside the required
+private-runtime results. CRLF/LF checkout differences are normalized for text
+hashes; generated layouts are already mapped to original line/column counters.
+
+The `Complete production coverage` job combines counts, regenerates JSON/HTML
+reports, and applies the same exact per-file 100% requirement. Its success is a
+required dependency of `Quality gate`; release publication still depends on
+that gate. All artifacts, provenance, suite logs, screenshots, and traces retain
+the existing 14-day lifetime. Packaging rebuilds the optimized production
+renderer, so coverage builds are not published as release packages.
+
 The report compares integer covered/total counts for every metric in every
 file. Rounded percentages, missing reports, missing production files, disabled
 Python branch measurement, and absent Python function measurements cannot pass.
@@ -72,7 +125,8 @@ for skips and platform limitations.
 
 ## Current status
 
-The 100% target is not yet met. Coverage collection and boundary regression
-tests are being added; the workflow audit, cross-platform aggregation, required
-coverage CI enforcement, and remaining production coverage gaps are unfinished.
+The 100% target is not yet met. The workflow audit and remaining production
+coverage gaps are unfinished. Cross-platform artifact aggregation and required
+coverage enforcement have regression tests; consult the actual CI checks for
+native collection and aggregation results on the current revision.
 Do not merge the coverage work as satisfying the target until those checks pass.

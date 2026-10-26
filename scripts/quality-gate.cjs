@@ -1,5 +1,5 @@
 function check(needs) {
-  const required = ['desktop', 'linux-ssh', 'linux-cleanup'];
+  const required = ['desktop', 'linux-ssh', 'linux-cleanup', 'coverage'];
   for (const name of required) {
     if (needs[name]?.result !== 'success') throw Error(`${name}: ${needs[name]?.result || 'missing'} (success required)`);
   }

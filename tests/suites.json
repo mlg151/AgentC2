@@ -1,6 +1,26 @@
 {
   "suites": [
     {
+      "id": "coverage-aggregate-cli",
+      "file": "tests/coverage-aggregate-cli.cjs",
+      "group": "core"
+    },
+    {
+      "id": "coverage-compilations",
+      "file": "tests/coverage-compilations.cjs",
+      "group": "core"
+    },
+    {
+      "id": "coverage-artifacts",
+      "file": "tests/coverage-artifacts.cjs",
+      "group": "core"
+    },
+    {
+      "id": "coverage-artifacts-python",
+      "file": "tests/coverage-artifacts.py",
+      "group": "linux-python"
+    },
+    {
       "id": "session-cleanup-boundaries-python",
       "file": "tests/session-cleanup-boundaries.py",
       "group": "linux-python"
