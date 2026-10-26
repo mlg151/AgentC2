@@ -73,6 +73,7 @@ assert.ok(contract.capabilities.every((name) => unverified[name] === false));
 add('event', event('request.resolved', { requestId: 'without-decision', state: 'expired', decision: null }), true);
 const unsupported = unavailableCapabilities('antigravity', '1.4.4', 'Adapter verification pending');
 add('capabilities', unsupported, true);
+add('capabilities', { ...unsupported, reason: null }, true);
 add('capabilities', { ...unsupported, attachments: true }, false);
 add('capabilities', { ...unsupported, status: 'supported', streaming: true }, true);
 add('capabilities', { ...unsupported, history: 'yes' }, false);

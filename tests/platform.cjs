@@ -11,6 +11,7 @@ const { packagePath } = require('../scripts/package-path.cjs');
   assert.equal(sshBinary('win32', {}), 'C:\\Windows\\System32\\OpenSSH\\ssh.exe');
   assert.equal(sshBinary('darwin', { PATH: '/nothing' }), '/usr/bin/ssh');
   assert.equal(sshBinary('linux'), 'ssh');
+  assert.equal(sshBinary(), sshBinary(process.platform, process.env));
   assert.equal(appDataDirectory('linux', {}, '/home/qa'), path.join('/home/qa', '.config'));
   assert.equal(appDataDirectory('linux', { XDG_CONFIG_HOME: '/config' }, '/home/qa'), '/config');
   assert.equal(appDataDirectory('darwin', {}, '/Users/qa'), path.join('/Users/qa', 'Library', 'Application Support'));

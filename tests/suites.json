@@ -1,6 +1,11 @@
 {
   "suites": [
     {
+      "id": "navigation-boundaries.e2e",
+      "file": "tests/navigation-boundaries.e2e.cjs",
+      "group": "linux-web"
+    },
+    {
       "id": "peer-settings-recovery.e2e",
       "file": "tests/peer-settings-recovery.e2e.cjs",
       "group": "linux-web"

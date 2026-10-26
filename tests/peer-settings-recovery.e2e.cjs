@@ -70,6 +70,9 @@ async function mount() { loading = null; await page.evaluate(() => window.qaMoun
     saving.resolve(status({ ...saving.input, deviceName: 'Trim this saved name' })); await settled('savePeerSync');
     assert.equal(await name.inputValue(), 'Trim this saved name', 'Acknowledgement must normalize fields not edited during the save');
     assert.equal(await port.inputValue(), '43220');
+    await mount(); loading.reject(Error('Current desktop-sync status unavailable')); await settled('peerSyncStatus');
+    await page.getByRole('alert').filter({ hasText: 'Current desktop-sync status unavailable' }).waitFor();
+    await name.fill('Recoverable initial draft'); assert.equal(await name.inputValue(), 'Recoverable initial draft');
     // Ordinary untouched initialization and explicit save still read back the
     // server's normalized configuration.
     await mount(); loading.resolve(status({ deviceName: 'Loaded peer' })); await settled('peerSyncStatus');
