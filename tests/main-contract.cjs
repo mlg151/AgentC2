@@ -127,7 +127,7 @@ async function platformStartup() {
   const broken = await mainFixture({ startupFailure: true, missingBuild: true }); assert.throws(() => broken.invoke('state:get'), /Could not open saved configuration.*Invalid saved settings/); assert.equal(broken.timers.length, 0); broken.app.emit('before-quit');
   const resumed = await mainFixture({ resumeUpdate: true, allowResume: true }); assert.equal(resumed.windows.length, 0); resumed.app.emit('before-quit');
   for (const [env, existing, directory] of [[{ AGENTC2_DATA_DIR: '/explicit' }, [], '/explicit'], [{ AGENT_HQ_DATA_DIR: '/legacy-env' }, [], '/legacy-env'], [{}, ['/fixture/userData/workspace.json'], '/fixture/userData'], [{}, ['/fixture/appData/agent-hq/workspace.json'], '/fixture/appData/agent-hq']]) {
-    const f = await mainFixture({ env, existing }); assert.equal(f.serviceOptions.directory, directory); f.app.emit('before-quit');
+    const f = await mainFixture({ env, existing }); assert.equal(require('node:path').normalize(f.serviceOptions.directory), require('node:path').normalize(directory)); f.app.emit('before-quit');
   }
 }
 

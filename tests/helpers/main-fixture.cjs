@@ -1,4 +1,5 @@
 const { EventEmitter } = require('node:events');
+const path = require('node:path');
 const { loadCommonJs } = require('./load-commonjs.cjs');
 
 async function mainFixture(options = {}) {
@@ -92,7 +93,7 @@ async function mainFixture(options = {}) {
   let createOptions;
   loadCommonJs('electron/main.cjs', {
     electron: { app, BrowserWindow: Window, clipboard, ipcMain: { handle: (name, handler) => state.handlers.set(name, handler) }, Menu, Notification: FixtureNotification, Tray: FixtureTray, nativeImage, powerMonitor, shell },
-    'node:fs': { existsSync: (file) => (options.existing || []).includes(file), readFileSync: () => { if (options.missingBuild) throw Error('No build metadata'); return '{"revision":"fixture-revision"}'; } },
+    'node:fs': { existsSync: (file) => (options.existing || []).some((candidate) => path.normalize(candidate) === path.normalize(file)), readFileSync: () => { if (options.missingBuild) throw Error('No build metadata'); return '{"revision":"fixture-revision"}'; } },
     './service.cjs': { createService: (input) => { state.serviceOptions = input; if (options.startupFailure) throw Error('Invalid saved settings'); return service; } },
     './platform.cjs': { closeAction: () => state.closeAction || 'close', tailscaleStatus: () => ({ installed: true }) },
     './updates.cjs': { createMainCheck: (revision) => ({ revision }), createUpdates: (input) => { createOptions = input; return updates; } },
