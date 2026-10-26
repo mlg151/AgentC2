@@ -736,6 +736,11 @@
       "id": "centcom-target-boundaries",
       "file": "tests/centcom-target-boundaries.cjs",
       "group": "core"
+    },
+    {
+      "id": "chat-worker-boundaries-python",
+      "file": "tests/chat-worker-boundaries.py",
+      "group": "linux-python"
     }
   ],
   "nested": {
