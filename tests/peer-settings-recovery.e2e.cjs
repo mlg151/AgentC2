@@ -80,6 +80,13 @@ async function mount() { loading = null; await page.evaluate(() => window.qaMoun
     await name.fill('  Normalized peer  '); saving = null; await apply.click(); await until(() => saving, 'Normalized save missing');
     saving.resolve(status({ ...saving.input, deviceName: 'Normalized peer' })); await settled('savePeerSync');
     assert.equal(await name.inputValue(), 'Normalized peer');
+    for (const reject of [false, true]) {
+      await mount(); const late = loading;
+      await page.evaluate(() => window.qaUnmount()); await page.getByText('Dialog unmounted', { exact: true }).waitFor();
+      if (reject) late.reject(Error('Unmounted desktop-sync status failed')); else late.resolve(status());
+      await settled('peerSyncStatus');
+      assert.equal(await page.getByRole('alert').count(), 0); assert.equal(await page.getByText('Dialog unmounted', { exact: true }).count(), 1);
+    }
     await page.evaluate(() => window.qaUnmount()); await page.getByText('Dialog unmounted', { exact: true }).waitFor();
     assert.deepEqual(errors, []);
     console.log('PASS desktop-sync edited initialization/save drafts, exact submitted config, newer status/error ordering, normalized readback and disposal');

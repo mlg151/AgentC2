@@ -2,6 +2,8 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { HistorySearch } from '../../src/components/HistorySearch';
 import { SettingsDialog } from '../../src/components/SettingsDialog';
+import { ProviderMark } from '../../src/components/ProviderMark';
+import { DeleteSessionDialog } from '../../src/components/DeleteSessionDialog';
 import { Modal } from '../../src/components/Modal';
 import { KeyboardHelp } from '../../src/components/KeyboardHelp';
 import { ChatModelSelector } from '../../src/components/ChatModelSelector';
@@ -31,8 +33,9 @@ function FocusFixture({ onClose, empty = false, restoreFocus, wide = false, disa
   return <Modal title="Focus fixture" onClose={onClose} restoreFocus={restoreFocus} wide={wide}>{empty ? <p>No dialog controls</p> : <><input type="hidden" /><button disabled={disabledFirst}>First dialog action</button><input aria-label="Disabled fixture field" disabled /><button>Last dialog action</button><p>Inside dialog content</p></>}</Modal>;
 }
 function KeyboardFixture(props) { return <KeyboardHelp {...props} onSave={(value) => window.invokeBridge('saveShortcuts', value)} />; }
+function DeleteFixture(props) { return <DeleteSessionDialog {...props} onDeleted={() => { window.invokeBridge('deleted'); window.qaUnmount(); }} />; }
 function ModelFixture(props) { return <ChatModelSelector {...props} onChange={(value) => window.invokeBridge('modelChange', value)} />; }
-const components = { history: HistorySearch, settings: SettingsDialog, centcom: CentcomDialog, peers: PeerSyncSettings, modal: FocusFixture, keyboard: KeyboardFixture, model: ModelFixture };
+const components = { history: HistorySearch, settings: SettingsDialog, centcom: CentcomDialog, peers: PeerSyncSettings, modal: FocusFixture, keyboard: KeyboardFixture, model: ModelFixture, provider: ProviderMark, delete: DeleteFixture };
 window.qaMount = (name, props = {}) => {
   const close = () => { window.invokeBridge('closed'); root.render(<p>Dialog closed</p>); };
   const Component = components[name];
