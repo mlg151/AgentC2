@@ -1,6 +1,11 @@
 {
   "suites": [
     {
+      "id": "antigravity-cleanup-boundaries-python",
+      "file": "tests/antigravity-cleanup-boundaries.py",
+      "group": "linux-python"
+    },
+    {
       "id": "component-ui.e2e",
       "file": "tests/component-ui.e2e.cjs",
       "group": "linux-web"
