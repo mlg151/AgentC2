@@ -92,17 +92,16 @@ function pythonSummary(report, lambdas = null) {
   }));
 }
 
-function javascriptReport(requireComplete = false) {
+function javascriptReport() {
   const source = require('./source-coverage.cjs');
   const coverage = source.report(path.join(directory, 'source'));
-  if (requireComplete) source.requireObserved(coverage);
   require('./coverage-artifacts.cjs').writeJavascriptReports(coverage, root, path.join(directory, 'javascript'));
   return coverage;
 }
 
 function report() {
   require('./coverage-artifacts.cjs').verifyCollection(root, directory);
-  javascriptReport(true);
+  const javascript = javascriptReport();
   const python = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
   const reportData = path.join(directory, 'python-report/.coverage');
   fs.mkdirSync(path.dirname(reportData), { recursive: true });
@@ -121,10 +120,10 @@ function report() {
   if (!run(python, ['-m', 'coverage', 'html', '--rcfile', reportConfig], { env })) return false;
   const lambdaFile = path.join(directory, 'python/lambdas.json');
   if (!run(python, ['scripts/normalize-coverage.py', '--functions', reportData, path.join(root, 'electron'), lambdaFile], { env })) return false;
-  return summarize(pythonFile, lambdaFile);
+  return summarize(pythonFile, lambdaFile, javascript.files().filter((file) => javascript.fileCoverageFor(file).data.all === true));
 }
 
-function summarize(pythonFile, lambdaFile) {
+function summarize(pythonFile, lambdaFile, unobserved = []) {
   const javascript = JSON.parse(fs.readFileSync(path.join(directory, 'javascript/coverage-summary.json'), 'utf8'));
   const pythonData = pythonSummary(JSON.parse(fs.readFileSync(pythonFile, 'utf8')), JSON.parse(fs.readFileSync(lambdaFile, 'utf8')));
   const summary = { ...Object.fromEntries(Object.entries(javascript).filter(([file]) => file !== 'total').map(([file, value]) => [path.relative(root, file).replaceAll('\\', '/'), value])), ...pythonData };
@@ -137,11 +136,12 @@ function summarize(pythonFile, lambdaFile) {
     const covered = Object.values(summary).reduce((sum, values) => sum + values[metric].covered, 0);
     return [metric, { covered, total, percent: total ? covered / total * 100 : 100 }];
   }));
-  fs.writeFileSync(path.join(directory, 'summary.json'), JSON.stringify({ target: 100, totals, files: summary, gaps }, null, 2) + '\n');
+  fs.writeFileSync(path.join(directory, 'summary.json'), JSON.stringify({ target: 100, totals, files: summary, gaps, unobserved }, null, 2) + '\n');
   for (const [metric, value] of Object.entries(totals)) console.log(`${metric}: ${value.percent.toFixed(2)}% (${value.covered}/${value.total})`);
   console.log(`${gaps.length} production file/metric gaps remain; target: 100% statements, branches, functions, and lines in every file.`);
   for (const gap of gaps.slice(0, 20)) console.log(`${gap.file}: ${gap.metric} ${gap.covered}/${gap.total} (${gap.missing} missing)`);
-  return gaps.length === 0;
+  if (unobserved.length) console.log(`Executable production source was never loaded: ${unobserved.join(', ')}`);
+  return gaps.length === 0 && unobserved.length === 0;
 }
 
 function pythonReportEnvironment(dataFile) {
@@ -178,7 +178,6 @@ function aggregate(input) {
   const files = fs.readdirSync(input, { recursive: true }).filter((file) => file.endsWith('.json')).map((file) => path.resolve(input, file)).sort();
   const artifacts = files.map((file) => JSON.parse(fs.readFileSync(file, 'utf8')));
   const coverage = artifactTools.mergeArtifacts(artifacts, expected, require('../tests/suites.json'), require('./source-coverage.cjs').manifest(root));
-  require('./source-coverage.cjs').requireObserved(coverage);
   fs.mkdirSync(directory, { recursive: true });
   artifactTools.writeJavascriptReports(coverage, root, path.join(directory, 'javascript'));
   const manifest = path.join(directory, 'artifact-inputs.json');
@@ -196,7 +195,7 @@ function aggregate(input) {
     ['scripts/normalize-coverage.py', '--functions', dataFile, path.join(root, 'electron'), lambdaFile],
   ]) if (!run(python, args, { env })) throw Error('Combined Python coverage reporting failed');
   fs.writeFileSync(path.join(directory, 'provenance.json'), JSON.stringify({ metadata: expected, shards: artifacts.map(({ label, platform, arch, suites }) => ({ label, platform, arch, suites })) }, null, 2) + '\n');
-  return summarize(pythonFile, lambdaFile);
+  return summarize(pythonFile, lambdaFile, coverage.files().filter((file) => coverage.fileCoverageFor(file).data.all === true));
 }
 
 async function main() {

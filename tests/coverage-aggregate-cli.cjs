@@ -13,6 +13,7 @@ try {
   fs.symlinkSync(path.join(root, 'node_modules'), path.join(directory, 'node_modules'), 'junction');
   fs.writeFileSync(path.join(directory, '.gitignore'), 'node_modules\ntest-results/\ninputs/\n');
   fs.writeFileSync(path.join(directory, 'electron/fixture.cjs'), 'function fixture() { return 1; }\nmodule.exports = fixture;\n');
+  fs.writeFileSync(path.join(directory, 'electron/empty.cjs'), '"use strict";\n');
   fs.writeFileSync(path.join(directory, 'electron/fixture.py'), 'fixture = 1\n');
   fs.writeFileSync(path.join(directory, 'src/types.ts'), 'export interface Fixture { value: string }\n');
   fs.writeFileSync(path.join(directory, '.coveragerc'), '[run]\nbranch = True\ncore = ctrace\nsource = electron\nrelative_files = True\n[json]\npretty_print = True\n[html]\ndirectory = test-results/coverage/python/html\n');
@@ -26,10 +27,11 @@ try {
   assert.equal(stamp.dirty, false);
   const file = 'electron/fixture.cjs';
   const source = require('../scripts/source-coverage.cjs');
-  const fixture = source.manifest(directory)[file];
+  const measured = source.manifest(directory);
+  const fixture = measured[file], empty = 'electron/empty.cjs';
   const artifacts = Object.entries(SHARDS).map(([label, policy], index) => ({ version: 2, javascriptMeasurement: { format: source.format, instrumenter: source.version }, label, platform: policy.platform, arch: policy.arch, metadata: stamp,
     suites: Object.fromEntries(policy.groups.map((group) => [group, suites.filter((suite) => suite.group === group).map(({ id }) => ({ id, status: 'success', code: 0, signal: null, durationSeconds: 0.1, skips: [] }))])),
-    javascript: { [file]: { ...fixture, all: false, s: Object.fromEntries(Object.keys(fixture.s).map((id) => [id, index === 0 ? 1 : 0])), f: Object.fromEntries(Object.keys(fixture.f).map((id) => [id, index === 0 ? 1 : 0])) } },
+    javascript: { [empty]: { ...measured[empty], all: index !== 0 }, [file]: { ...fixture, all: false, s: Object.fromEntries(Object.keys(fixture.s).map((id) => [id, index === 0 ? 1 : 0])), f: Object.fromEntries(Object.keys(fixture.f).map((id) => [id, index === 0 ? 1 : 0])) } },
     python: { version: '7.16.0', branchCoverage: true, processReports: label === 'linux-cleanup' ? 0 : 1, files: label === 'linux-ssh' ? { 'electron/fixture.py': { fixture: [[-1, 1], [1, -1]] } } : {} },
   }));
   const write = () => { for (const artifact of artifacts) fs.writeFileSync(path.join(directory, 'inputs', artifact.label + '.json'), JSON.stringify(artifact)); };
@@ -44,7 +46,8 @@ try {
   const pass = run();
   assert.equal(pass.status, 0, pass.stdout + pass.stderr);
   let report = JSON.parse(fs.readFileSync(path.join(directory, 'test-results/coverage/summary.json'), 'utf8'));
-  assert.deepEqual(report.gaps, []); assert.equal(Object.keys(report.files).length, 2);
+  assert.deepEqual(report.gaps, []); assert.equal(Object.keys(report.files).length, 3);
+  assert.deepEqual(report.unobserved, []);
   assert.ok(fs.existsSync(path.join(directory, 'test-results/coverage/javascript/index.html')));
   assert.ok(fs.existsSync(path.join(directory, 'test-results/coverage/python/html/index.html')));
   const provenance = JSON.parse(fs.readFileSync(path.join(directory, 'test-results/coverage/provenance.json'), 'utf8'));
@@ -55,6 +58,16 @@ try {
   assert.equal(fail.status, 1, fail.stdout + fail.stderr);
   report = JSON.parse(fs.readFileSync(path.join(directory, 'test-results/coverage/summary.json'), 'utf8'));
   assert.deepEqual(report.gaps, [{ file, metric: 'functions', covered: 0, total: 1, missing: 1 }]);
+  for (const artifact of artifacts) artifact.javascript[empty].all = true;
+  artifacts[0].javascript[file].f[0] = 1;
+  write();
+  const unloaded = run(); assert.equal(unloaded.status, 1, unloaded.stdout + unloaded.stderr);
+  report = JSON.parse(fs.readFileSync(path.join(directory, 'test-results/coverage/summary.json'), 'utf8'));
+  assert.deepEqual(report.gaps, []);
+  assert.deepEqual(report.unobserved, [empty], 'Even a zero-counter executable module must be observed at runtime');
+  assert.match(unloaded.stdout, /Executable production source was never loaded/);
+  assert.ok(fs.existsSync(path.join(directory, 'test-results/coverage/javascript/coverage-final.json')));
+  assert.ok(fs.existsSync(path.join(directory, 'test-results/coverage/python/coverage.json')));
   fs.unlinkSync(path.join(directory, 'inputs', 'linux-ssh.json'));
   const missing = run(); assert.equal(missing.status, 1); assert.match(missing.stderr, /all six/);
   if (inheritedDirectory && fs.existsSync(inheritedDirectory)) {
@@ -68,4 +81,4 @@ try {
     assert.equal(probe.status, 0, probe.stdout + probe.stderr);
   }
 } finally { fs.rmSync(directory, { recursive: true, force: true }); }
-console.log('PASS disposable verifier CLI: all six shards, JS/Python reports, exact success, an uncalled function failing the gate, and missing native evidence rejected');
+console.log('PASS disposable verifier CLI: all six shards, JS/Python reports, exact success, uncalled functions and unobserved zero-counter modules failing with retained reports, and missing native evidence rejected');

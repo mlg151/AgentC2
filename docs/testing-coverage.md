@@ -142,7 +142,9 @@ renderer, so coverage builds are not published as release packages.
 The report compares integer covered/total counts for every metric in every
 file. Rounded percentages, missing reports, missing production files, disabled
 Python branch measurement, and absent Python function measurements cannot pass.
-An unexecuted file remains a coverage gap. A successful report is evidence for
+An unexecuted file remains a coverage gap. Reports retain both languages and
+list never-loaded JavaScript modules in `summary.json` under `unobserved`; even
+a zero-counter module prevents success until runtime evidence exists. A successful report is evidence for
 the measured code dimensions; workflow completeness requires the separate
 [workflow-to-test audit](testing-workflows.md) and actual suite results, including explicit accounting
 for skips and platform limitations.
