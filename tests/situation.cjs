@@ -72,6 +72,8 @@ assert.equal(invalidAnchor.situation.anchorKey, null); assert.equal(invalidAncho
 const invalidTarget = updateSituation(workspace, { targetKey: 'default/tmux:missing', focusedPane: 'target' });
 assert.equal(invalidTarget.situation.targetKey, null); assert.equal(invalidTarget.situation.focusedPane, 'anchor');
 assert.equal(unitState({ key: a, activity: 'halted', state: 'live' }, []).code, 'HALT');
+assert.equal(unitState({ key: a, activity: 'engaged', state: 'live' }, []).code, 'ENG', 'Confirmed execution must be distinguishable from unreported process liveness');
+assert.equal(unitState({ key: a, activity: 'engaged', state: 'live', exitCode: 1 }, []).code, 'FAULT', 'An execution hint must not hide a confirmed exit failure');
 assert.throws(() => normalizeBinding('Ctrl+'), /Choose a modified key/);
 assert.ok(bindingMatches({ code: 'Slash', key: '?', ctrlKey: true, altKey: false, shiftKey: true, metaKey: false, isComposing: false }, 'Ctrl+Shift+?', false));
 console.log('PASS Situation Room migration, independent panes, immutable navigation, stable scoped callsigns/overflow, truthful states, and cross-platform shortcut validation');

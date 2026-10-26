@@ -5,6 +5,7 @@ const path = require('node:path');
 const { Store, defaults, validateSettings, validateWorkspace } = require('../electron/config.cjs');
 
 assert.deepEqual(validateWorkspace({ tabs: [], metadata: {}, situation: { collapsedGroups: ['host:alpha', 'host:alpha', 'repo:fixture'] } }).situation.collapsedGroups, ['host:alpha', 'repo:fixture']);
+assert.equal(validateWorkspace({ tabs: [], metadata: {}, situation: { groupBy: 'repository' } }).situation.groupBy, 'repository', 'Repository grouping must survive normalization and save');
 const base = () => ({ ...defaults(), hosts: [{ id: 'host', name: 'Fixture', target: 'fixture', port: 22, enabled: true }] });
 const order = () => ({ version: 1, id: 'order', hostId: 'host', repository: '/repository', enabled: false, instructions: '', overrides: {}, mcp: [] });
 const server = () => ({ name: 'fixture', transport: 'stdio', command: 'fixture', providers: ['codex'] });

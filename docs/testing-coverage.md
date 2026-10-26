@@ -151,18 +151,19 @@ for skips and platform limitations.
 
 ## Current status
 
-The 100% target is not yet met. The [six-shard original-source run for 06ff33a](https://github.com/mlg151/AgentC2/actions/runs/40282582265)
+The 100% target is not yet met. The [six-shard original-source run for c0b3f3b](https://github.com/mlg151/AgentC2/actions/runs/40293449397)
 passed all four native package jobs and both isolated Linux jobs. Its verified
-aggregate measured 15303/16480 statements (92.86%), 11438/12924 branches (88.50%),
-3029/3268 functions (92.69%), and 11830/12327 lines (95.97%). It measured 123
-production files, with 55 complete files, 208 file/metric gaps, and no unobserved
+aggregate measured 15408/16523 statements (93.25%), 11548/12940 branches (89.24%),
+3057/3276 functions (93.32%), and 11873/12356 lines (96.09%). It measured 123
+production files, with 60 complete files, 199 file/metric gaps, and no unobserved
 modules. Coverage and Quality gate correctly failed the exact target. The
 retained artifact includes all six source/suite manifests and regenerated
 HTML/JSON reports.
 
-CENTCOM has 130 remaining branch gaps and App has 43. The service reaches
-158/158 functions and 635/635 branches, with five statements still unobserved
-in that aggregate. App reaches 242/242 functions and 268/268 lines, including
+CENTCOM has 114 remaining branch gaps and App has 43. The service reaches
+750/750 statements, 635/635 branches, 158/158 functions, and 521/521 lines
+in that aggregate. Loop-breaker, platform helpers, the JavaScript protocol
+validator, and command binding helpers also reach all four thresholds. App reaches 242/242 functions and 268/268 lines, including
 callbacks V8 had omitted; ten statements remain within covered lines. The [workflow audit](testing-workflows.md) remains unfinished.
 
 Image upload (JavaScript and Python), approval bindings, the Electron main
@@ -195,12 +196,12 @@ with the fixed original-source counts. Do not merge as satisfying the target
 until every final-revision metric and workflow requirement passes.
 
 
-The next focused service collection covers handoff/fault/lifecycle and event
-recovery; all 70 core suites pass at b096c2d. The post-save OpOrder loop uses its
+Required service suites cover handoff/fault/lifecycle and event recovery;
+all 74 core suites pass in the c0b3f3b native jobs. The post-save OpOrder loop uses its
 validated array rather than a redundant missing-field fallback. The additional
 browser recovery suite passes with source instrumentation for cross-host late
-inventory, deletion, callsign capacity and overlapping poll suppression. These
-follow-ups require fresh final-revision native evidence.
+inventory, deletion, callsign capacity and overlapping poll suppression. Further
+changes still require fresh final-revision native evidence.
 
 A bounded-metadata test reproduced quadratic regex scanning in fleet identity
 redaction on a million-character plain word. The identity matcher now begins at
@@ -223,3 +224,26 @@ command replay policy. A content/viewport observer also keeps following after
 deferred transcript layout while manual/history browsing retains its position.
 Before-fix traces/screenshots and the five missed service callback statements
 have additional focused regression cases; final native aggregation is required.
+
+
+After that baseline, 74 core, 15 browser, and three native desktop suites pass
+with original-source collection at fc85d49. Expanded renderer cases pass all
+15 browser suites at 24f93c9, reaching all four metrics for Modal (35
+statements/29 branches/6 functions/17 lines), KeyboardHelp (12/8/6/3),
+ChatModelSelector (15/19/6/10), PeerSyncSettings (73/39/31/40), ProviderMark
+(2/3/1/2), and DeleteSessionDialog (16/10/4/9). These are focused results;
+the final six-shard aggregate remains required.
+
+The c0b3f3b native macOS Intel run confirms the desktop-sync draft race repair.
+A delayed initial load or save acknowledgement preserves individually edited
+fields while loading/normalizing untouched fields. Later live status supersedes
+older initial replies and errors. Busy deletion also provides a real modal case
+with no enabled controls; the shared dialog now retains focus and supports
+Tab/Shift+Tab from its container and from outside the dialog.
+
+All 32 Linux/Python suites pass at 05169cb, including unchanged deployed-v1
+upgrades and nine new worker boundaries. The native Codex deletion opt-in is
+reported as skipped in that local group; required private native evidence and
+platform limitations remain distinct. A later added worker case rejects
+missing-newline and oversized frames before mutation. The tests leave provider
+processes, SDK setup, active sessions, journals, and upgrade behavior unchanged.
