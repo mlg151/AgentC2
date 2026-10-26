@@ -93,7 +93,12 @@ contribute current-source coverage. Image upload still transfers an ephemeral
 Python command: its compile filename contains a SHA-256 computed from the
 actual decoded source bytes, and only a matching current-source digest is
 attributed to `electron/image-upload.py`. The required deployed-v1 compatibility
-and upgrade regressions are unchanged.
+and upgrade fixtures are unchanged. The Claude history reader and detached
+launcher are separate Python files in the content-addressed worker bundle. New
+bundles use those files; a deployed worker continues from its own existing
+bundle until the established retirement checks permit handoff. No protocol,
+journal, pending-command, or session migration is introduced, and uncertain
+commands are never replayed to upgrade a worker.
 
 ## Required cross-platform CI result
 

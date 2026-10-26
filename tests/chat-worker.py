@@ -338,7 +338,7 @@ class BootstrapTests(unittest.TestCase):
                 launches = []
                 original_run = subprocess.run
                 def counted_run(args, **kwargs):
-                    if len(args) > 2 and args[1] == "-c" and "subprocess.Popen" in args[2]:
+                    if len(args) > 1 and Path(args[1]).name == "chat_launcher.py":
                         launches.append(args)
                         time.sleep(0.1)  # Let competing helpers reach bootstrap.
                     return original_run(args, **kwargs)
@@ -348,6 +348,8 @@ class BootstrapTests(unittest.TestCase):
                         results = list(pool.map(lambda _: chat_remote(payload, root), range(4)))
                 health = results[0]
                 self.assertEqual(len(launches), 1, "Concurrent helpers must not leave delayed duplicate launchers")
+                self.assertEqual(Path(launches[0][1]), root / health["sourceDigest"] / "chat_launcher.py")
+                self.assertEqual(Path(launches[0][3]), root / health["sourceDigest"] / "chat_worker.py")
                 self.assertEqual(len({result["pid"] for result in results}), 1)
                 self.assertEqual(len({result["bootId"] for result in results}), 1)
                 self.assertEqual(chat_remote(payload, root), health)

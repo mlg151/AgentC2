@@ -132,7 +132,9 @@ committed hard link. Approval capture's two unused private defaults are removed;
 both callers already always pass normalized arrays. These focused results do
 not replace the final native aggregate or workflow audit.
 
-The inventory review still needs to expose the inline Claude history reader
-and detached worker launcher as independently measurable Python source. That
-change must retain deployed worker ownership and pass the frozen-v1 upgrade
-regressions before merge.
+The inline Claude history reader and detached worker launcher are now separate
+Python sources in the content-addressed worker bundle. Helper tests verify
+missing/empty/populated native history, SDK failure propagation, exact detached
+process flags, and a real detached child. Frozen-v1 upgrade fixtures remain
+unchanged; all six compatibility, ownership, pending-command, SDK-preparation,
+and unknown-receipt regressions must pass before merge.

@@ -1,6 +1,11 @@
 {
   "suites": [
     {
+      "id": "chat-helper-sources-python",
+      "file": "tests/chat-helper-sources.py",
+      "group": "linux-python"
+    },
+    {
       "id": "image-upload-boundaries",
       "file": "tests/image-upload-boundaries.cjs",
       "group": "core"

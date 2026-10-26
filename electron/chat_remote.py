@@ -1,6 +1,6 @@
 """Ephemeral helper entrypoint for the detached worker's private Unix socket."""
 
-CHAT_WORKER_FILES = ("chat_worker.py", "chat_runtime.py", "chat_protocol.py", "chat_journal.py", "chat_adapters.py", "chat-protocol.json", "chat_format.py", "chat_codex.py", "chat_codex_schema.py", "chat-codex-schema.json", "chat_antigravity.py", "chat_antigravity_cli.py", "chat_claude.py", "chat_opencode.py")
+CHAT_WORKER_FILES = ("chat_worker.py", "chat_runtime.py", "chat_protocol.py", "chat_journal.py", "chat_adapters.py", "chat-protocol.json", "chat_format.py", "chat_codex.py", "chat_codex_schema.py", "chat-codex-schema.json", "chat_antigravity.py", "chat_antigravity_cli.py", "chat_claude.py", "chat_claude_history.py", "chat_launcher.py", "chat_opencode.py")
 
 
 def chat_remote(payload, directory=None):
@@ -140,9 +140,8 @@ def chat_remote(payload, directory=None):
                 os.fchmod(log, 0o600)
                 # Reap a short-lived launcher while the detached worker outlives the
                 # ephemeral helper, without leaving a live Popen object behind.
-                launcher = "import os,subprocess,sys; subprocess.Popen(sys.argv[1:],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=None,start_new_session=True,close_fds=True); os._exit(0)"
                 runtime = subprocess.run([sys.executable, str(code / "chat_runtime.py"), str(root)], capture_output=True, text=True, timeout=30, check=True).stdout.strip()
-                subprocess.run([sys.executable, "-c", launcher, runtime, str(code / "chat_worker.py"), "--directory", str(root), "--source-digest", digest], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log, close_fds=True, check=True)
+                subprocess.run([sys.executable, str(code / "chat_launcher.py"), runtime, str(code / "chat_worker.py"), "--directory", str(root), "--source-digest", digest], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log, close_fds=True, check=True)
             finally:
                 os.close(log)
             for _ in range(100):
