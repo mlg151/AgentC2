@@ -1,6 +1,21 @@
 {
   "suites": [
     {
+      "id": "main-contract",
+      "file": "tests/main-contract.cjs",
+      "group": "core"
+    },
+    {
+      "id": "config-boundaries",
+      "file": "tests/config-boundaries.cjs",
+      "group": "core"
+    },
+    {
+      "id": "remote-boundaries-python",
+      "file": "tests/remote-boundaries.py",
+      "group": "linux-python"
+    },
+    {
       "id": "chat-runtime-unit-python",
       "file": "tests/chat-runtime-unit.py",
       "group": "linux-python"
