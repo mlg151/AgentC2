@@ -721,6 +721,11 @@
       "id": "peer-sync-ui",
       "file": "tests/peer-sync.e2e.cjs",
       "group": "desktop"
+    },
+    {
+      "id": "centcom-target-boundaries",
+      "file": "tests/centcom-target-boundaries.cjs",
+      "group": "core"
     }
   ],
   "nested": {
