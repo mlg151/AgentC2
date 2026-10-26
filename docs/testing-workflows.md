@@ -1,0 +1,76 @@
+# Documented workflow audit
+
+This is the behavior audit for the five requested test layers. It complements
+[production coverage](testing-coverage.md); neither a list of tests nor a line
+coverage percentage proves that every workflow is tested. The audit is open.
+
+A contract check verifies a boundary's accepted inputs, outputs, errors, and
+compatibility. A unit check isolates a production decision. Integration checks
+execute collaborating production modules and their real local dependencies.
+Functional checks assert an observable user outcome. An end-to-end check follows
+the user action through the actual application, bridge, transport, execution
+host, and readback where applicable. One suite can contain checks at multiple
+layers, but a mocked renderer bridge alone is not an end-to-end check.
+Provider protocol fixtures supply deterministic responses without credentials
+or paid calls. Their results do not establish live provider/account or physical
+network behavior. Every gap remains open until the corresponding assertion and
+required suite result have been reviewed.
+
+## Worktree lifecycle evidence reviewed
+
+| Documented behavior | Contract and unit evidence | Integration evidence | Functional/end-to-end evidence | Remaining audit |
+| --- | --- | --- | --- | --- |
+| New isolated task resolves one base and leaves the primary checkout intact | `worktrees.py::test_parallel_isolation_and_idempotent_retry`; `worktree-boundaries.py::test_invalid_identity_and_admission_fields` | Disposable real Git branches, separate indexes, ownership records and parallel retry in `worktrees.py` | `workspace.e2e.cjs` creates the unit through Electron/SSH/tmux and checks branch/path association | Review the renderer's invalid-input and launch-failure paths at each applicable layer |
+| Retry never dispatches a second live agent | `worktree-boundaries.py::test_live_retry_checks_tmux_identity_without_dispatching`; `test_chat_retry_binds_model_and_transport` | Real recorded ready/launch state with controlled tmux identity; `worktrees.py::test_reviewed_recovery_is_revision_bound_and_serialized` serializes concurrent retries | `chat-launch.e2e.cjs` and `centcom-adapters.e2e.cjs` exercise actual transport-backed creation/observation | Review desktop retry-picker interaction, expired reviews, and both transport variants |
+| Ownership/branch/path changes refuse mutation | `worktree-boundaries.py` checks unsafe records, lock directories, canonical paths, branch mismatch, and changed provisioning commits | Real disposable Git detach, branch movement, record writes, links, and interrupted atomic publication | `workspace.e2e.cjs` and `centcom-adapters.e2e.cjs` verify owned-unit operations | Add explicit renderer error/outcome evidence for every documented ownership refusal |
+| SitRep transfers exactly the reviewed patch before launch | `worktrees.py::test_sitrep_patch_is_applied_once_before_retryable_launch`; `worktree-boundaries.py` rejects malformed, oversized, binary and changed transfers | Real `git apply`, reverse-check crash recovery, failed check/apply/readback injection, and unchanged source checkout | `sitrep.e2e.cjs` reviews and sends across two isolated SSH routes, verifies recipient patch/trace and duplicate-safe retry | Review full validation/error matrix in the SitRep dialog |
+| Restart recovery verifies retained patch and re-entered instructions | `worktrees.py::test_ready_sitrep_can_recover_after_restart_without_reapplying`; `worktree-boundaries.py::test_empty_sitrep_and_incomplete_ready_transfer` | Real ready records and changed target files; retry verifies the digest before dispatch | `sitrep.e2e.cjs` recovers a ready recipient from the owned-worktree picker | Verify all documented untracked-file and active-recipient GUI refusals |
+| Archive preserves dirty, unmerged, active and unowned work | `worktrees.py::test_archive_preserves_dirty_unmerged_and_unowned_files`; boundary tests verify active and unavailable records | Real disposable merge/remove plus recovery after an interrupted removal; Git branch is retained | `workspace.e2e.cjs` checks dirty refusal, managed stop and clean archive; `centcom-adapters.e2e.cjs` executes reviewed archive | Review archive UI refusal/error presentation and persisted archived state |
+| Diff stages/reverts only the reviewed hunk | `worktree-diff.py` and `worktree-diff-boundaries.py` check stale snapshots, wrong units, unusual names, binary/large files, artifact read races, hunk races and bounded subprocess failures | Real separate index/worktree mutations, partial staging, single-hunk revert and ownership checks | `workspace.e2e.cjs` opens the drawer and checks staged/index content, revert and dirty archive refusal | Review drawer keyboard focus, polling backoff, offline labels and every non-actionable file kind |
+
+The isolated helper collection for the worktree lifecycle reaches 237/237
+statements and lines, 120/120 branch exits, and 9/9 named functions. This is
+helper-specific evidence from the existing lifecycle suite plus the new boundary
+suite. It does not resolve the open UI audit items or establish application-wide
+100% coverage. The diff helper separately reaches 173/173 statements/lines
+and 68/68 branch exits with the existing hunk suite and new boundary suite.
+
+## Remaining documentation and candidate evidence
+
+The following is a routing index for the unfinished audit. Test names are
+candidates to inspect, not claims that all five layers pass. Split each row into
+its documented success, rejection, interruption, restart, and platform variants;
+record the specific assertions and any missing layer before closing it.
+
+| Documentation | Behaviors to audit | Existing evidence to inspect |
+| --- | --- | --- |
+| README: Run; platforms; releases | Install/start/build/package, dependency failures, native PTY, isolation, settings location/migration, signing, updates, version assignment and publication | `desktop.e2e`, `native-pty`, `packaging`, `platform`, `local-lifecycle`, `updates`, `source-updates`, `mac-updates`, `update-download.e2e`, `auto-version`, `ci-policy` |
+| README: Situation Room | ORBAT grouping/filter/search, pins, callsigns/capacity, split panes/tab eviction, focus/keyboard/IME, notes/handoffs, multi-host routing, resources/staleness | `situation`, `productivity`, `readiness`, `workspace.e2e`, `desktop-sessions.e2e`, `component-ui.e2e`, `config-boundaries` |
+| Situation Room: Overwatch | Paged read-only snapshots, unavailable/stale labels, paging/jump keys, detached singleton window, docking, IPC restrictions and selection sync | `workspace.e2e`, `overwatch-window.e2e`, `window-sender`, `main-contract` |
+| README: scrolling/clipboard; clipboard-images | Wheel/page history, input versus scrolling, text/image paste, bounds, ownership/lost transfer, URL routing and focus restoration | `terminal-scroll`, `tmux-control`, `terminal.e2e`, `image-upload`, `renderer-contract`, `desktop.e2e` |
+| README: commands/history/help | Callsign command timeout/cancel, switcher/history limits, unavailable/truncated results, duplicate shortcuts and persistence | `productivity`, `situation`, `workspace.e2e`, `component-ui.e2e` |
+| README: launch presets; rules-of-engagement | Shell arguments/instructions, create/resume, profile precedence, native flags/hooks, custom/gated rejection, model/host selection and existing-session safety | `remote-helper-python`, `remote-boundaries-python`, `chat-provider-contracts-python`, `chat-runtime-python`, optional `launch-modes` and `claude-gated` |
+| README: attention; provider-telemetry; fleet-readiness | Confirmed versus inferred evidence, acknowledgements/notifications, hook deduplication, usage provenance/staleness, readiness precedence and clock persistence | `attention`, `readiness`, `provider-telemetry-python`, `remote-helper-python`, `workspace.e2e`, `loop-breaker` |
+| README: companion/remote control | Pairing expiry/single use, cookies/origins/rate limits, HTTPS/private-IP transports, scoped handles, control handoff/resize/input, lifecycle receipts, links/history, filters, revoke/forget and disconnect | `remote-control`, `companion-client`, `renderer-contract`, `companion.e2e`, `companion-filters.e2e`, `component-ui.e2e` |
+| README: background access; platforms | Native close/hide/minimize/tray/Dock/menu/Quit, simulated/physical sleep, observer reconnect without mutation replay, Tailscale discovery and installation | `platform`, `main-contract`, `desktop.e2e`, `companion.e2e`; physical desktop/tailnet checks remain unevidenced by headless fixtures |
+| desktop-sync | Pair/connect/revoke, endpoint/auth/encryption/replay, limits/backoff, convergence/tombstones/local exclusions, offline restart/conflicts, pull tabs and active-service guards | `peer-sync`, `peer-sync-ui`, `component-ui.e2e` |
+| reconnect | Retry/backoff/last-view cancellation, retained ownership, stale inventory, restart workspace, host-retarget invalidation, normal exit versus transport loss | `reconnect`, `local-service`, `workspace.e2e`, `chat-upgrade-python` |
+| dev-tunnels | Loopback URL discovery, shared forward/probe, safe path/query preservation, explicit/automatic forward, failures/retries and detach/quit cleanup | `tunnels`, `tunnels.e2e`, `renderer-contract`, `remote-boundaries-python` |
+| history-cleanup; README: retention | Provider eligibility/native deletion, exact review expiry/revision, pins, locks/activity, partial/uncertain results, no replay, local tombstones, daily batches and restart catch-up | `cleanup`, `cleanup.e2e`, `remote-helper-python`, `session-cleanup-boundaries-python`, `antigravity-cleanup-boundaries-python` |
+| oporders | MCP conversion/admission, reviewed preview/enrolment, owned sections, unrelated-file preservation, rollback/modes/backups, conflicts, pause/remove and inventory reconciliation | `oporders-unit`, `oporders-python`, `oporders.e2e`, `oporders.ui.e2e`, `component-ui.e2e`, `centcom-oporders` |
+| sitrep; worktrees; worktree-diffs | Reviewed Git transfer/lifecycle/diff behaviors above, including LFS, binary/untracked/size limits and verification command provenance | Worktree table above; `sitrep-python`, `worktree-diff-python`, `sitrep.e2e`, `workspace.e2e` |
+| exercises | Serialized dispatch/partial retry, separate worktrees/base, completion/verification evidence, cancellation, winner review/promotion/retry, preserved losers and safe archive | `exercises`, `exercises-python`, `exercises.e2e` |
+| flash-traffic; loop-breaker | Exact one-shot permissions and deadlines, stale/duplicate decisions, control ownership, confirmed failure streak/reset/cooldown, scoped interruption and restart uncertainty | `flash-python`, `flash.e2e`, `loop-breaker`, `loop-breaker-python`, `loop-breaker.e2e`, optional `claude-gated` |
+| unified-chat; opencode; antigravity-sdk-evaluation | Provider capability/runtime preparation, sessions/turns/events/tools/requests/models, streaming/replay/cursors, receipts versus completion, deletion/retention, private runtimes and safe upgrades | `chat-protocol`, `chat-provider-contracts-python`, `chat-runtime-unit-python`, `chat-runtime-python`, **required** `chat-upgrade-python`, `chat-launch.e2e`, `chat-launch-local`, `chat-ui.e2e`, `chat-ui-opencode` |
+| specops | Rank/workflow editing, graph/model/ROE validation, mission dispatch/observe/handoff, bounded denial/retry/HALT, artifact/journal/budget evidence, GitHub readiness/close checks, cancellation and uncertain restart | `specops`, `github-python`, `specops.ui.e2e`, `centcom-workflows.e2e`, `centcom-adapters.e2e` |
+| centcom-contract: requests/outcomes | Every registered input/output/example, aliases, query/action limits, deduplication, journal correlation/retention/redaction, history patterns, separate submission/completion/acceptance | `centcom-schema`, `centcom-doctrine`, `centcom-evidence`, `centcom-history`, `centcom-boundary`, `centcom-adapters.e2e` |
+| centcom-contract: approval/persistence | Reviewed identity/revision binding, authority, trusted actor, stale approval, configuration drafts/status races, async dispatch scope and interrupted/uncertain recovery | `centcom`, `centcom-dispatch`, `centcom-bindings`, `centcom-recovery`, `centcom.ui.e2e`, `component-ui.e2e` |
+| centcom-contract: operational evidence | Unit/fleet/support/resource/artifact/diff/mission/context queries, exact owned targets, pagination, read-only status and adapter completion | `centcom-support`, `centcom-missions`, `centcom-operations`, `centcom-evidence`, `centcom-adapters.e2e` |
+| centcom-contract: scheduling/spend/completion | Triggers/fallback/budgets/limits, serialized turns/cancellation/deadlines, automation propose/review/apply/dismiss, provider turn matching and retained completion facts | `centcom-turn`, `centcom-automations`, `centcom-launch`, `centcom-hooks.e2e`, `centcom-bridge.e2e`, `centcom-workflows.e2e` |
+
+Historical implementation plans and previously recorded validation dates are not
+fresh execution evidence. Native CI results must come from the current revision.
+Optional provider probes, target-network checks, OS installer interaction,
+physical phone/sleep, notification permission prompts, and publisher signing
+remain explicit limitations until actual evidence is available. Do not mark the
+goal complete or merge on the basis of this preliminary audit.

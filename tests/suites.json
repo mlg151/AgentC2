@@ -1,6 +1,16 @@
 {
   "suites": [
     {
+      "id": "worktree-diff-boundaries-python",
+      "file": "tests/worktree-diff-boundaries.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "worktree-boundaries-python",
+      "file": "tests/worktree-boundaries.py",
+      "group": "linux-python"
+    },
+    {
       "id": "coverage-aggregate-cli",
       "file": "tests/coverage-aggregate-cli.cjs",
       "group": "core"

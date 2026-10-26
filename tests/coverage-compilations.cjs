@@ -6,25 +6,28 @@ const { spawnSync } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 const { normalize } = require('../scripts/normalize-v8.cjs');
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agentc2-coverage-compilations-'));
+// macOS exposes /var as an alias of /private/var; Node's CJS loader reports
+// canonical source paths. Use that same identity for the disposable source.
+const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agentc2-coverage-compilations-')));
 try {
   fs.mkdirSync(path.join(directory, 'src'));
   const file = path.join(directory, 'src/fixture.ts');
   fs.writeFileSync(file, 'export const yes = (value = 1) => value;\nexport const never = (value = 2) => value;\n');
   const raw = path.join(directory, 'raw');
+  const compiled = path.join(directory, 'src/compiled.cjs');
   const code = `
-    const fs = require('node:fs'), Module = require('node:module');
+    const fs = require('node:fs');
     const ts = require(${JSON.stringify(require.resolve('typescript'))});
     const filename = process.argv[1];
     const source = ts.transpileModule(fs.readFileSync(filename, 'utf8'), { fileName: filename,
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: Number(process.argv[2]), inlineSourceMap: true, inlineSources: true }
     }).outputText;
-    const loaded = new Module(filename); loaded.filename = filename;
-    loaded._compile(source, filename);
-    if (loaded.exports.yes() !== 1) throw Error('Fixture was not executed');
+    fs.writeFileSync(process.argv[3], source);
+    const loaded = require(process.argv[3]);
+    if (loaded.yes() !== 1) throw Error('Fixture was not executed');
   `;
   for (const target of [require('typescript').ScriptTarget.ES5, require('typescript').ScriptTarget.ES2022]) {
-    const result = spawnSync(process.execPath, ['--enable-source-maps', '-e', code, file, String(target)], { env: { ...process.env, NODE_V8_COVERAGE: raw }, encoding: 'utf8' });
+    const result = spawnSync(process.execPath, ['--enable-source-maps', '-e', code, file, String(target), compiled], { env: { ...process.env, NODE_V8_COVERAGE: raw }, encoding: 'utf8' });
     assert.equal(result.status, 0, result.stdout + result.stderr);
   }
   const generated = path.join(directory, 'normalized');
@@ -54,7 +57,7 @@ try {
   assert.ok(summary.total.functions.pct < 100);
   const damaged = path.join(directory, 'damaged'); fs.mkdirSync(damaged);
   const sample = JSON.parse(fs.readFileSync(path.join(raw, fs.readdirSync(raw)[0]), 'utf8'));
-  fs.writeFileSync(path.join(damaged, 'missing-map.json'), JSON.stringify({ result: sample.result.filter((entry) => entry.url === pathToFileURL(file).href) }));
+  fs.writeFileSync(path.join(damaged, 'missing-map.json'), JSON.stringify({ result: sample.result.filter((entry) => entry.url === pathToFileURL(compiled).href).map((entry) => ({ ...entry, url: pathToFileURL(file).href })) }));
   const missingMap = spawnSync(process.execPath, [path.resolve(__dirname, '../scripts/coverage-javascript.cjs'), 'report', '--src', 'src', '--extension', '.ts', '--include', 'src/**/*.ts', '--exclude-after-remap', '--temp-directory', damaged, '--reports-dir', output], { cwd: directory, encoding: 'utf8' });
   assert.notEqual(missingMap.status, 0, 'Missing production TypeScript maps cannot become an apparently complete report');
   assert.match(missingMap.stderr, /Compiled TypeScript source map is missing/);

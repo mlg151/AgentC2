@@ -32,7 +32,13 @@ try {
     python: { version: '7.16.0', branchCoverage: true, processReports: label === 'linux-cleanup' ? 0 : 1, files: label === 'linux-ssh' ? { 'electron/fixture.py': { fixture: [[-1, 1], [1, -1]] } } : {} },
   }));
   const write = () => { for (const artifact of artifacts) fs.writeFileSync(path.join(directory, 'inputs', artifact.label + '.json'), JSON.stringify(artifact)); };
-  const run = () => spawnSync(process.execPath, ['scripts/coverage.cjs', 'aggregate', 'inputs'], { cwd: directory, encoding: 'utf8' });
+  // This disposable repository is verifier input, not application execution.
+  // Inherited automatic collectors would misattribute its relative Python
+  // filename to the parent repository when this suite itself runs in coverage CI.
+  const inheritedDirectory = process.env.COVERAGE_FILE && path.dirname(process.env.COVERAGE_FILE);
+  const inheritedFiles = inheritedDirectory && fs.existsSync(inheritedDirectory) ? new Set(fs.readdirSync(inheritedDirectory)) : new Set();
+  const environment = { ...process.env, AGENTC2_COVERAGE: '0', COVERAGE_PROCESS_START: '', COVERAGE_FILE: path.join(directory, 'test-results/verifier-python/.coverage'), NODE_V8_COVERAGE: path.join(directory, 'test-results/verifier-v8') };
+  const run = () => spawnSync(process.execPath, ['scripts/coverage.cjs', 'aggregate', 'inputs'], { cwd: directory, encoding: 'utf8', env: environment });
   write();
   const pass = run();
   assert.equal(pass.status, 0, pass.stdout + pass.stderr);
@@ -50,5 +56,15 @@ try {
   assert.deepEqual(report.gaps, [{ file, metric: 'functions', covered: 0, total: 1, missing: 1 }]);
   fs.unlinkSync(path.join(directory, 'inputs', 'linux-ssh.json'));
   const missing = run(); assert.equal(missing.status, 1); assert.match(missing.stderr, /all six/);
+  if (inheritedDirectory && fs.existsSync(inheritedDirectory)) {
+    const reports = fs.readdirSync(inheritedDirectory).filter((name) => name.startsWith('.coverage.') && !inheritedFiles.has(name)).map((name) => path.join(inheritedDirectory, name));
+    const script = [
+      'from coverage import CoverageData; import json,sys',
+      'for filename in json.loads(sys.argv[1]):',
+      ' data=CoverageData(basename=filename); data.read(); assert "electron/fixture.py" not in data.measured_files(), filename',
+    ].join('\n');
+    const probe = spawnSync(process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3'), ['-c', script, JSON.stringify(reports)], { env: environment, encoding: 'utf8' });
+    assert.equal(probe.status, 0, probe.stdout + probe.stderr);
+  }
 } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 console.log('PASS disposable verifier CLI: all six shards, JS/Python reports, exact success, an uncalled function failing the gate, and missing native evidence rejected');

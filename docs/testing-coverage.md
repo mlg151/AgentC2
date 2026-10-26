@@ -120,7 +120,7 @@ file. Rounded percentages, missing reports, missing production files, disabled
 Python branch measurement, and absent Python function measurements cannot pass.
 An unexecuted file remains a coverage gap. A successful report is evidence for
 the measured code dimensions; workflow completeness requires the separate
-workflow-to-test audit and actual suite results, including explicit accounting
+[workflow-to-test audit](testing-workflows.md) and actual suite results, including explicit accounting
 for skips and platform limitations.
 
 ## Current status
