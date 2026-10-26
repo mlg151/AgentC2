@@ -17,8 +17,10 @@ const { Tunnels } = require('../electron/tunnels.cjs');
   assert.deepEqual([linux.binary, ...linux.args], ['python3', '-', 'payload']);
   assert.equal(linux.env.PRIVATE_TEST, 'preserved');
   assert.ok(linux.env.PATH.startsWith('/fixture/bin:'));
-  const fallback = localCommand('python3', [], 'linux', {});
-  assert.ok(fallback.env.PATH.split(':').includes(require('node:path').posix.join(require('node:os').homedir(), '.local', 'bin')));
+  const { loadCommonJs } = require('./helpers/load-commonjs.cjs');
+  const fallbackModule = loadCommonJs('electron/local.cjs', { 'node:os': { homedir: () => '/fallback-home' } });
+  const fallback = fallbackModule.localCommand('python3', [], 'linux', {});
+  assert.ok(fallback.env.PATH.split(':').includes('/fallback-home/.local/bin'));
   assert.equal(fallback.env.PATH.split(':').includes(''), false);
   for (const platform of ['linux', 'darwin']) {
     const execution = localCommand('python3', [], platform, { HOME: '/fixture', PATH: '/usr/bin:/fixture/bin:/usr/bin' });
