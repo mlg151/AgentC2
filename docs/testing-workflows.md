@@ -194,3 +194,13 @@ normal/chat preview provenance, search candidate/match limits, pre-mutation
 launch/permission/diff rejection, Flash queue disconnect/decision handling, and
 active terminal/chat settings guards. It never opens a native PTY or contacts a
 provider. Actual SSH, adapters, and native platform suites remain required.
+
+
+The service handoff/fault/event/lifecycle suites extend the boundary fixture with
+review expiry/source/target/digest checks, every bounded handoff evidence form,
+interrupted restart and receipt deadlines/read loss, OpOrder retry/reconnect and
+conflict retention/removal, observer/image-transfer fences, rename disappearance,
+and uncertain deletion without tombstones or mutation replay. The post-save
+OpOrder loop reads the already validated `settings.opOrders` array; the unused
+legacy fallback is removed after proving normalization on missing input. The
+remaining legacy inventory/reconciliation fallbacks are still exercised.

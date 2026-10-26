@@ -133,6 +133,16 @@ async function launchAdmission() {
     service.chats.capabilities = async () => [];
     await assert.rejects(service.create({ provider: 'codex', transport: 'chat' }), /Structured chat is unavailable/);
     assert.equal(fixture.calls.length, 0);
+    fixture.setHandler((request) => request.respond(request.payload.action === 'inventory' ? { user: 'fixture', sessions: [] } : { name: 'hq-111111111111' }));
+    for (const input of [{ ...valid, presetId: 'codex' }, { provider: 'antigravity', transport: 'terminal', presetId: 'antigravity' }, { ...valid, conversationId: 'fresh-saved-history' }, { ...valid, agentId: 'background-fixture' }, { ...valid, worktree, recoverSitrep: true }]) {
+      assert.equal((await service.create(input)).name, 'hq-111111111111'); await service.inventory();
+      const payload = fixture.calls.findLast((request) => ['create', 'worktree_launch'].includes(request.payload.action)).payload;
+      assert.equal(payload.transport, 'terminal');
+      if (input.conversationId) assert.equal(payload.conversationId, input.conversationId);
+      if (input.agentId) assert.equal(payload.agentId, input.agentId);
+      if (input.recoverSitrep) assert.equal(payload.recoverSitrep, true);
+    }
+    await assert.rejects(service.cleanup.preview({ provider: 'codex', hostId: 'disabled', days: 30 }), /Host is unavailable/);
   } finally { fixture.close(); }
 }
 

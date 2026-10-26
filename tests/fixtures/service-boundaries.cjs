@@ -11,8 +11,9 @@ function serviceFixture(seed = () => {}) {
   saved.save('settings', { ...saved.data.settings, hosts: [{ id: 'default', name: 'Fixture host', target: 'fixture.invalid', port: 22, enabled: true }, { id: 'local', name: 'Local fixture', kind: 'local', enabled: true }, { id: 'disabled', name: 'Disabled', target: 'disabled.invalid', port: 22, enabled: false }] });
   seed(saved);
   let now = 1800000000000;
-  const calls = [], timers = new Map();
+  const calls = [], logs = [], timers = new Map();
   let adapters;
+  let imageHandler = async () => '/tmp/fixture-image.png';
   let handler = (request) => request.respond(request.payload.action === 'inventory' ? { user: 'fixture', sessions: [] } : {});
   const spawn = (binary, args) => {
     const child = new EventEmitter();
@@ -30,13 +31,13 @@ function serviceFixture(seed = () => {}) {
   };
   class Clock extends Date { static now() { return now; } }
   const commander = require('../../electron/commander.cjs');
-  const { createService } = loadCommonJs('electron/service.cjs', { './commander.cjs': { ...commander, commanderFacade(input) { adapters = input; return commander.commanderFacade(input); } }, 'node:child_process': { spawn }, 'node-pty': { spawn() { throw Error('A read-only boundary test attempted a native terminal'); } } }, {
-    Date: Clock,
+  const { createService } = loadCommonJs('electron/service.cjs', { './image-upload.cjs': { uploadPng: (input) => imageHandler(input) }, './commander.cjs': { ...commander, commanderFacade(input) { adapters = input; return commander.commanderFacade(input); } }, 'node:child_process': { spawn }, 'node-pty': { spawn() { throw Error('A read-only boundary test attempted a native terminal'); } } }, {
+    Date: Clock, console: { ...console, warn: (...args) => logs.push(['warn', ...args]), error: (...args) => logs.push(['error', ...args]) },
     setTimeout(callback, delay) { const timer = { callback, delay }; timers.set(timer, timer); return timer; },
     clearTimeout(timer) { timers.delete(timer); },
   });
   const service = createService({ directory, home: directory });
-  return { service, adapters, directory, calls, timers, setHandler(next) { handler = next; }, advance(milliseconds) { now += milliseconds; },
+  return { service, adapters, directory, calls, logs, timers, setHandler(next) { handler = next; }, setImageHandler(next) { imageHandler = next; }, advance(milliseconds) { now += milliseconds; },
     close() { service.centcom.dispose(); service.specops.dispose(); service.chats.closeAll(); service.terminals.closeAll(); service.tunnels.closeAll(); fs.rmSync(directory, { recursive: true, force: true }); },
   };
 }

@@ -1,6 +1,26 @@
 {
   "suites": [
     {
+      "id": "service-lifecycle",
+      "file": "tests/service-lifecycle.cjs",
+      "group": "core"
+    },
+    {
+      "id": "service-events",
+      "file": "tests/service-events.cjs",
+      "group": "core"
+    },
+    {
+      "id": "service-faults",
+      "file": "tests/service-faults.cjs",
+      "group": "core"
+    },
+    {
+      "id": "service-handoffs",
+      "file": "tests/service-handoffs.cjs",
+      "group": "core"
+    },
+    {
       "id": "service-boundaries",
       "file": "tests/service-boundaries.cjs",
       "group": "core"
