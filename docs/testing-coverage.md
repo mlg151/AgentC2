@@ -21,7 +21,7 @@ coverage. A below-target report exits nonzero even when every selected suite
 passes.
 
 For a complete collection, first run `node scripts/coverage.cjs reset` when no
-test processes are running. Build with `AGENTC2_COVERAGE=1 npm run build`, then run
+test processes are running. Build with `AGENTC2_COVERAGE=1 AGENTC2_SOURCE_COVERAGE=1 npm run build`, then run
 the existing suite groups with `AGENTC2_COVERAGE=1`. Coverage is opt-in; ordinary
 test entrypoints retain their existing behavior. Collect all required native
 and isolated groups from `tests/suites.json`, including packaged startup and
@@ -32,7 +32,7 @@ own disposable SSH account and the guarded QA home; never use a real user's
 home.
 
 Run `npm run test:coverage:report` to combine retained Python process data and
-Node/Electron/browser V8 data. It does not clear prior collection. Do not combine
+Node/Electron/browser original-source counters. It does not clear prior collection. Do not combine
 data from different source revisions or instrumentation versions. Use `reset`
 before establishing a new baseline after changing the collector. Collection
 pins the Git revision and hashes of application source, test code, workflows,
@@ -46,35 +46,54 @@ reports, process logs, traces, and screenshots remain under `test-results/`.
 
 ## Measurement boundaries
 
-The executable denominator includes all `.cjs` and `.py` production files under
-`electron/` and `.ts`/`.tsx` renderer files under `src/`, including files that no
-test loads. CSS, image assets, JSON data, and erased TypeScript declarations are
-not executable code. Declaration-only exclusions are derived from the AST;
-adding a runtime export puts the file back into the denominator. Dependencies,
-fixtures, generated bundles, and test infrastructure are not application
-source. Browser bundle execution is mapped back to original production files.
-Coverage builds retain generated statement boundaries for accurate source-map
-remapping; ordinary production builds keep their existing minification.
+The executable denominator is defined in `scripts/production-sources.cjs`:
+application code under `electron/`, `src/`, and `public/`, plus the documented
+`scripts/pair-companion.cjs` runtime CLI. It includes the companion service
+worker and the image-upload Python helper, which was previously embedded in a
+JavaScript string. Files that no test loads remain in the denominator. CSS,
+images, JSON data, dependencies, fixtures, generated bundles, and build/test
+infrastructure are not application code. Declaration-only exclusions are
+derived from the TypeScript AST; adding a runtime export puts a file back into
+the denominator.
 
-Python reports use the standard Coverage.py statement/line and branch metrics.
-Named function regions are covered only when their bodies execute. Python
-lambda callbacks additionally require negative runtime entry arcs; an executed
-definition alone does not count. Ambiguous shared-line callbacks stay uncovered.
-Anonymous JavaScript callbacks receive stable coverage-only names so C8 cannot
-silently omit them from the function denominator. Copied
-worker modules and renamed session hooks are attributed to production files
-only when their bytes match; frozen v1 workers and modified fixtures cannot
-contribute coverage for the current worker. The deployed-v1 compatibility and
-upgrade tests remain required independently of these metrics.
+JavaScript and TypeScript use `istanbul-lib-instrument` 6.0.3 on the original
+source AST, before TypeScript, React, Vite, or CommonJS transformations.
+Statements on the same line remain separate counters. Every original function
+has a static counter even if its enclosing callback never creates it; compiler
+helpers do not add functions to the denominator. `coverage-source.cjs` checks
+all production function counts against an independent TypeScript AST traversal.
+The instrumenter uses Istanbul's statement, line, function, and branch metrics;
+branch categories follow that instrumenter's source semantics. Workflow and
+failure-path coverage remain separate requirements.
 
-Each compiled JavaScript layout keeps its own V8 offset space and source map.
-Node unit transpilation, Vite development transforms, and built browser bundles
-cannot overwrite one another's maps merely because they share an original
-TypeScript filename. Source counters merge only at identical locations; an
-uncalled child function or branch cannot borrow a containing range's count.
-Only explicit unexecuted-file placeholders yield to measured execution. C8 is
-pinned to 12.0.0 because the adapter uses its raw V8 parser and source mapper;
-real subprocess regressions guard that interface and callback attribution.
+Node's test-only require/VM hook and the renderer loader instrument unchanged
+source. Vite instruments original modules and the public service worker in both
+development and QA builds. Browser snapshots include navigation/page/context
+close boundaries and the separate service-worker global. Repeated cumulative
+snapshots use a maximum within one process/document/worker epoch; independent
+epochs add actual execution counts. Every collected map and source digest must
+match a freshly generated original-source manifest. Runtime placeholders,
+removed callbacks, modified source, malformed counts, and old-format artifacts
+are rejected. An executable module that was never loaded cannot pass even when
+it has zero metric counters. Coverage-exclusion directives are forbidden.
+
+V8 raw reports and the legacy C8 adapter remain available for diagnostics, but
+V8 percentages are not acceptance evidence: V8 can omit uncreated callbacks,
+count compiler-generated functions, or vary branch ranges with the execution
+profile. Legacy percentages must not be compared directly with the new fixed
+original-source counters. Ordinary builds retain their existing optimization
+and do not contain source counters.
+
+Python uses Coverage.py 7.16.0 statement/line and branch metrics. Named function
+regions require body execution. Lambda callbacks additionally require negative
+runtime entry arcs; an executed definition alone does not count. Ambiguous
+shared-line callbacks stay uncovered. Copied worker modules and renamed session
+hooks are attributed only when their bytes match; frozen v1 workers cannot
+contribute current-source coverage. Image upload still transfers an ephemeral
+Python command: its compile filename contains a SHA-256 computed from the
+actual decoded source bytes, and only a matching current-source digest is
+attributed to `electron/image-upload.py`. The required deployed-v1 compatibility
+and upgrade regressions are unchanged.
 
 ## Required cross-platform CI result
 
@@ -106,7 +125,7 @@ missing, cancelled, or malformed suite evidence, wrong native architectures,
 missing branch collection, and skipped deployed-worker upgrade regressions.
 Ordinary duplicate system-SDK skips remain visible alongside the required
 private-runtime results. CRLF/LF checkout differences are normalized for text
-hashes; generated layouts are already mapped to original line/column counters.
+hashes; original-source maps and counter identities must match exactly.
 
 The `Complete production coverage` job combines counts, regenerates JSON/HTML
 reports, and applies the same exact per-file 100% requirement. Its success is a
@@ -125,15 +144,19 @@ for skips and platform limitations.
 
 ## Current status
 
-The 100% target is not yet met. The [six-shard CI run for 6e5ac4e](https://github.com/mlg151/AgentC2/actions/runs/40261948716)
-passed all four native package jobs and both isolated Linux jobs. Its verified
-aggregate measured 15807/16387 statements and lines (96.46%), 11654/13411 branch
-exits (86.90%), and 2910/3284 functions (88.61%). There were 211 production
-file/metric gaps. The aggregate and Quality gate correctly failed the exact
-100% requirement. The combined HTML/JSON reports and source/suite provenance
-are retained in `Complete-coverage-QA` for 14 days.
+The 100% target is not yet met. The [six-shard CI run for 74b85a1](https://github.com/mlg151/AgentC2/actions/runs/40264338052)
+passed all four native package jobs and both isolated Linux jobs. Its legacy V8
+aggregate reported 15856/16389 statements/lines (96.75%), 11674/13406 branch
+ranges (87.08%), and 2914/3281 functions (88.81%), with 186 file/metric gaps.
+These figures are diagnostic only: the subsequent AST audit found 31 omitted
+callbacks in `App.tsx` and duplicate function identities elsewhere.
 
-Further isolated helper and timeline tests do not replace a fresh complete
-aggregate. The [workflow audit](testing-workflows.md) remains unfinished.
-Do not merge the coverage work as satisfying the target until the complete
-coverage and workflow requirements pass on the final revision.
+The replacement collector counts all 242 original functions in `App.tsx`.
+Its regressions cover uncreated callbacks, multiple statements on one line,
+independent compiler layouts, strict-mode preservation, exact source-map and
+digest validation, snapshot deduplication, worker cache behavior, and rejection
+of absent runtime evidence. A fresh complete six-shard original-source
+aggregate is required before reporting a new application baseline. The
+[workflow audit](testing-workflows.md) remains unfinished. Do not merge as
+satisfying the target until every final-revision code metric and workflow
+requirement passes.

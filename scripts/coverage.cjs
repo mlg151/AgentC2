@@ -38,12 +38,15 @@ function coverageEnvironment(environment = process.env) {
   require('./coverage-artifacts.cjs').collection(root, directory);
   const python = path.join(directory, 'python');
   const javascript = path.join(directory, 'v8');
-  for (const folder of [python, javascript]) fs.mkdirSync(folder, { recursive: true });
+  const source = path.join(directory, 'source');
+  for (const folder of [python, javascript, source]) fs.mkdirSync(folder, { recursive: true });
   return {
     ...environment,
     AGENTC2_COVERAGE: '1',
+    AGENTC2_SOURCE_COVERAGE: '1',
+    AGENTC2_SOURCE_COVERAGE_DIR: source,
     NODE_V8_COVERAGE: javascript,
-    NODE_OPTIONS: /(?:^|\s)--enable-source-maps(?:\s|$)/.test(environment.NODE_OPTIONS || '') ? environment.NODE_OPTIONS : `${environment.NODE_OPTIONS || ''} --enable-source-maps`.trim(),
+    NODE_OPTIONS: [environment.NODE_OPTIONS || '', '--enable-source-maps', '--require=' + JSON.stringify(path.join(root, 'scripts/source-coverage-hook.cjs'))].join(' ').trim(),
     COVERAGE_PROCESS_START: path.join(root, '.coveragerc'),
     COVERAGE_FILE: path.join(python, '.coverage'),
     PYTHONPATH: [path.join(root, 'tests/helpers/coverage-python'), preparePython(environment), environment.PYTHONPATH].filter(Boolean).join(path.delimiter),
@@ -56,33 +59,7 @@ function run(command, args, options = {}) {
   return result.status === 0;
 }
 
-function declarationFiles(base = root) {
-  const ts = require('typescript');
-  const excluded = [];
-  for (const relative of fs.readdirSync(path.join(base, 'src'), { recursive: true })) {
-    if (!/\.tsx?$/.test(relative)) continue;
-    const file = path.join('src', relative).replaceAll('\\', '/');
-    if (file.endsWith('.d.ts')) { excluded.push(file); continue; }
-    const source = fs.readFileSync(path.join(base, file), 'utf8');
-    const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
-    // Exclude only files whose AST consists entirely of erased declarations.
-    // An added runtime export immediately puts the file into the denominator.
-    if (parsed.statements.every((node) => ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node) || node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.DeclareKeyword) || ts.isImportDeclaration(node) && node.importClause?.isTypeOnly || ts.isExportDeclaration(node) && node.isTypeOnly)) excluded.push(file);
-  }
-  return excluded;
-}
-
-function c8Arguments() {
-  return [
-    path.join(root, 'scripts/coverage-javascript.cjs'), 'report', '--all', '--src', 'electron', '--src', 'src',
-    '--extension', '.cjs', '--extension', '.ts', '--extension', '.tsx', '--extension', '.js',
-    '--include', 'electron/**/*.cjs', '--include', 'src/**/*.{ts,tsx}', '--include', 'dist/**/*.js',
-    '--exclude-after-remap', '--exclude', '**/node_modules/**',
-    ...declarationFiles().flatMap((file) => ['--exclude', file]),
-    '--temp-directory', path.join(directory, 'v8-normalized'), '--reports-dir', path.join(directory, 'javascript'),
-    '--reporter', 'json-summary', '--reporter', 'json', '--reporter', 'html', '--reporter', 'text-summary',
-  ];
-}
+const { declarationFiles } = require('./production-sources.cjs');
 
 function check(summary) {
   const gaps = [];
@@ -115,16 +92,17 @@ function pythonSummary(report, lambdas = null) {
   }));
 }
 
-function javascriptReport() {
-  if (!fs.existsSync(path.join(directory, 'v8')) || !fs.readdirSync(path.join(directory, 'v8')).some((file) => file.endsWith('.json'))) throw Error('JavaScript coverage data is missing; collect suites first');
-  fs.rmSync(path.join(directory, 'v8-normalized'), { recursive: true, force: true });
-  require('./normalize-v8.cjs').normalize(path.join(directory, 'v8'), path.join(directory, 'v8-normalized'));
-  if (!run(process.execPath, c8Arguments())) throw Error('JavaScript coverage reporting failed');
+function javascriptReport(requireComplete = false) {
+  const source = require('./source-coverage.cjs');
+  const coverage = source.report(path.join(directory, 'source'));
+  if (requireComplete) source.requireObserved(coverage);
+  require('./coverage-artifacts.cjs').writeJavascriptReports(coverage, root, path.join(directory, 'javascript'));
+  return coverage;
 }
 
 function report() {
   require('./coverage-artifacts.cjs').verifyCollection(root, directory);
-  javascriptReport();
+  javascriptReport(true);
   const python = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
   const reportData = path.join(directory, 'python-report/.coverage');
   fs.mkdirSync(path.dirname(reportData), { recursive: true });
@@ -150,21 +128,8 @@ function summarize(pythonFile, lambdaFile) {
   const javascript = JSON.parse(fs.readFileSync(path.join(directory, 'javascript/coverage-summary.json'), 'utf8'));
   const pythonData = pythonSummary(JSON.parse(fs.readFileSync(pythonFile, 'utf8')), JSON.parse(fs.readFileSync(lambdaFile, 'utf8')));
   const summary = { ...Object.fromEntries(Object.entries(javascript).filter(([file]) => file !== 'total').map(([file, value]) => [path.relative(root, file).replaceAll('\\', '/'), value])), ...pythonData };
-  const declarations = new Set(declarationFiles());
-  const ts = require('typescript');
-  const expectedFiles = [];
-  for (const base of ['electron', 'src']) {
-    const expected = fs.readdirSync(path.join(root, base), { recursive: true }).map((file) => `${base}/${file.replaceAll('\\', '/')}`).filter((file) => /\.(cjs|py|tsx?)$/.test(file) && !declarations.has(file));
-    expectedFiles.push(...expected);
-    for (const file of expected) {
-      if (!summary[file]) throw Error(`Production file missing from coverage: ${file}`);
-      if (file.endsWith('.py') || summary[file].functions.total > 0) continue;
-      let functions = false;
-      const visit = (node) => { if (ts.isFunctionLike(node) && node.body) functions = true; ts.forEachChild(node, visit); };
-      visit(ts.createSourceFile(file, fs.readFileSync(path.join(root, file), 'utf8'), ts.ScriptTarget.Latest, true));
-      if (functions) throw Error(`Function measurement was lost for ${file}; verify browser source maps before trusting this report`);
-    }
-  }
+  const expectedFiles = require('./production-sources.cjs').executableFiles(root);
+  for (const file of expectedFiles) if (!summary[file]) throw Error(`Production file missing from coverage: ${file}`);
   if (!require('node:util').isDeepStrictEqual(Object.keys(summary).sort(), expectedFiles.sort())) throw Error('Coverage contains unexpected source files or generated bundles');
   const gaps = check(summary);
   const totals = Object.fromEntries(metrics.map((metric) => {
@@ -199,8 +164,8 @@ function exportShard(label) {
   const python = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
   const env = { ...process.env, COVERAGE_PROCESS_START: '' };
   if (!run(python, ['scripts/coverage-data.py', 'export', path.join(directory, 'python'), root, pythonFile], { env })) throw Error('Python coverage export failed');
-  const artifact = { version: 1, label, platform: process.platform, arch: process.arch, metadata, suites, javascript, python: JSON.parse(fs.readFileSync(pythonFile, 'utf8')) };
-  artifactTools.validateArtifact(artifact, metadata, require('../tests/suites.json'), artifactTools.expectedFiles(root));
+  const artifact = { version: 2, javascriptMeasurement: { format: require('./source-coverage.cjs').format, instrumenter: require('./source-coverage.cjs').version }, label, platform: process.platform, arch: process.arch, metadata, suites, javascript, python: JSON.parse(fs.readFileSync(pythonFile, 'utf8')) };
+  artifactTools.validateArtifact(artifact, metadata, require('../tests/suites.json'), require('./source-coverage.cjs').manifest(root));
   const output = path.join(directory, 'artifact', `${label}.json`);
   fs.mkdirSync(path.dirname(output), { recursive: true });
   fs.writeFileSync(output, JSON.stringify(artifact) + '\n');
@@ -212,7 +177,8 @@ function aggregate(input) {
   const expected = artifactTools.metadata(root);
   const files = fs.readdirSync(input, { recursive: true }).filter((file) => file.endsWith('.json')).map((file) => path.resolve(input, file)).sort();
   const artifacts = files.map((file) => JSON.parse(fs.readFileSync(file, 'utf8')));
-  const coverage = artifactTools.mergeArtifacts(artifacts, expected, require('../tests/suites.json'), artifactTools.expectedFiles(root));
+  const coverage = artifactTools.mergeArtifacts(artifacts, expected, require('../tests/suites.json'), require('./source-coverage.cjs').manifest(root));
+  require('./source-coverage.cjs').requireObserved(coverage);
   fs.mkdirSync(directory, { recursive: true });
   artifactTools.writeJavascriptReports(coverage, root, path.join(directory, 'javascript'));
   const manifest = path.join(directory, 'artifact-inputs.json');
@@ -238,7 +204,7 @@ async function main() {
   if (process.argv[2] === 'export') { if (process.argv.length !== 4) throw Error('Usage: coverage.cjs export <shard>'); exportShard(process.argv[3]); return; }
   if (process.argv[2] === 'aggregate') { if (process.argv.length !== 4) throw Error('Usage: coverage.cjs aggregate <artifact-directory>'); if (!aggregate(process.argv[3])) process.exitCode = 1; return; }
   if (process.argv[2] === 'reset') {
-    for (const file of ['v8', 'v8-normalized', 'python', 'python-normalized', 'python-report', 'javascript', 'summary.json', 'collection.json', 'artifact', 'portable-python.json', 'artifact-inputs.json', 'provenance.json']) fs.rmSync(path.join(directory, file), { recursive: true, force: true });
+    for (const file of ['source', 'v8', 'v8-normalized', 'python', 'python-normalized', 'python-report', 'javascript', 'summary.json', 'collection.json', 'artifact', 'portable-python.json', 'artifact-inputs.json', 'provenance.json']) fs.rmSync(path.join(directory, file), { recursive: true, force: true });
     return;
   }
   const env = coverageEnvironment();

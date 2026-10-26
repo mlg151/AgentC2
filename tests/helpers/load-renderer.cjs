@@ -7,7 +7,8 @@ const ts = require('typescript');
 // to TypeScript rather than an anonymous new Function() that coverage cannot see.
 function loadRenderer(file, dependencies = {}) {
   const filename = path.resolve(__dirname, '../../src', file);
-  const compiled = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+  const source = require('../../scripts/source-coverage-hook.cjs').prepare(filename, fs.readFileSync(filename, 'utf8'));
+  const compiled = ts.transpileModule(source, {
     fileName: filename,
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, inlineSourceMap: true, inlineSources: true },
   }).outputText;

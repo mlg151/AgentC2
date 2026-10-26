@@ -16,7 +16,7 @@ try {
   fs.writeFileSync(path.join(directory, 'electron/fixture.py'), 'fixture = 1\n');
   fs.writeFileSync(path.join(directory, 'src/types.ts'), 'export interface Fixture { value: string }\n');
   fs.writeFileSync(path.join(directory, '.coveragerc'), '[run]\nbranch = True\ncore = ctrace\nsource = electron\nrelative_files = True\n[json]\npretty_print = True\n[html]\ndirectory = test-results/coverage/python/html\n');
-  for (const file of ['coverage.cjs', 'coverage-artifacts.cjs', 'coverage-data.py', 'normalize-coverage.py']) fs.copyFileSync(path.join(root, 'scripts', file), path.join(directory, 'scripts', file));
+  for (const file of ['coverage.cjs', 'coverage-artifacts.cjs', 'source-coverage.cjs', 'production-sources.cjs', 'coverage-data.py', 'normalize-coverage.py']) fs.copyFileSync(path.join(root, 'scripts', file), path.join(directory, 'scripts', file));
   const groups = [...new Set(Object.values(SHARDS).flatMap((shard) => shard.groups))];
   const suites = groups.map((group) => ({ id: group === 'linux-python' ? 'chat-upgrade-python' : group + '-fixture', group }));
   fs.writeFileSync(path.join(directory, 'tests/suites.json'), JSON.stringify({ suites }));
@@ -24,11 +24,12 @@ try {
   git('init', '-q'); git('add', '.'); git('commit', '-qm', 'Verifier fixture');
   const stamp = metadata(directory);
   assert.equal(stamp.dirty, false);
-  const location = { start: { line: 1, column: 0 }, end: { line: 1, column: 31 } };
   const file = 'electron/fixture.cjs';
-  const artifacts = Object.entries(SHARDS).map(([label, policy], index) => ({ version: 1, label, platform: policy.platform, arch: policy.arch, metadata: stamp,
+  const source = require('../scripts/source-coverage.cjs');
+  const fixture = source.manifest(directory)[file];
+  const artifacts = Object.entries(SHARDS).map(([label, policy], index) => ({ version: 2, javascriptMeasurement: { format: source.format, instrumenter: source.version }, label, platform: policy.platform, arch: policy.arch, metadata: stamp,
     suites: Object.fromEntries(policy.groups.map((group) => [group, suites.filter((suite) => suite.group === group).map(({ id }) => ({ id, status: 'success', code: 0, signal: null, durationSeconds: 0.1, skips: [] }))])),
-    javascript: { [file]: { path: file, statementMap: { 0: location, 1: { start: { line: 2, column: 0 }, end: { line: 2, column: 25 } } }, fnMap: { 0: { name: 'fixture', decl: location, loc: location, line: 1 } }, branchMap: { 0: { type: 'branch', line: 1, loc: location, locations: [location] } }, s: { 0: index === 0 ? 1 : 0, 1: index === 0 ? 1 : 0 }, f: { 0: index === 0 ? 1 : 0 }, b: { 0: [index === 0 ? 1 : 0] } } },
+    javascript: { [file]: { ...fixture, all: false, s: Object.fromEntries(Object.keys(fixture.s).map((id) => [id, index === 0 ? 1 : 0])), f: Object.fromEntries(Object.keys(fixture.f).map((id) => [id, index === 0 ? 1 : 0])) } },
     python: { version: '7.16.0', branchCoverage: true, processReports: label === 'linux-cleanup' ? 0 : 1, files: label === 'linux-ssh' ? { 'electron/fixture.py': { fixture: [[-1, 1], [1, -1]] } } : {} },
   }));
   const write = () => { for (const artifact of artifacts) fs.writeFileSync(path.join(directory, 'inputs', artifact.label + '.json'), JSON.stringify(artifact)); };

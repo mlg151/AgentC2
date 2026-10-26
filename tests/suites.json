@@ -1,6 +1,26 @@
 {
   "suites": [
     {
+      "id": "image-upload-python",
+      "file": "tests/image-upload.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "pair-companion-cli",
+      "file": "tests/pair-companion-cli.cjs",
+      "group": "core"
+    },
+    {
+      "id": "coverage-source-browser.e2e",
+      "file": "tests/coverage-source-browser.e2e.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "coverage-source",
+      "file": "tests/coverage-source.cjs",
+      "group": "core"
+    },
+    {
       "id": "centcom-bindings-boundaries",
       "file": "tests/centcom-bindings-boundaries.cjs",
       "group": "core"

@@ -18,7 +18,7 @@ function canonical(file, base) {
   const implementation = path.win32.isAbsolute(base) && !path.posix.isAbsolute(base) ? path.win32 : path.posix;
   const relative = implementation.isAbsolute(file) ? implementation.relative(base, file) : file;
   const name = relative.replaceAll('\\', '/');
-  if (!/^(electron|src)\//.test(name) || name.split('/').some((part) => !part || part === '.' || part === '..')) throw Error(`Unexpected coverage source: ${file}`);
+  if (!require('./production-sources.cjs').isSource(name) || name.split('/').some((part) => !part || part === '.' || part === '..')) throw Error(`Unexpected coverage source: ${file}`);
   return name;
 }
 
@@ -33,11 +33,11 @@ function metadata(base, execute = execFileSync) {
     return createHash('sha256').update(bytes.includes(0) ? bytes : Buffer.from(bytes.toString('utf8').replaceAll('\r\n', '\n'))).digest('hex');
   };
   for (const file of tracked) {
-    if (/^(?:electron|src)\//.test(file)) sources[file] = digest(file);
+    if (require('./production-sources.cjs').isSource(file)) sources[file] = digest(file);
     else if (/^(?:scripts|tests|\.github)\//.test(file) || ['.coveragerc', '.nvmrc', 'vite.config.ts', 'package.json', 'package-lock.json'].includes(file)) instrumentation[file] = digest(file);
   }
   if (!Object.keys(sources).length || !Object.keys(instrumentation).length) throw Error('Coverage source and instrumentation manifests cannot be empty');
-  return { version: 1, revision, dirty: Boolean(git(['status', '--porcelain', '--untracked-files=normal']).trim()), sources, instrumentation };
+  return { version: 2, revision, dirty: Boolean(git(['status', '--porcelain', '--untracked-files=normal']).trim()), sources, instrumentation };
 }
 
 function assertMetadata(actual, expected) {
@@ -48,7 +48,7 @@ function collection(base, directory) {
   const current = metadata(base);
   const file = path.join(directory, 'collection.json');
   if (!fs.existsSync(file)) {
-    for (const name of ['v8', 'python']) {
+    for (const name of ['v8', 'python', 'source']) {
       const folder = path.join(directory, name);
       if (fs.existsSync(folder) && fs.readdirSync(folder).some((name) => name.endsWith('.json') || name.startsWith('.coverage.'))) throw Error('Unversioned coverage data exists; reset and collect again');
     }
@@ -72,11 +72,7 @@ function verifyCollection(base, directory) {
   return saved;
 }
 
-function expectedFiles(base) {
-  const declarations = new Set(require('./coverage.cjs').declarationFiles(base));
-  return fs.readdirSync(path.join(base, 'electron'), { recursive: true }).map((file) => `electron/${file.replaceAll('\\', '/')}`).filter((file) => file.endsWith('.cjs'))
-    .concat(fs.readdirSync(path.join(base, 'src'), { recursive: true }).map((file) => `src/${file.replaceAll('\\', '/')}`).filter((file) => /\.tsx?$/.test(file) && !declarations.has(file))).sort();
-}
+function expectedFiles(base) { return require('./production-sources.cjs').javascriptFiles(base); }
 
 function counters(data, source) {
   if (data.all !== undefined && typeof data.all !== 'boolean') throw Error(`Invalid all-files placeholder for ${source}`);
@@ -129,11 +125,14 @@ function pythonData(value, sources) {
 
 function validateArtifact(artifact, expected, inventory, expectedJavascript) {
   const shard = SHARDS[artifact.label];
-  if (artifact.version !== 1 || !shard || artifact.platform !== shard.platform || artifact.arch !== shard.arch) throw Error('Missing or incorrect native coverage shard identity');
+  if (artifact.version !== 2 || !shard || artifact.platform !== shard.platform || artifact.arch !== shard.arch) throw Error('Missing or incorrect native coverage shard identity');
   assertMetadata(artifact.metadata, expected);
   if (artifact.metadata.dirty) throw Error('CI coverage must come from a clean checkout');
   suiteEvidence(artifact.label, artifact.suites, inventory);
-  javascriptData(artifact.javascript, '', expectedJavascript);
+  const source = require('./source-coverage.cjs');
+  if (!isDeepStrictEqual(artifact.javascriptMeasurement, { format: source.format, instrumenter: source.version })) throw Error('Original-source JavaScript measurement is required');
+  javascriptData(artifact.javascript, '', Object.keys(expectedJavascript));
+  for (const [file, data] of Object.entries(artifact.javascript)) source.validate(data, expectedJavascript[file], file, true);
   pythonData(artifact.python, expected.sources);
   if (artifact.label !== 'linux-cleanup' && !artifact.python.processReports) throw Error(`Python collection is missing for ${artifact.label}`);
 }
@@ -146,7 +145,7 @@ function mergeArtifacts(artifacts, expected, inventory, expectedJavascript) {
     seen.add(artifact.label);
   }
   if (!isDeepStrictEqual([...seen].sort(), Object.keys(SHARDS).sort())) throw Error('Coverage from all six required native and isolated jobs is required');
-  return mergeJavascript(artifacts.map((artifact) => artifact.javascript));
+  return require('./source-coverage.cjs').merge(artifacts.map((artifact) => artifact.javascript), expectedJavascript);
 }
 
 function mergeJavascript(reports) {

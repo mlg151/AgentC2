@@ -8,19 +8,20 @@ const artifacts = require('../scripts/coverage-artifacts.cjs');
 
 const file = 'electron/fixture.cjs';
 const location = { start: { line: 1, column: 0 }, end: { line: 1, column: 12 } };
-const coverage = (statement, branch, fn) => ({ path: file, statementMap: { 0: location }, fnMap: { 0: { name: 'fixture', decl: location, loc: location, line: 1 } }, branchMap: { 0: { type: 'branch', line: 1, loc: location, locations: [location] } }, s: { 0: statement }, b: { 0: [branch] }, f: { 0: fn } });
-const metadata = { version: 1, revision: 'a'.repeat(40), dirty: false, sources: { [file]: 'b'.repeat(64), 'electron/fixture.py': 'c'.repeat(64) }, instrumentation: { 'scripts/coverage.cjs': 'd'.repeat(64) } };
+const coverage = (statement, branch, fn) => structuredClone({ path: file, sourceHash: 'b'.repeat(64), statementMap: { 0: location }, fnMap: { 0: { name: 'fixture', decl: location, loc: location, line: 1 } }, branchMap: { 0: { type: 'branch', line: 1, loc: location, locations: [location] } }, s: { 0: statement }, b: { 0: [branch] }, f: { 0: fn } });
+const metadata = { version: 2, revision: 'a'.repeat(40), dirty: false, sources: { [file]: 'b'.repeat(64), 'electron/fixture.py': 'c'.repeat(64) }, instrumentation: { 'scripts/coverage.cjs': 'd'.repeat(64) } };
 const groups = [...new Set(Object.values(artifacts.SHARDS).flatMap((shard) => shard.groups))];
 const inventory = { suites: groups.map((group) => ({ id: group === 'linux-python' ? 'chat-upgrade-python' : group + '-fixture', group })) };
 const result = (id) => ({ id, status: 'success', code: 0, signal: null, durationSeconds: 1.5, skips: [] });
 function shard(label) {
   const policy = artifacts.SHARDS[label];
-  return { version: 1, label, platform: policy.platform, arch: policy.arch, metadata: structuredClone(metadata),
+  return { version: 2, javascriptMeasurement: { format: require('../scripts/source-coverage.cjs').format, instrumenter: require('../scripts/source-coverage.cjs').version }, label, platform: policy.platform, arch: policy.arch, metadata: structuredClone(metadata),
     suites: Object.fromEntries(policy.groups.map((group) => [group, inventory.suites.filter((suite) => suite.group === group).map((suite) => result(suite.id))])),
     javascript: { [file]: coverage(0, 0, 0) }, python: { version: '7.16.0', branchCoverage: true, processReports: label === 'linux-cleanup' ? 0 : 1, files: {} } };
 }
 const all = () => Object.keys(artifacts.SHARDS).map(shard);
-const merge = (input) => artifacts.mergeArtifacts(input, metadata, inventory, [file]);
+const expected = { [file]: { ...coverage(0, 0, 0), all: true } };
+const merge = (input) => artifacts.mergeArtifacts(input, metadata, inventory, expected);
 const valid = all();
 valid[0].javascript[file] = coverage(1, 0, 0); valid[1].javascript[file] = coverage(0, 1, 0); valid[2].javascript[file] = coverage(0, 0, 1);
 const combined = merge(valid).getCoverageSummary();
@@ -52,9 +53,12 @@ for (const mutate of [
   (item) => { item.javascript[file].b[0] = [1, 1]; },
   (item) => { item.javascript[file].f = {}; },
   (item) => { item.javascript[file].path = 'electron/other.cjs'; },
+  (item) => { item.javascriptMeasurement.format = 'v8'; },
+  (item) => { item.javascript[file].sourceHash = 'wrong'; },
+  (item) => { item.javascript[file].fnMap[0].loc.start.column++; },
   (item) => { item.platform = 'wrong'; },
   (item) => { item.arch = 'wrong'; },
-  (item) => { item.version = 2; },
+  (item) => { item.version = 3; },
   (item) => { delete item.suites.desktop; },
   (item) => { item.suites.core = []; },
   (item) => { item.suites.core.push(item.suites.core[0]); },
@@ -71,8 +75,8 @@ for (const mutate of [
   const input = all(); mutate(input[0]); assert.throws(() => merge(input));
 }
 const skipped = all().find((item) => item.label === 'linux-ssh'); skipped.suites['linux-python'][0].skips.push('skipped');
-assert.throws(() => artifacts.validateArtifact(skipped, metadata, inventory, [file]), /upgrade regression may not be skipped/);
-const preserved = shard('desktop-linux-x64'); preserved.suites.core[0].skips = ['Optional duplicate system SDK probe; private runtime suite is required separately']; artifacts.validateArtifact(preserved, metadata, inventory, [file]);
+assert.throws(() => artifacts.validateArtifact(skipped, metadata, inventory, expected), /upgrade regression may not be skipped/);
+const preserved = shard('desktop-linux-x64'); preserved.suites.core[0].skips = ['Optional duplicate system SDK probe; private runtime suite is required separately']; artifacts.validateArtifact(preserved, metadata, inventory, expected);
 assert.deepEqual(preserved.suites.core[0].skips, ['Optional duplicate system SDK probe; private runtime suite is required separately']);
 for (const [value, base] of [['D:\\a\\AgentC2\\electron\\fixture.cjs', 'd:\\a\\AgentC2'], ['/work/AgentC2/electron/fixture.cjs', '/work/AgentC2'], ['electron/fixture.cjs', '']]) assert.equal(artifacts.canonical(value, base), file);
 for (const value of ['../electron/fixture.cjs', 'electron/../fixture.cjs', '/etc/fixture.cjs', 'electron//fixture.cjs']) assert.throws(() => artifacts.canonical(value, '/work/AgentC2'));

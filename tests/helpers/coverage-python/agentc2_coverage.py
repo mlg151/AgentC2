@@ -1,5 +1,6 @@
 """Attribute unchanged deployed worker copies to their production source files."""
 from pathlib import Path
+import hashlib
 
 from coverage import CoveragePlugin, FileTracer
 
@@ -17,6 +18,12 @@ class CopiedFile(FileTracer):
 class CopiedSources(CoveragePlugin):
     def file_tracer(self, filename):
         deployed = Path(filename)
+        if deployed.name.startswith("agentc2-image-upload-"):
+            source = SOURCE / "image-upload.py"
+            digest = hashlib.sha256(source.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+            if deployed.name == "agentc2-image-upload-" + digest + ".py":
+                return CopiedFile(source)
+            return None
         source = SOURCE / ("session-hook.py" if deployed.name == "hook.py" else deployed.name)
         if not source.is_file() or source.suffix != ".py":
             return None

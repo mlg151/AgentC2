@@ -42,6 +42,7 @@ function normalize(entries) {
 }
 
 async function instrumentCoverage(context) {
+  const saveSource = process.env.AGENTC2_SOURCE_COVERAGE === '1' ? await require('./source-browser-coverage.cjs').instrumentSourceCoverage(context) : null;
   const pending = new Map();
   function attach(page) {
     if (pending.has(page)) return pending.get(page);
@@ -72,6 +73,6 @@ async function instrumentCoverage(context) {
     return page;
   };
   await Promise.all(context.pages().map((page) => attach(page).started));
-  return async () => { for (const record of pending.values()) await record.save(); };
+  return async () => { await saveSource?.(); for (const record of pending.values()) await record.save(); };
 }
 module.exports = { instrumentCoverage, normalize, localFile };

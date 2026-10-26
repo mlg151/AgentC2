@@ -1,5 +1,6 @@
 """Collector attribution must distinguish current source from legacy workers."""
 import importlib.util
+import hashlib
 from pathlib import Path
 import shutil
 import sys
@@ -56,6 +57,14 @@ class CoverageSources(unittest.TestCase):
         self.module.coverage_init(types.SimpleNamespace(add_file_tracer=registered.append), {})
         self.assertEqual(len(registered), 1)
         self.assertIsInstance(registered[0], self.module.CopiedSources)
+
+    def test_ephemeral_upload_digest_identifies_the_executed_source(self):
+        source = ROOT / "electron/image-upload.py"
+        digest = hashlib.sha256(source.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+        filename = "agentc2-image-upload-" + digest + ".py"
+        self.assertEqual(self.plugin.file_tracer(filename).source_filename(), str(source))
+        self.assertIsNone(self.plugin.file_tracer("agentc2-image-upload-" + "0" * 64 + ".py"))
+        self.assertIsNone(self.plugin.file_tracer(filename + ".modified.py"))
 
     def test_fragment_loader_retains_filenames_and_shared_scope(self):
         with tempfile.TemporaryDirectory(prefix="agentc2-coverage-source-") as directory:

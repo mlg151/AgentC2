@@ -2,7 +2,8 @@
 
 This is the behavior audit for the five requested test layers. It complements
 [production coverage](testing-coverage.md); neither a list of tests nor a line
-coverage percentage proves that every workflow is tested. The audit is open.
+coverage percentage proves that every workflow is tested. The audit is open. The historical focused V8 counts below are diagnostic;
+the original-source AST collector supersedes those denominators.
 
 A contract check verifies a boundary's accepted inputs, outputs, errors, and
 compatibility. A unit check isolates a production decision. Integration checks
@@ -81,11 +82,11 @@ record the specific assertions and any missing layer before closing it.
 | README: Run; platforms; releases | Install/start/build/package, dependency failures, native PTY, isolation, settings location/migration, signing, updates, version assignment and publication | `desktop.e2e`, `native-pty`, `packaging`, `platform`, `local-lifecycle`, `updates`, `source-updates`, `mac-updates`, `update-download.e2e`, `auto-version`, `ci-policy` |
 | README: Situation Room | ORBAT grouping/filter/search, pins, callsigns/capacity, split panes/tab eviction, focus/keyboard/IME, notes/handoffs, multi-host routing, resources/staleness | `situation`, `productivity`, `readiness`, `workspace.e2e`, `desktop-sessions.e2e`, `component-ui.e2e`, `config-boundaries` |
 | Situation Room: Overwatch | Paged read-only snapshots, unavailable/stale labels, paging/jump keys, detached singleton window, docking, IPC restrictions and selection sync | `workspace.e2e`, `overwatch-window.e2e`, `window-sender`, `main-contract` |
-| README: scrolling/clipboard; clipboard-images | Wheel/page history, input versus scrolling, text/image paste, bounds, ownership/lost transfer, URL routing and focus restoration | `terminal-scroll`, `tmux-control`, `terminal.e2e`, `image-upload`, `renderer-contract`, `desktop.e2e` |
+| README: scrolling/clipboard; clipboard-images | Wheel/page history, input versus scrolling, text/image paste, bounds, ownership/lost transfer, URL routing and focus restoration | `terminal-scroll`, `tmux-control`, `terminal.e2e`, `image-upload`, `image-upload-python`, `renderer-contract`, `desktop.e2e` |
 | README: commands/history/help | Callsign command timeout/cancel, switcher/history limits, unavailable/truncated results, duplicate shortcuts and persistence | `productivity`, `situation`, `workspace.e2e`, `component-ui.e2e` |
 | README: launch presets; rules-of-engagement | Shell arguments/instructions, create/resume, profile precedence, native flags/hooks, custom/gated rejection, model/host selection and existing-session safety | `remote-helper-python`, `remote-boundaries-python`, `chat-provider-contracts-python`, `chat-runtime-python`, optional `launch-modes` and `claude-gated` |
 | README: attention; provider-telemetry; fleet-readiness | Confirmed versus inferred evidence, acknowledgements/notifications, hook deduplication, usage provenance/staleness, readiness precedence and clock persistence | `attention`, `readiness`, `provider-telemetry-python`, `remote-helper-python`, `workspace.e2e`, `loop-breaker` |
-| README: companion/remote control | Pairing expiry/single use, cookies/origins/rate limits, HTTPS/private-IP transports, scoped handles, control handoff/resize/input, lifecycle receipts, links/history, filters, revoke/forget and disconnect | `remote-control`, `companion-client`, `renderer-contract`, `companion.e2e`, `companion-filters.e2e`, `component-ui.e2e` |
+| README: companion/remote control | Pairing expiry/single use, cookies/origins/rate limits, HTTPS/private-IP transports, scoped handles, control handoff/resize/input, lifecycle receipts, links/history, filters, revoke/forget and disconnect | `pair-companion-cli`, `coverage-source-browser.e2e`, `remote-control`, `companion-client`, `renderer-contract`, `companion.e2e`, `companion-filters.e2e`, `component-ui.e2e` |
 | README: background access; platforms | Native close/hide/minimize/tray/Dock/menu/Quit, simulated/physical sleep, observer reconnect without mutation replay, Tailscale discovery and installation | `platform`, `main-contract`, `desktop.e2e`, `companion.e2e`; physical desktop/tailnet checks remain unevidenced by headless fixtures |
 | desktop-sync | Pair/connect/revoke, endpoint/auth/encryption/replay, limits/backoff, convergence/tombstones/local exclusions, offline restart/conflicts, pull tabs and active-service guards | `peer-sync`, `peer-sync-ui`, `component-ui.e2e` |
 | reconnect | Retry/backoff/last-view cancellation, retained ownership, stale inventory, restart workspace, host-retarget invalidation, normal exit versus transport loss | `reconnect`, `local-service`, `workspace.e2e`, `chat-upgrade-python` |
@@ -108,3 +109,14 @@ Optional provider probes, target-network checks, OS installer interaction,
 physical phone/sleep, notification permission prompts, and publisher signing
 remain explicit limitations until actual evidence is available. Do not mark the
 goal complete or merge on the basis of this preliminary audit.
+
+The source-inventory audit also includes the companion service worker and local
+pairing CLI. The required browser suite checks real worker activation/cache
+isolation, network-only private routes and POST/foreign-origin requests, failed
+responses, offline asset reads, and 40-entry eviction. The CLI suite uses private
+fixture directories for configuration precedence, invitation JSON, hash-only
+persistence, and single-use consumption. Image-upload tests validate the same
+extracted Python bytes both directly and through the base64 transfer wrapper,
+including PNG corruption/truncation, private file modes, safe stale-file cleanup,
+and symlink rejection. Remaining failure branches and desktop image-paste flows
+still require review against the final source report.

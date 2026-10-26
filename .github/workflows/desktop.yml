@@ -37,6 +37,7 @@ jobs:
     timeout-minutes: 40
     env:
       AGENTC2_COVERAGE: '1'
+      AGENTC2_SOURCE_COVERAGE: '1'
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.1.0
@@ -156,6 +157,7 @@ jobs:
     env:
       AGENTC2_HOST: agentc2-ci
       AGENTC2_COVERAGE: '1'
+      AGENTC2_SOURCE_COVERAGE: '1'
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.1.0
@@ -207,6 +209,7 @@ jobs:
       AGENTC2_HOST: agentc2-ci
       AGENTC2_CLEANUP_QA_HOME: /tmp/agentc2-cleanup-ssh-ci/remote-home
       AGENTC2_COVERAGE: '1'
+      AGENTC2_SOURCE_COVERAGE: '1'
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.1.0
