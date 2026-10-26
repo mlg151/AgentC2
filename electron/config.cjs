@@ -286,10 +286,11 @@ class Store extends EventEmitter {
     workspace.tabs = workspace.tabs.filter((key) => !deleted.has(key));
     if (deleted.has(workspace.selectedKey)) workspace.selectedKey = workspace.tabs.at(-1) || null;
     if (deleted.has(workspace.splitKey)) workspace.splitKey = null;
-    // validateWorkspace always constructs the situation, including legacy input.
-    if (deleted.has(workspace.situation.anchorKey)) workspace.situation.anchorKey = null;
-    if (deleted.has(workspace.situation.targetKey)) workspace.situation.targetKey = null;
-    for (const key of deleted) delete workspace.situation.callsigns[key];
+    if (workspace.situation) {
+      if (deleted.has(workspace.situation.anchorKey)) workspace.situation.anchorKey = null;
+      if (deleted.has(workspace.situation.targetKey)) workspace.situation.targetKey = null;
+      for (const key of deleted) delete workspace.situation.callsigns[key];
+    }
     const attentionCursors = { ...this.data.attentionCursors };
     for (const key of keys) delete attentionCursors[key];
     // One atomic store replacement prevents stale renderer saves resurrecting history.
