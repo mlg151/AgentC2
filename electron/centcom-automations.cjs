@@ -29,14 +29,11 @@ function createAutomations({ service, state, validateConfig, persist, stateFile 
       scope = { profiles: definition.profiles, before };
       payload = artifact;
     } else if (kind === 'centcom_trigger') {
-      if (Object.keys(payload).some((k) => !Object.hasOwn(state.config.triggers, k))) throw new Error('Unknown CENTCOM trigger field');
       artifact = validateConfig({ ...state.config, triggers: { ...state.config.triggers, ...payload } }).triggers;
       before = state.config.triggers;
       scope = state.config;
       payload = artifact;
     } else {
-      if (!object(payload.order) || Object.keys(payload).some((k) => !['order', 'revision'].includes(k))) throw new Error('OpOrder payload requires order and optional preview revision');
-      if (payload.revision !== undefined && !/^[a-f0-9]{64}$/.test(payload.revision)) throw new Error('Invalid OpOrder preview revision');
       const order = { ...payload.order, enabled: true };
       const normalized = validateSettings({ ...settings, opOrders: [...(settings.opOrders || []).filter((o) => o.id !== order.id), order] });
       artifact = normalized.opOrders.find((o) => o.id === order.id);

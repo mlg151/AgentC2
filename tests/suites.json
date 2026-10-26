@@ -1,6 +1,11 @@
 {
   "suites": [
     {
+      "id": "centcom-support-boundaries",
+      "file": "tests/centcom-support-boundaries.cjs",
+      "group": "core"
+    },
+    {
       "id": "chat-helper-sources-python",
       "file": "tests/chat-helper-sources.py",
       "group": "linux-python"

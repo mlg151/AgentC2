@@ -145,3 +145,17 @@ remote-access saves without duplicate tray creation. The focused original-source
 report reaches 457/457 statements, 140/140 branches, 158/158 functions, and
 254/254 lines in `electron/main.cjs`. Its unused private sender default is
 removed; the registration wrapper always supplies the observer permission.
+
+Focused original-source coverage also reaches all four thresholds for capability
+support (129 statements, 176 branches, 24 functions, 70 lines) and automation
+handling (117 statements, 79 branches, 21 functions, 81 lines). Support tests use
+the real operation registry and fleet boundary and reject any attempt to mutate
+or acquire control. They cover disabled/disconnected hosts, legacy terminal
+metadata, missing ownership/request/capability evidence, unsupported hooks,
+unknown scopes, stale inspection, and unproven repository prerequisites.
+Automation tests cover malformed/legacy drafts, absent persisted settings,
+legacy settings without OpOrders, and an actual Store save racing a read-only
+preview. JSON shape/revision checks already enforced by the published schema
+are not repeated after that validator; invalid payloads retain their schema
+errors before any persistence or enrollment. The existing real Git OpOrder and
+both-authority engine integration suites remain required.
