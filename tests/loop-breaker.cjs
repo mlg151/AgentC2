@@ -64,11 +64,10 @@ try {
   const auto = breaker.observe([session([18, 19].map((index) => ({ ...event(index, 'failed', a), failureLabel: undefined })), { key: 'default/tmux:hq-dddddddddddd' })])[0];
   assert.equal(auto.status, 'pending'); assert.equal(auto.autoInterrupt, true); assert.equal(auto.label, 'Repeated confirmed failure');
   assert.deepEqual(breaker.observe([session([event(20, 'failed', a)], { presetId: 'missing-preset' })]), []);
-  const countBeforeNotice = store.data.loopState[unknownKey].count;
-  const notice = event(22, 'notice');
-  assert.deepEqual(breaker.observe([session([notice], { key: unknownKey })]), []);
-  assert.equal(store.data.loopState[unknownKey].cursor, notice.id);
-  assert.equal(store.data.loopState[unknownKey].count, countBeforeNotice, 'An unrelated event cannot establish failure or progress');
+  const noticeKey = 'default/tmux:hq-eeeeeeeeeeee', notice = event(23, 'notice');
+  assert.deepEqual(breaker.observe([session([event(22, 'failed', a), notice], { key: noticeKey })]), []);
+  assert.equal(store.data.loopState[noticeKey].cursor, notice.id);
+  assert.equal(store.data.loopState[noticeKey].count, 1, 'An unrelated event cannot establish failure or progress');
   store.save('settings', { ...store.data.settings, presets: store.data.settings.presets.map((preset) => preset.id === 'claude' ? { ...preset, attentionHooks: false } : preset) });
   assert.deepEqual(breaker.observe([session([event(21, 'failed', a)])]), [], 'Disabled attention hooks cannot authorize automatic interruption');
   console.log('PASS repeated confirmed failures, progress and signature resets, scope, restart deduplication, and cooldown');

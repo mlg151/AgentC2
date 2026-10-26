@@ -2,12 +2,14 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { HistorySearch } from '../../src/components/HistorySearch';
 import { SettingsDialog } from '../../src/components/SettingsDialog';
+import { PeerSyncSettings } from '../../src/components/PeerSyncSettings';
 import { CentcomDialog } from '../../src/components/CentcomDialog';
 import '../../src/styles.css';
 
 // Render production components with a controlled IPC boundary. No SSH,
 // provider credentials, remote configuration, or model calls are involved.
 const root = createRoot(document.getElementById('root')!);
+window.qaBridgeSettled = [];
 window.agentHQ = new Proxy({}, {
   get(_target, name: string) {
     if (name === 'platform') return window.qaPlatform || 'linux';
@@ -16,10 +18,13 @@ window.agentHQ = new Proxy({}, {
       window.addEventListener(name, listener);
       return () => window.removeEventListener(name, listener);
     };
-    return (...args) => window.invokeBridge(name, ...args);
+    return async (...args) => {
+      try { return await window.invokeBridge(name, ...args); }
+      finally { window.qaBridgeSettled.push(name); }
+    };
   },
 });
-const components = { history: HistorySearch, settings: SettingsDialog, centcom: CentcomDialog };
+const components = { history: HistorySearch, settings: SettingsDialog, centcom: CentcomDialog, peers: PeerSyncSettings };
 window.qaMount = (name, props = {}) => {
   const close = () => { window.invokeBridge('closed'); root.render(<p>Dialog closed</p>); };
   const Component = components[name];
