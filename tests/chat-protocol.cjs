@@ -15,6 +15,12 @@ const create = command('create', { provider: 'codex', cwd: '/tmp/repo', title: '
 add('command', { ...create, payload: { ...create.payload, model: 'fixture-model' } }, true);
 for (const model of ['', 42, 'x'.repeat(201)]) add('command', { ...create, payload: { ...create.payload, model } }, false);
 for (const provider of contract.providers) add('command', { ...create, payload: { ...create.payload, provider } }, true);
+add('command', { ...create, payload: { ...create.payload, managedName: 'hq-' + 'a'.repeat(12), instructions: '', providerSessionId: 'native-session' } }, true);
+for (const change of [
+  ...[null, 42, '', 'hq-invalid'].map((managedName) => ({ managedName })),
+  { instructions: 'Reviewed repository guidance' }, { providerSessionId: 'native-session' },
+]) add('command', { ...create, payload: { ...create.payload, ...change } }, !Object.hasOwn(change, 'managedName'));
+for (const instructions of [42, '😀'.repeat(10001)]) add('command', { ...create, payload: { ...create.payload, instructions } }, false);
 for (const operation of ['send', 'steer', 'respond', 'interrupt', 'stop']) add('command', command(operation, operation === 'send' ? { text: 'Hello 👋' } : operation === 'steer' ? { text: 'Continue', expectedTurnId: 'turn-one' } : operation === 'respond' ? { requestId: 'request-one', turnId: 'turn-one', itemId: null, decision: 'deny' } : {}), true);
 add('command', command('respond', { requestId: 'q', turnId: null, itemId: null, answers: [{ questionId: 'q1', answers: ['Answer'] }] }), true);
 for (const change of [{ protocolVersion: 2 }, { protocolVersion: true }, { commandId: '../escape' }, { operation: 'shell' }, { extra: true }, { sessionId }]) add('command', { ...create, ...change }, false);
@@ -25,6 +31,8 @@ add('command', command('stop', { signal: 9 }), false);
 add('command', command('send', { text: 'ok' }, '../escape'), false);
 add('command', command('respond', { requestId: 'q', turnId: null, itemId: null, decision: 'allow', answers: [] }), false);
 add('command', command('respond', { requestId: 'q', turnId: null, itemId: null, answers: [] }), false);
+for (const answers of ['invalid', Array(21).fill('answer')]) add('command', command('respond', { requestId: 'q', turnId: null, itemId: null, answers: [{ questionId: 'q1', answers }] }), false);
+add('command', command('respond', { requestId: 'q', turnId: null, itemId: null, answers: [{ questionId: 'q1', answers: ['', 'Freeform answer'] }] }), true);
 
 const data = {
   'session.updated': { state: 'running', detail: 'Working' },
@@ -45,11 +53,20 @@ for (const [kind, value] of Object.entries(data)) {
   add('event', event(kind, value), true);
   add('event', event(kind, { ...value, arbitrary: true }), false);
 }
-for (const change of [{ sequence: 0 }, { sequence: true }, { timestamp: '2026-02-31T12:00:00.000Z' }, { timestamp: '2026-10-22T12:00:00.000+01:00' }, { timestamp: 'today' }, { provider: 'unknown' }, { type: 'unknown' }, { turnId: '' }]) add('event', { ...event('message.delta', { text: 'x' }), ...change }, false);
+for (const change of [{ protocolVersion: 2 }, { sequence: 0 }, { sequence: true }, { timestamp: '2026-02-31T12:00:00.000Z' }, { timestamp: '2026-10-22T12:00:00.000+01:00' }, { timestamp: 'today' }, { provider: 'unknown' }, { type: 'unknown' }, { turnId: '' }]) add('event', { ...event('message.delta', { text: 'x' }), ...change }, false);
 add('event', event('usage.updated', { ...data['usage.updated'], totalTokens: -1 }), false);
 add('event', event('usage.updated', { ...data['usage.updated'], totalTokens: true }), false);
 add('event', event('tool.completed', { ...data['tool.completed'], isError: 'false' }), false);
 add('event', event('question.requested', { requestId: 'q', questions: [] }), false);
+for (const change of [{ options: 'invalid' }, { options: Array(101).fill('choice') }, { multiple: 'yes' }]) add('event', event('question.requested', { requestId: 'q', questions: [{ id: 'q1', question: 'Which?', options: [], multiple: false, ...change }] }), false);
+add('event', event('error', { ...data.error, retryable: 'no' }), false);
+for (const payload of [null, [], 42]) add('event', event('provider.event', { method: 'fixture', payload }), false);
+const extension = event('provider.event', { method: 'fixture', payload: { text: '' } });
+const remaining = contract.limits.wireBytes - Buffer.byteLength(JSON.stringify(extension));
+for (const extra of [0, 1]) add('event', { ...extension, data: { ...extension.data, payload: { text: 'x'.repeat(remaining + extra) } } }, extra === 0);
+// These values cannot reach a JSON/Python receiver at all, so validate them on
+// the producer side instead of serializing them into different parity inputs.
+for (const value of [undefined, () => {}, Symbol('fixture'), 1n, NaN, Infinity]) assert.throws(() => validateEvent(event('provider.event', { method: 'fixture', payload: { value } })), /Invalid JSON chat value/);
 const unsupported = unavailableCapabilities('antigravity', '1.4.4', 'Adapter verification pending');
 add('capabilities', unsupported, true);
 add('capabilities', { ...unsupported, attachments: true }, false);

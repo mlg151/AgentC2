@@ -1,6 +1,41 @@
 {
   "suites": [
     {
+      "id": "chat-runtime-unit-python",
+      "file": "tests/chat-runtime-unit.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "chat-provider-contracts-python",
+      "file": "tests/chat-provider-contracts.py",
+      "group": "linux-python"
+    },
+    {
+      "id": "centcom-dispatch",
+      "file": "tests/centcom-dispatch.cjs",
+      "group": "core"
+    },
+    {
+      "id": "commander-unit",
+      "file": "tests/commander-unit.cjs",
+      "group": "core"
+    },
+    {
+      "id": "oporders-unit",
+      "file": "tests/oporders-unit.cjs",
+      "group": "core"
+    },
+    {
+      "id": "attention",
+      "file": "tests/attention.cjs",
+      "group": "core"
+    },
+    {
+      "id": "mac-update-unit",
+      "file": "tests/mac-update-unit.cjs",
+      "group": "core"
+    },
+    {
       "id": "coverage-normalization-python",
       "file": "tests/coverage-normalization.py",
       "group": "linux-python"

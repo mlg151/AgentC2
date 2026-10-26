@@ -4,6 +4,7 @@ const { activeFleet, commanderIdentity } = require('../electron/centcom-fleet.cj
 const { outputSchema, automationOutputSchema } = require('../electron/centcom-output.cjs');
 const { validate, automationSchema } = require('../electron/centcom-schema.cjs');
 const { readHistory, summarizeAction } = require('../electron/centcom-history.cjs');
+const { operationExamples, automationExamples, doctrineExample } = require('../electron/centcom-examples.cjs');
 const envelope = (value) => '```agentc2-c2\n' + JSON.stringify(value) + '\n```';
 
 for (const value of [undefined, null, false, 1, {}, '', ' \n', 'ordinary response']) assert.equal(parseCentcomEnvelope(value), null);
@@ -59,6 +60,9 @@ assert.match(bounded('x'.repeat(100), 20).reason, /byte limit/);
 assert.throws(() => outputSchema('unknown-operation'), /Missing output contract/);
 assert.throws(() => automationOutputSchema('unknown-kind'), /Unknown automation output/);
 assert.throws(() => automationSchema('unknown-kind'), /Unknown automation schema/);
+assert.throws(() => operationExamples({ operation: 'unknown', handler() {} }), /Missing contract example/);
+assert.throws(() => automationExamples('unknown-kind'), /Missing automation contract example/);
+assert.throws(() => doctrineExample([]), /Doctrine operation is not in the implemented contract/);
 assert.throws(() => validate({ $ref: '#/$defs/unknown' }, {}), /Unresolved schema reference/);
 assert.equal(validate({ not: { const: 1 } }, 2), 2);
 assert.deepEqual(validate({ type: 'object' }, { upstream: 'permitted extension' }), { upstream: 'permitted extension' });

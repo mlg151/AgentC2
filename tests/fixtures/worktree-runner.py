@@ -6,7 +6,8 @@ import sys
 root = Path(__file__).resolve().parents[2]
 scope = {"__name__": "centcom_worktree_fixture"}
 for name in ("worktrees.py", "provider_telemetry.py", "remote.py", "exercises.py"):
-    exec((root / "electron" / name).read_text(), scope)
+    source = root / "electron" / name
+    exec(compile(source.read_text(), str(source), "exec"), scope)
 request = json.load(sys.stdin)
 home = Path(request.pop("fixtureHome")).resolve()
 scope["WORKTREE_ROOT"] = home / "owned"

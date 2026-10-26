@@ -14,6 +14,7 @@ const { readClipboardPng } = require('../electron/clipboard-image.cjs');
   const clipboard = { read: async () => [{ types: ['image/png'], getType: async () => new Blob([png]) }] };
   const nativeImage = { createFromBuffer: () => ({ isEmpty: () => false, getSize: () => ({ width: 512, height: 512 }), toPNG: () => png }) };
   assert.deepEqual(await readClipboardPng(clipboard, nativeImage), png);
+  await assert.rejects(readClipboardPng(clipboard, { createFromBuffer: () => ({ isEmpty: () => true }) }), /could not be decoded/);
   await assert.rejects(() => readClipboardPng({ read: async () => [{ types: ['image/png'], getType: async () => ({ size: PNG_LIMIT + 1 }) }] }, nativeImage), /larger than 8 MB/);
   await assert.rejects(() => readClipboardPng(clipboard, { createFromBuffer: () => ({ isEmpty: () => false, getSize: () => ({ width: 10001, height: 1 }) }) }), /dimensions/);
   assert.equal(await readClipboardPng({ read: async () => [{ types: ['text/plain'] }] }, nativeImage), null);

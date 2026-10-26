@@ -24,15 +24,16 @@ async function installMacArchive({ archive, bundle, version, directory, run = ex
     // Copy before moving the current app. A failed final rename restores it.
     // A previous bundle is retained for manual rollback after a successful update.
     const command = `set -eu\n/usr/bin/ditto ${quote(incoming)} ${quote(candidate)}\n/bin/mv ${quote(bundle)} ${quote(backup)}\nif /bin/mv ${quote(candidate)} ${quote(bundle)}; then\n  /usr/bin/true\nelse\n  /bin/mv ${quote(backup)} ${quote(bundle)}\n  exit 1\nfi`;
-    try {
-      await fs.access(parent, require('node:fs').constants.W_OK);
-      await run('/bin/sh', ['-c', command]);
-    } catch (error) {
-      // Request elevation only for a non-writable installation directory, never
-      // retry an installation failure with higher privileges.
+    // Only the access preflight can select elevation. A failure while running
+    // the replacement transaction must leave the current app running for review.
+    let elevate = false;
+    try { await fs.access(parent, require('node:fs').constants.W_OK); }
+    catch (error) {
       if (error.code !== 'EACCES' && error.code !== 'EPERM') throw error;
-      await run('/usr/bin/osascript', ['-e', `do shell script ${JSON.stringify(command)} with administrator privileges`]);
+      elevate = true;
     }
+    if (elevate) await run('/usr/bin/osascript', ['-e', `do shell script ${JSON.stringify(command)} with administrator privileges`]);
+    else await run('/bin/sh', ['-c', command]);
     return backup;
   } finally { await fs.rm(staging, { recursive: true, force: true }); }
 }
