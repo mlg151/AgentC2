@@ -159,3 +159,28 @@ preview. JSON shape/revision checks already enforced by the published schema
 are not repeated after that validator; invalid payloads retain their schema
 errors before any persistence or enrollment. The existing real Git OpOrder and
 both-authority engine integration suites remain required.
+
+
+`app-workflows.e2e` exercises the real desktop renderer through a deterministic
+public preload boundary: tabs/panes/anchor/callsigns/keyboard routes, persistent
+notes/projects/pins, settings and clipboard recovery, inbox/fault/Flash traffic,
+launch/handoff acknowledgement with delayed inventory and no automatic replay,
+SPECOPS escalation/stage routing, host recovery, empty workspaces, and initial,
+peer-sync, and native Overwatch event races. Actual SSH and native window suites
+remain necessary for transport and OS behavior.
+
+The app suite also rejects renderer errors through repeated React StrictMode
+terminal disposal. xterm 5.5 fails this check with the upstream pending viewport
+callback error; xterm 6 and matching addons resolve it. The desktop wheel handler
+runs in DOM capture so xterm's changed viewport cannot consume provider scrolling
+first. `terminal.e2e` checks rendered keyboard/mouse fullscreen movement, shell
+history, fallback, clipboard, links, and retained state against real SSH/tmux.
+
+`terminal-touch` checks the local touch adapter's direction, sub-row accumulation,
+intent threshold, horizontal/multi-touch passthrough, identity, zero-size fallback,
+cancellation, and disposal. `phone-terminal-touch.e2e` drives real Chromium touch
+gestures over the production phone terminal with a normal-buffer snapshot. It
+asserts older/newer rendered history, no remote writes/resizes/control requests,
+and detach/reattach safety. This fixture covers xterm's local scrollback; live
+SSH/tmux uses the alternate screen and the separate retained-history dialog.
+Physical mobile/browser and publisher/platform limitations above remain open.

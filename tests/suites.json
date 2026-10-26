@@ -1,6 +1,21 @@
 {
   "suites": [
     {
+      "id": "terminal-touch",
+      "file": "tests/terminal-touch.cjs",
+      "group": "core"
+    },
+    {
+      "id": "phone-terminal-touch.e2e",
+      "file": "tests/phone-terminal-touch.e2e.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "app-workflows.e2e",
+      "file": "tests/app-workflows.e2e.cjs",
+      "group": "linux-web"
+    },
+    {
       "id": "centcom-support-boundaries",
       "file": "tests/centcom-support-boundaries.cjs",
       "group": "core"

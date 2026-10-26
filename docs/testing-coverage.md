@@ -151,27 +151,40 @@ for skips and platform limitations.
 
 ## Current status
 
-The 100% target is not yet met. The [six-shard original-source run for 0da0861](https://github.com/mlg151/AgentC2/actions/runs/40270031569)
+The 100% target is not yet met. The [six-shard original-source run for c57ee63](https://github.com/mlg151/AgentC2/actions/runs/40272481774)
 passed all four native package jobs and both isolated Linux jobs. Its verified
-aggregate measured 14911/16433 statements (90.74%), 11091/12917 branches (85.86%),
-2905/3265 functions (88.97%), and 11701/12289 lines (95.22%). It measured 119
-production files, with 44 complete files and 231 file/metric gaps. Coverage and
-Quality gate correctly failed the exact target. The retained artifact includes
-all six source/suite manifests and regenerated HTML/JSON reports.
+aggregate measured 14935/16439 statements (90.85%), 11106/12914 branches (86.00%),
+2911/3265 functions (89.16%), and 11713/12295 lines (95.27%). It measured 121
+production files, with 50 complete files, 222 file/metric gaps, and no unobserved
+modules. Coverage and Quality gate correctly failed the exact target. The
+retained artifact includes all six source/suite manifests and regenerated
+HTML/JSON reports.
 
 The largest remaining branch gaps in that baseline are service (172), CENTCOM
 (158), App (107), ChatView (78), and TerminalView (57). App has 165/242 covered
 functions; all 242 original functions are included, including callbacks V8 had
 omitted. The [workflow audit](testing-workflows.md) remains unfinished.
 
-Follow-up focused collections reach all four thresholds for image upload
-(JavaScript and Python), approval bindings, and the Electron main process.
-The companion service worker and pairing CLI also reach all four thresholds in
-the source-level aggregate. The extracted Claude history reader and detached
-launcher additionally expose code previously hidden in Python strings; their
-helper tests, actual private-SDK tests, and unchanged frozen-v1 upgrade
-regressions pass. These additions require a fresh final-revision native
-aggregate; focused results do not replace it.
+Image upload (JavaScript and Python), approval bindings, the Electron main
+process, the companion service worker, pairing CLI, and extracted Claude history
+reader/launcher reach all four thresholds in that aggregate. Focused follow-up
+collections reach all four thresholds for capability/support discovery and
+automation validation. The latter removes three duplicated checks already
+performed by the published JSON-schema validator; rejection still precedes any
+persistence. These focused results do not replace a final native aggregate.
+
+The required app workflow suite exercises the production renderer through the
+public preload boundary, including launch/handoff acknowledgements followed by
+delayed or failed inventory, settings/workspace/clipboard failures, permissions,
+and native-window/initial-state races. React StrictMode disposal exposed an
+xterm 5.5 pending viewport callback error. The xterm 6 upgrade includes that
+upstream fix; captured desktop wheel routing retains tmux/provider scrolling.
+Its touch regression is covered separately with a normal-buffer phone terminal
+fixture and real CDP touch gestures. A small local scrolling adapter preserves
+horizontal/pinch gestures and never sends input or takes control. Live tmux
+alternate-screen history continues to use the existing retained-history view.
+No deployed worker protocol, journal, or launch-permission flag changes are
+introduced by these terminal changes.
 
 The earlier [V8 run for 74b85a1](https://github.com/mlg151/AgentC2/actions/runs/40264338052)
 reported 96.75% statements/lines, 87.08% branch ranges, and 88.81% functions.

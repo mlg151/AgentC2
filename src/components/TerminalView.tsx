@@ -114,11 +114,12 @@ export function TerminalView({ terminalId, visible, focused = true }: { terminal
       if (activeIdRef.current && controlRef.current) void window.agentHQ?.writeTerminal(activeIdRef.current, data).catch(showError);
     });
     const disposeSelection = terminal.onSelectionChange(() => setHasSelection(terminal.hasSelection()));
-    terminal.attachCustomWheelEventHandler((event) => {
+    const onWheel = (event: WheelEvent) => {
       const id = activeIdRef.current;
-      if (!controlRef.current) return true;
-      if (!id || !event.deltaY) return true;
+      if (!controlRef.current) return;
+      if (!id || !event.deltaY) return;
       event.preventDefault();
+      event.stopImmediatePropagation();
       const amount = event.deltaMode === 1 ? Math.abs(event.deltaY) : Math.ceil(Math.abs(event.deltaY) / 40);
       wheelPending.current += Math.sign(event.deltaY) * Math.max(3, Math.min(amount, 60));
       if (wheelTimer.current === null && !wheelFlight.current) {
@@ -135,8 +136,10 @@ export function TerminalView({ terminalId, visible, focused = true }: { terminal
           void flight.finally(() => { if (wheelFlight.current === flight) wheelFlight.current = null; });
         }, 35);
       }
-      return false;
-    });
+    };
+    // Capture before xterm's viewport consumes wheel events. Controlled views
+    // scroll through tmux/provider policy; observers keep local-only scrolling.
+    element.addEventListener('wheel', onWheel, { capture: true, passive: false });
     terminal.attachCustomKeyEventHandler((event) => {
       const key = event.key.toLowerCase();
       const modifier = event.ctrlKey || event.metaKey;
@@ -202,6 +205,7 @@ export function TerminalView({ terminalId, visible, focused = true }: { terminal
       if (wheelTimer.current !== null) clearTimeout(wheelTimer.current);
       disposeInput.dispose();
       disposeSelection.dispose();
+      element.removeEventListener('wheel', onWheel, true);
       element.removeEventListener('paste', onPaste, true);
       element.removeEventListener('mousedown', suppressRemoteContextMenu, true);
       element.removeEventListener('mouseup', suppressRemoteContextMenu, true);
