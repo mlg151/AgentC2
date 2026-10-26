@@ -18,6 +18,20 @@ const { packagePath } = require('../scripts/package-path.cjs');
   assert.equal(appDataDirectory('win32', { APPDATA: '/fixture/roaming' }, '/fixture/home'), '/fixture/roaming');
   assert.deepEqual(tailscaleBinaries('win32', {}), ['C:\\Program Files\\Tailscale\\tailscale.exe']);
   assert.deepEqual(tailscaleBinaries('win32', { ProgramFiles: 'D:\\Programs' }), ['D:\\Programs\\Tailscale\\tailscale.exe']);
+  assert.deepEqual(tailscaleBinaries(), tailscaleBinaries(process.platform, process.env));
+  assert.equal(closeAction({ quitting: false, remoteEnabled: true, hasTray: true }), process.platform === 'linux' ? 'minimize' : 'hide');
+  // Capture the module's normal execFile dependency before loading it in a
+  // child; default options are exercised without reading the user's tailnet.
+  const defaultStatus = JSON.parse(execFileSync(process.execPath, ['-e', `
+    const assert = require('node:assert/strict');
+    require('node:child_process').execFile = (file, args, options, done) => {
+      assert.ok(file); assert.deepEqual(args, ['status', '--json']);
+      assert.equal(options.env.TAILSCALE_BE_CLI, '1');
+      done(null, '{}');
+    };
+    require(process.argv[1]).tailscaleStatus().then((value) => process.stdout.write(JSON.stringify(value))).catch((error) => { console.error(error); process.exitCode = 1; });
+  `, require.resolve('../electron/platform.cjs')], { encoding: 'utf8' }));
+  assert.deepEqual(defaultStatus, { installed: true, state: 'Unavailable', url: '', error: '' });
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agentc2-platform-'));
   try {
     fs.writeFileSync(path.join(directory, 'remote-access.json'), JSON.stringify({ enabled: true, url: 'https://qa.example.ts.net' }));

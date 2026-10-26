@@ -67,6 +67,10 @@ for (const extra of [0, 1]) add('event', { ...extension, data: { ...extension.da
 // These values cannot reach a JSON/Python receiver at all, so validate them on
 // the producer side instead of serializing them into different parity inputs.
 for (const value of [undefined, () => {}, Symbol('fixture'), 1n, NaN, Infinity]) assert.throws(() => validateEvent(event('provider.event', { method: 'fixture', payload: { value } })), /Invalid JSON chat value/);
+const unverified = unavailableCapabilities('codex');
+assert.equal(unverified.version, null); assert.equal(unverified.reason, 'Provider integration has not been verified');
+assert.ok(contract.capabilities.every((name) => unverified[name] === false));
+add('event', event('request.resolved', { requestId: 'without-decision', state: 'expired', decision: null }), true);
 const unsupported = unavailableCapabilities('antigravity', '1.4.4', 'Adapter verification pending');
 add('capabilities', unsupported, true);
 add('capabilities', { ...unsupported, attachments: true }, false);

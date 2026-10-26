@@ -5,7 +5,7 @@ const { validateWorkspace } = require('../electron/config.cjs');
 function load(name) {
   return loadRenderer(`${name}.ts`);
 }
-const { situationFor, updateSituation, openInPane, closeWorkspaceTab, assignCallsigns, unitState } = load('workspace');
+const { situationFor, updateSituation, openInPane, closeWorkspaceTab, assignCallsigns, unitState, projectFor } = load('workspace');
 const { normalizeBinding, resolvedBinding, bindingMatches, validateShortcuts } = load('commands');
 const a = 'default/tmux:hq-123', b = 'secondary/tmux:hq-123';
 let workspace = validateWorkspace({ tabs: [a, b], selectedKey: a, splitKey: b, metadata: {} });
@@ -65,4 +65,13 @@ assert.ok(bindingMatches(event, 'Alt+J', true), 'Option characters must still ma
 assert.ok(!bindingMatches({ ...event, isComposing: true }, 'Alt+J', true));
 assert.ok(!bindingMatches({ ...event, getModifierState: () => true }, 'Alt+J', true));
 assert.ok(!bindingMatches({ ...event, shiftKey: true }, 'Alt+J', false));
+// Empty persisted slots recover their focus and grouping deterministically.
+assert.equal(projectFor({ key: a, cwd: '' }, {}), 'Ungrouped');
+const invalidAnchor = updateSituation(validateWorkspace({ tabs: [b], metadata: {} }), { anchorKey: a, targetKey: b, focusedPane: 'anchor' });
+assert.equal(invalidAnchor.situation.anchorKey, null); assert.equal(invalidAnchor.selectedKey, b);
+const invalidTarget = updateSituation(workspace, { targetKey: 'default/tmux:missing', focusedPane: 'target' });
+assert.equal(invalidTarget.situation.targetKey, null); assert.equal(invalidTarget.situation.focusedPane, 'anchor');
+assert.equal(unitState({ key: a, activity: 'halted', state: 'live' }, []).code, 'HALT');
+assert.throws(() => normalizeBinding('Ctrl+'), /Choose a modified key/);
+assert.ok(bindingMatches({ code: 'Slash', key: '?', ctrlKey: true, altKey: false, shiftKey: true, metaKey: false, isComposing: false }, 'Ctrl+Shift+?', false));
 console.log('PASS Situation Room migration, independent panes, immutable navigation, stable scoped callsigns/overflow, truthful states, and cross-platform shortcut validation');
