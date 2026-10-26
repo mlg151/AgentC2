@@ -21,7 +21,7 @@ function send(event, ...args) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(event, ...args);
 }
 function showWindow() { if (!mainWindow || mainWindow.isDestroyed()) createWindow(); if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); }
-function assertSender(event, allowOverwatch = false) {
+function assertSender(event, allowOverwatch) {
   const windows = [mainWindow, ...(allowOverwatch ? [overwatchWindow] : [])];
   assertWindowSender(event, windows);
   if (startupError) throw new Error(startupError);

@@ -138,3 +138,10 @@ missing/empty/populated native history, SDK failure propagation, exact detached
 process flags, and a real detached child. Frozen-v1 upgrade fixtures remain
 unchanged; all six compatibility, ownership, pending-command, SDK-preparation,
 and unknown-receipt regressions must pass before merge.
+
+The main-process contract suite also covers late service events after window
+close, focusing an already visible detached Overwatch window, and repeated
+remote-access saves without duplicate tray creation. The focused original-source
+report reaches 457/457 statements, 140/140 branches, 158/158 functions, and
+254/254 lines in `electron/main.cjs`. Its unused private sender default is
+removed; the registration wrapper always supplies the observer permission.

@@ -68,6 +68,7 @@ async function windowsAndEvents() {
   const main = f.windows[0];
   f.invoke('overwatch:undock'); const watch = f.windows[1];
   watch.minimized = true; f.invoke('overwatch:undock'); assert.equal(f.windows.length, 2); assert.equal(watch.restored, true);
+  watch.restored = false; f.invoke('overwatch:undock'); assert.equal(f.windows.length, 2); assert.equal(watch.restored, false, 'Focusing a visible Overwatch window does not restore or create another native window');
   assert.equal(watch.openHandler({ url: 'https://example.invalid' }).action, 'deny');
   let prevented = false; watch.webContents.emit('will-navigate', { preventDefault() { prevented = true; } }); assert.equal(prevented, true);
   const reads = new Set(['state:get', 'inventory', 'terminal:previews', 'overwatch:state', 'overwatch:dock', 'overwatch:select']);
@@ -99,6 +100,7 @@ async function windowsAndEvents() {
   assert.equal(f.invoke('overwatch:dock').undocked, false); assert.equal(watch.destroyed, true);
   for (const action of ['minimize', 'hide', 'close']) { f.closeAction = action; let prevented = false; main.emit('close', { preventDefault() { prevented = true; } }); assert.equal(prevented, action !== 'close'); }
   main.destroy(); assert.throws(() => f.invoke('overwatch:select', 'host/tmux:managed'), /Untrusted window/);
+  const closedCalls = f.calls.length; f.service.events.emit('health:updated', { state: 'late' }); assert.equal(f.calls.length, closedCalls, 'Late backend events cannot send to a closed main window');
   f.app.emit('activate'); assert.equal(f.windows.length, 3);
   f.invoke('overwatch:undock'); f.app.emit('before-quit'); assert.equal(f.windows.at(-1).destroyed, true); assert.ok(f.timers.every((timer) => timer.cleared));
   await assert.rejects(f.invoke('overwatch:select', 'host/tmux:managed'), /Main window is unavailable/);
@@ -119,6 +121,7 @@ async function platformStartup() {
     f.gatewayFailure = false; tray.menu.template[1].click(); await f.flush(); assert.equal(tray.destroyed, true);
     f.invoke('overwatch:undock'); assert.equal(f.windows[1].loaded[0], platform === 'linux' ? 'url' : 'file');
     await f.invoke('remote:save', { enabled: true }); assert.equal(f.trays.length, 2);
+    await f.invoke('remote:save', { enabled: true }); assert.equal(f.trays.length, 2, 'Saving enabled remote access retains the existing tray');
     f.app.emit('before-quit'); f.quit = false; f.app.emit('window-all-closed'); assert.equal(f.quit, platform !== 'darwin');
   }
   const unavailableTray = await mainFixture({ remoteEnabled: true, trayFailure: true }); assert.equal(unavailableTray.trays.length, 0); assert.ok(unavailableTray.calls.some(([name]) => name === 'console.warn')); unavailableTray.app.emit('before-quit');
