@@ -1,6 +1,11 @@
 {
   "suites": [
     {
+      "id": "session-cleanup-boundaries-python",
+      "file": "tests/session-cleanup-boundaries.py",
+      "group": "linux-python"
+    },
+    {
       "id": "antigravity-cleanup-boundaries-python",
       "file": "tests/antigravity-cleanup-boundaries.py",
       "group": "linux-python"

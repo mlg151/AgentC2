@@ -24,15 +24,16 @@ export function CentcomDialog({ settings, onClose }: { settings: Settings; onClo
     let active = true;
     void window.agentHQ?.centcomState().then((s) => {
       if (active) {
-        setState(s);
-        setConfigDraft(s.config);
+        // A live event or an edited draft can precede this initial reply.
+        setState((current) => current ?? s);
+        setConfigDraft((draft) => draft ?? s.config);
       }
     }).catch((e: Error) => { if (active) setError(e.message); });
 
     const off = window.agentHQ?.onCentcomState((s) => {
       if (active) {
         setState(s);
-        if (!configDraft) setConfigDraft(s.config);
+        setConfigDraft((draft) => draft ?? s.config);
       }
     });
 

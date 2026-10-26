@@ -183,6 +183,86 @@ async function commander(page) {
   await page.getByRole('button', { name: 'Close', exact: true }).click(); await page.getByText('Dialog closed', { exact: true }).waitFor();
 }
 
+async function commanderDraft(page) {
+  const initial = { config: centcomDefaults('alpha'), session: null, status: 'idle', costUsd: 0, costKnown: true, directives: [], automations: [], auditLog: [] };
+  let pending;
+  handlers.set('centcomState', () => new Promise((resolve, reject) => { pending = { resolve, reject }; }));
+  handlers.set('configureCentcom', async (config) => ({ ...initial, config: validateConfig(config) }));
+  await mount(page, 'centcom', { settings: settings() }); await until(() => pending, 'Initial commander request missing');
+  const live = { ...initial, config: { ...initial.config, model: 'event-model' }, status: 'running', costUsd: 3 };
+  await page.evaluate((state) => window.qaEmit('onCentcomState', state), live);
+  await page.getByRole('button', { name: 'Configuration & ROE', exact: true }).click();
+  await page.getByLabel('Model ID', { exact: true }).fill('unsaved-reviewed-model');
+  await page.getByLabel(/^Command Execution Host/).selectOption('beta');
+  await page.getByLabel(/^Autonomous C2/).check(); await page.getByLabel(/^Max Cumulative Budget/).fill('2');
+  await page.evaluate((state) => window.qaEmit('onCentcomState', state), { ...live, costUsd: 4 });
+  assert.equal(await page.getByLabel('Model ID', { exact: true }).inputValue(), 'unsaved-reviewed-model', 'Live status cannot overwrite unsaved configuration');
+  pending.resolve(initial);
+  await page.locator('.centcom-badge.status-running').waitFor();
+  assert.equal(await page.getByLabel('Model ID', { exact: true }).inputValue(), 'unsaved-reviewed-model', 'Late initial response cannot overwrite the draft');
+  await page.getByText('SPEND: $4.00', { exact: true }).waitFor();
+  await page.getByLabel('Model ID', { exact: true }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(directory, 'centcom-draft-preserved.png') });
+  await page.getByRole('button', { name: 'Save Configuration', exact: true }).click(); await until(() => last('configureCentcom')[1].model === 'unsaved-reviewed-model', 'Edited commander config was not saved');
+  const saved = last('configureCentcom')[1]; assert.equal(saved.hostId, 'beta'); assert.equal(saved.authority, 'autonomous'); assert.equal(saved.maxBudgetUsd, 2);
+  await page.screenshot({ path: path.join(directory, 'centcom-draft-saved.png') }); await close(page);
+  handlers.set('centcomState', async () => { throw Error('Initial commander state unavailable'); });
+  await mount(page, 'centcom', { settings: settings() }); await page.getByRole('alert').filter({ hasText: 'Initial commander state unavailable' }).waitFor(); await close(page);
+  for (const reject of [false, true]) {
+    pending = null; handlers.set('centcomState', () => new Promise((resolve, reject) => { pending = { resolve, reject }; }));
+    await mount(page, 'centcom', { settings: settings() }); await until(() => pending, 'Pending commander request missing'); await close(page);
+    if (reject) pending.reject(Error('Late commander failure')); else pending.resolve(initial);
+    await page.getByText('Dialog closed', { exact: true }).waitFor();
+  }
+}
+
+async function peerSettings(page) {
+  let state = { id: 'desktop', enabled: false, running: false, deviceName: 'Fixture', bindAddress: '127.0.0.1', port: 43128, address: '', error: '', peers: [] }, failure = '', expiry = 60000;
+  handlers.set('peerSyncStatus', async () => state);
+  handlers.set('savePeerSync', async (input) => { if (failure) throw Error('Sync configuration refused'); return state = { ...state, ...input, running: input.enabled, address: 'ws://127.0.0.1:43201' }; });
+  handlers.set('issuePeerPairing', async () => ({ code: 'fixture-pairing-code', url: 'ws://127.0.0.1:43201', expiresAt: Date.now() + expiry }));
+  handlers.set('connectPeer', async () => state = { ...state, peers: [{ id: 'peer', name: 'Connected fixture', connected: true, remoteTabs: ['alpha/tmux:one'], lastSyncedAt: new Date().toISOString(), error: '' }, { id: 'offline', name: 'Offline fixture', connected: false, remoteTabs: [], lastSyncedAt: null, error: 'Fixture offline' }] });
+  handlers.set('pullPeerTabs', async () => ({ tabs: ['alpha/tmux:one'] }));
+  handlers.set('revokePeer', async (id) => state = { ...state, peers: state.peers.filter((peer) => peer.id !== id) });
+  await mount(page, 'settings', { settings: settings() }); await page.getByRole('button', { name: 'Desktop sync', exact: true }).click(); await page.getByRole('status').filter({ hasText: 'Desktop sync is off' }).waitFor();
+  await page.getByLabel('Enable desktop sync', { exact: true }).check(); await page.getByLabel('Device name', { exact: true }).fill('Edited desktop'); await page.getByLabel('LAN / VPN bind address', { exact: true }).fill('127.0.0.1'); await page.getByLabel('Sync port', { exact: true }).fill('43201');
+  failure = 'save'; await page.getByRole('button', { name: 'Apply desktop sync', exact: true }).click(); await page.getByRole('alert').filter({ hasText: 'Sync configuration refused' }).waitFor(); failure = '';
+  await page.getByRole('button', { name: 'Apply desktop sync', exact: true }).click(); await page.getByRole('status').filter({ hasText: 'Listening at ws://127.0.0.1:43201' }).waitFor();
+  assert.deepEqual(last('savePeerSync')[1], { ...state, id: 'desktop', running: false, address: '', error: '', peers: [] }, 'The editor preserves the loaded configuration fields');
+  await page.getByRole('button', { name: 'Generate pairing code', exact: true }).click(); await page.getByLabel('Pairing code', { exact: true }).waitFor();
+  assert.equal(await page.getByLabel('Pairing code', { exact: true }).inputValue(), 'fixture-pairing-code');
+  await page.getByLabel('Peer address', { exact: true }).fill(' ws://127.0.0.1:43202 '); await page.getByLabel('Peer pairing code', { exact: true }).fill(' fixture-code ');
+  await page.getByRole('button', { name: 'Connect desktop', exact: true }).click(); await page.getByText('Connected fixture', { exact: true }).waitFor();
+  assert.deepEqual(last('connectPeer'), ['connectPeer', { url: 'ws://127.0.0.1:43202', code: 'fixture-code' }]); assert.equal(await page.getByLabel('Peer pairing code', { exact: true }).inputValue(), '');
+  await page.getByRole('button', { name: 'Pull open tabs (1)', exact: true }).click(); await until(() => last('pullPeerTabs'), 'Peer tabs not requested'); assert.deepEqual(last('pullPeerTabs'), ['pullPeerTabs', 'peer']);
+  await page.locator('.host-editor').filter({ has: page.getByText('Connected fixture', { exact: true }) }).getByRole('button', { name: 'Revoke desktop', exact: true }).click(); await until(() => last('revokePeer'), 'Peer revocation missing'); assert.deepEqual(last('revokePeer'), ['revokePeer', 'peer']);
+  expiry = -1; await page.getByRole('button', { name: 'Generate pairing code', exact: true }).click(); await page.getByText('Pairing code expired. Generate a new one.', { exact: true }).waitFor();
+  await page.evaluate((state) => window.qaEmit('onPeerSyncStatus', state), { ...state, error: 'External sync error' }); await page.getByRole('alert').filter({ hasText: 'External sync error' }).waitFor(); assert.equal(await page.getByText('Pairing code expired. Generate a new one.', { exact: true }).count(), 0);
+  await close(page);
+}
+
+async function projectOrders(page) {
+  let current = settings(), failure = '', ready = false;
+  const revision = 'b'.repeat(64);
+  handlers.set('saveSettings', async (input) => { if (failure === 'save') throw Error('Order save refused'); current = validateSettings(input); });
+  handlers.set('previewOpOrder', async () => ({ ready, revision, unsupported: ready ? [] : ['Provider conversion requires review'], changes: [{ path: 'AGENTS.md', status: ready ? 'changed' : 'conflict', diff: 'Reviewed fixture diff', reason: ready ? '' : 'Fixture conflict' }] }));
+  handlers.set('enrollOpOrder', async (order, reviewed) => { assert.equal(reviewed, revision); if (failure === 'apply') throw Error('Reviewed order changed'); return current = validateSettings({ ...current, opOrders: [...(current.opOrders || []).filter((item) => item.id !== order.id), { ...order, enabled: true }] }); });
+  await mount(page, 'settings', { settings: current }); await page.getByRole('button', { name: 'OpOrders', exact: true }).click(); await page.getByText('Create an OpOrder to enroll a project.', { exact: true }).waitFor(); await page.getByRole('button', { name: 'Add OpOrder', exact: true }).click();
+  await page.getByLabel(/^Host/).selectOption('beta'); await page.getByLabel('Remote Git worktree root', { exact: true }).fill('/fixture/repository'); await page.getByLabel(/^Shared instructions/).fill('Shared fixture guidance');
+  await page.getByLabel(/^Claude override/).fill('Claude fixture'); await page.getByLabel(/^Antigravity override/).fill('Antigravity fixture'); await page.getByLabel(/^Codex-only override/).fill('Unsupported override');
+  await page.getByLabel(/^MCP servers/).fill('{}'); await page.getByRole('button', { name: 'Preview remote changes', exact: true }).click(); await page.getByRole('alert').filter({ hasText: 'MCP servers must be a JSON array' }).waitFor();
+  await page.getByLabel(/^MCP servers/).fill('['); await page.getByRole('button', { name: 'Preview remote changes', exact: true }).click(); await page.getByRole('alert').waitFor();
+  await page.getByLabel(/^MCP servers/).fill('[]'); await page.getByRole('button', { name: 'Preview remote changes', exact: true }).click(); await page.getByText('Review required', { exact: true }).waitFor(); assert.equal(await page.getByRole('button', { name: 'Apply and enable sync', exact: true }).isDisabled(), true);
+  await page.getByLabel(/^Codex-only override/).fill(''); ready = true;
+  await page.getByRole('button', { name: 'Preview remote changes', exact: true }).click(); await page.getByText('Ready to apply', { exact: true }).waitFor();
+  failure = 'apply'; await page.getByRole('button', { name: 'Apply and enable sync', exact: true }).click(); await page.getByRole('alert').filter({ hasText: 'Reviewed order changed' }).waitFor(); assert.equal(await page.getByRole('button', { name: 'Apply and enable sync', exact: true }).isDisabled(), true);
+  failure = ''; await page.getByRole('button', { name: 'Preview remote changes', exact: true }).click(); await page.getByRole('button', { name: 'Apply and enable sync', exact: true }).click(); await page.getByRole('button', { name: 'Apply update', exact: true }).waitFor();
+  await until(() => last('externalSettings'), 'Applied settings callback missing'); assert.equal(last('externalSettings')[1].opOrders[0].enabled, true); assert.equal(current.opOrders[0].hostId, 'beta'); assert.equal(current.opOrders[0].instructions, 'Shared fixture guidance');
+  failure = 'save'; await page.getByRole('button', { name: 'Pause sync', exact: true }).click(); await page.getByRole('alert').filter({ hasText: 'Order save refused' }).waitFor();
+  failure = ''; await page.getByRole('button', { name: 'Pause sync', exact: true }).click(); await page.getByRole('button', { name: 'Apply and enable sync', exact: true }).waitFor(); assert.equal(current.opOrders[0].enabled, false);
+  await page.getByRole('button', { name: 'Remove', exact: true }).click(); await page.getByText('Create an OpOrder to enroll a project.', { exact: true }).waitFor(); assert.deepEqual(current.opOrders, []); await close(page);
+}
+
 (async () => {
   try {
     fs.mkdirSync(directory, { recursive: true });
@@ -194,7 +274,7 @@ async function commander(page) {
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/tests/fixtures/component-ui.html`);
     assert.equal(await page.title(), 'AgentC2 Component QA'); await page.getByRole('button', { name: 'Fixture focus anchor', exact: true }).waitFor();
     assert.equal(await page.locator('vite-error-overlay').count(), 0);
-    await history(page); await configuration(page); await remoteAccess(page); await commander(page);
+    await history(page); await configuration(page); await remoteAccess(page); await peerSettings(page); await projectOrders(page); await commander(page); await commanderDraft(page);
     await page.setViewportSize({ width: 960, height: 800 }); await mount(page, 'settings', { settings: settings() }); await page.screenshot({ path: path.join(directory, 'settings-narrow.png') }); await close(page);
     assert.deepEqual(errors, []);
     console.log('PASS rendered history/search cancellation, settings persistence/error recovery, pairing/revocation, exact CENTCOM decisions/configuration/reset confirmation, focus restoration, and narrow layout');
