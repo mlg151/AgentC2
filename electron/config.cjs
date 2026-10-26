@@ -142,7 +142,6 @@ function validateWorkspace(w) {
     used.add(value);
     return [text(key, 300), value];
   }));
-  if (used.size > 99) throw new Error('At most 99 callsigns can be assigned');
   const shortcuts = Object.fromEntries(Object.entries(source.shortcuts || {}).map(([key, value]) => [text(key, 60), text(value, 80)]));
   if (Object.keys(shortcuts).length > 50) throw new Error('Too many keyboard overrides');
   const focusedPane = source.focusedPane === 'target' && targetKey || !anchorKey && targetKey ? 'target' : 'anchor';

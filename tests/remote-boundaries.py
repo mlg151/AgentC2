@@ -114,9 +114,8 @@ class RemoteBoundaries(unittest.TestCase):
         self.assertEqual(self.call("codex_sessions"), [])
         database = self.home / ".codex" / "state_5.sqlite"
         database.parent.mkdir()
-        database.write_bytes(b"invalid database")
-        self.assertEqual(self.call("codex_sessions"), [])
-        database.unlink()
+        with patch.object(sqlite3, "connect", side_effect=sqlite3.DatabaseError("Unreadable database")):
+            self.assertEqual(self.call("codex_sessions"), [])
         with closing(sqlite3.connect(database)) as conn:
             conn.execute("CREATE TABLE threads(id,title,cwd,updated_at_ms,archived)")
             conn.executemany("INSERT INTO threads VALUES(?,?,?,?,?)", [("saved-id", "T" * 130, "/repo", 1790000000000, 0), ("archived-id", None, None, None, 1)])
@@ -125,6 +124,32 @@ class RemoteBoundaries(unittest.TestCase):
         self.assertEqual([row["id"] for row in rows], ["saved-id", "archived-id"])
         self.assertEqual(len(rows[0]["title"]), 120)
         self.assertEqual((rows[1]["title"], rows[1]["cwd"], rows[1]["state"]), ("Codex conversation", "", "archived"))
+
+    def test_codex_failed_schema_query_closes_the_read_only_connection(self):
+        database = self.home / ".codex" / "state_5.sqlite"
+        database.parent.mkdir()
+        database.touch()
+        connections = []
+        class TrackedConnection(sqlite3.Connection):
+            closed = False
+            def close(self):
+                self.closed = True
+                super().close()
+        connect = sqlite3.connect
+        def tracked(*args, **kwargs):
+            self.assertEqual(args, (f"file:{database}?mode=ro",))
+            self.assertEqual(kwargs, {"uri": True, "timeout": 2})
+            connection = connect(*args, **kwargs, factory=TrackedConnection)
+            connections.append(connection)
+            return connection
+        try:
+            with patch.object(sqlite3, "connect", tracked):
+                self.assertEqual(self.call("codex_sessions"), [])
+            self.assertEqual(len(connections), 1)
+            self.assertTrue(connections[0].closed, "A schema-read failure must close its SQLite connection")
+        finally:
+            for connection in connections:
+                connection.close()
 
     def test_claude_transcript_and_active_agent_merge(self):
         root = self.home / ".claude" / "projects" / "project"
@@ -609,7 +634,15 @@ class RemoteBoundaries(unittest.TestCase):
             (ancestor / "cpu.max").write_text("max 100000")
         (proc / "pressure" / "cpu").write_text("\nsome avg10=1.5 total=10\n")
         (group / "cpu.pressure").write_text("some invalid=bad\n")
-        result = self.call("resource_constraints", proc, root)
+        read_paths = []
+        original_read = Path.read_text
+        def read(path, *args, **kwargs):
+            read_paths.append(path)
+            return original_read(path, *args, **kwargs)
+        with patch.object(Path, "read_text", read):
+            result = self.call("resource_constraints", proc, root)
+        limits = {path.parent for path in read_paths if path.name in ("memory.max", "cpu.max")}
+        self.assertEqual(limits, {root, group.parent, group}, "Probe ancestors only inside the cgroup mount")
         self.assertEqual((result["memoryLimitStatus"], result["cpuLimitStatus"]), ("unlimited", "unlimited"))
         self.assertEqual(result["pressure"]["cpu"]["some"]["avg10"], 1.5)
         self.assertIsNone(result["groupPressure"]["cpu"])
