@@ -42,8 +42,12 @@ Additional isolated helper evidence now closes the code metrics for GitHub
 preview, omitted/binary/large work, verification timeout/cleanup, changed source,
 conflicting/failed promotion, and rejection before external mutation. The GitHub
 URL regression reproduces acceptance of lookalike hostnames before the fix and
-requires an exact `github.com` hostname afterward. Workflow/layer audit items
-below remain open.
+requires an exact `github.com` hostname afterward. The session cleanup helper additionally reaches 352/352 statements/lines,
+200/200 branch exits, and every named function and callback in the combined
+isolated cleanup/helper collection. The expanded safety tests preserve histories
+on active/unknown ownership, provider readback failure, a stale batch, oversized
+shared data, or an uncertain native receipt. Workflow/layer audit items below
+remain open.
 
 ## Remaining documentation and candidate evidence
 
