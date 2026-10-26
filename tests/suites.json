@@ -741,6 +741,11 @@
       "id": "chat-worker-boundaries-python",
       "file": "tests/chat-worker-boundaries.py",
       "group": "linux-python"
+    },
+    {
+      "id": "centcom-persisted-targets",
+      "file": "tests/centcom-persisted-targets.cjs",
+      "group": "core"
     }
   ],
   "nested": {
