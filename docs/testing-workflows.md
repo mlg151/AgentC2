@@ -120,3 +120,19 @@ extracted Python bytes both directly and through the base64 transfer wrapper,
 including PNG corruption/truncation, private file modes, safe stale-file cleanup,
 and symlink rejection. Remaining failure branches and desktop image-paste flows
 still require review against the final source report.
+
+The original-source focused collection for upload/binding boundaries covers
+`image-upload.cjs` (49 statements, 29 branches, 10 functions, 31 lines),
+`image-upload.py` (62 statements/lines, 24 branches, one function), and
+`centcom-bindings.cjs` (175 statements, 235 branches, 37 functions, 110 lines)
+at 100% in all four metrics. Image-transfer tests include spawn/close races,
+stdout/stderr limits, invalid receipts, broken pipes, timeouts, unsafe parent and
+root links, unreadable stale entries, and temporary-file disappearance after a
+committed hard link. Approval capture's two unused private defaults are removed;
+both callers already always pass normalized arrays. These focused results do
+not replace the final native aggregate or workflow audit.
+
+The inventory review still needs to expose the inline Claude history reader
+and detached worker launcher as independently measurable Python source. That
+change must retain deployed worker ownership and pass the frozen-v1 upgrade
+regressions before merge.

@@ -1,7 +1,8 @@
 """Exercise the transferred PNG helper without a real user's upload directory."""
 import base64
-import hashlib
 import json
+import io
+from contextlib import redirect_stderr, redirect_stdout
 import os
 from pathlib import Path
 import subprocess
@@ -9,6 +10,8 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
+import types
 import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -84,6 +87,51 @@ class ImageUpload(unittest.TestCase):
                 self.assertIn(b"Clipboard PNG", result.stderr)
                 self.assertEqual(result.stdout, b"")
         self.assertFalse(self.root.exists(), "Invalid PNGs must fail before creating an upload directory")
+
+    def run_in_process(self):
+        output, errors = io.StringIO(), io.StringIO()
+        with patch.object(Path, "home", return_value=self.home), patch.object(sys, "stdin", types.SimpleNamespace(buffer=io.BytesIO(PNG))), redirect_stdout(output), redirect_stderr(errors):
+            exec(compile(HELPER.read_text(), str(HELPER), "exec"), {})
+        self.assertEqual(errors.getvalue(), "")
+        value = json.loads(output.getvalue())
+        self.assertEqual(Path(value["path"]).read_bytes(), PNG)
+        return value
+
+    def test_unreadable_cleanup_entry_does_not_abort_new_transfer(self):
+        self.root.mkdir(parents=True)
+        unreadable = self.root / ("agentc2-" + "f" * 32 + ".png")
+        unreadable.write_bytes(b"existing fixture")
+        original = Path.lstat
+
+        def inspect(file, *args, **kwargs):
+            if file == unreadable:
+                raise PermissionError("Fixture cleanup entry is unreadable")
+            return original(file, *args, **kwargs)
+
+        with patch.object(Path, "lstat", inspect):
+            self.run_in_process()
+        self.assertEqual(unreadable.read_bytes(), b"existing fixture")
+
+    def test_temporary_disappearance_after_link_preserves_committed_png(self):
+        original = os.link
+
+        def link_and_remove(source, destination, **kwargs):
+            original(source, destination, **kwargs)
+            Path(source).unlink()
+
+        with patch.object(os, "link", link_and_remove):
+            self.run_in_process()
+        self.assertEqual(list(self.root.glob("*.part")), [])
+
+    def test_symlinked_parent_is_rejected_without_writing(self):
+        target = self.home / "other"
+        target.mkdir()
+        self.root.parent.parent.mkdir(parents=True)
+        self.root.parent.symlink_to(target, target_is_directory=True)
+        result = self.run_helper(PNG)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(b"ownership is unsafe", result.stderr)
+        self.assertEqual(list(target.iterdir()), [])
 
     def test_symlinked_upload_root_is_rejected_without_writing(self):
         target = self.home / "other"

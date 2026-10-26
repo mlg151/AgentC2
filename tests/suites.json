@@ -1,6 +1,11 @@
 {
   "suites": [
     {
+      "id": "image-upload-boundaries",
+      "file": "tests/image-upload-boundaries.cjs",
+      "group": "core"
+    },
+    {
       "id": "image-upload-python",
       "file": "tests/image-upload.py",
       "group": "linux-python"
