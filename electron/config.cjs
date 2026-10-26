@@ -240,11 +240,10 @@ class Store extends EventEmitter {
     workspace.tabs = workspace.tabs.filter((key) => !deleted.has(key));
     if (deleted.has(workspace.selectedKey)) workspace.selectedKey = workspace.tabs.at(-1) || null;
     if (deleted.has(workspace.splitKey)) workspace.splitKey = null;
-    if (workspace.situation) {
-      if (deleted.has(workspace.situation.anchorKey)) workspace.situation.anchorKey = null;
-      if (deleted.has(workspace.situation.targetKey)) workspace.situation.targetKey = null;
-      for (const key of deleted) delete workspace.situation.callsigns[key];
-    }
+    // validateWorkspace always constructs the situation, including legacy input.
+    if (deleted.has(workspace.situation.anchorKey)) workspace.situation.anchorKey = null;
+    if (deleted.has(workspace.situation.targetKey)) workspace.situation.targetKey = null;
+    for (const key of deleted) delete workspace.situation.callsigns[key];
     // Pin mutations have their own API. An older desktop snapshot must not undo
     // a companion change, even when that snapshot predates the metadata entry.
     for (const [key, metadata] of Object.entries(workspace.metadata)) {
@@ -287,11 +286,10 @@ class Store extends EventEmitter {
     workspace.tabs = workspace.tabs.filter((key) => !deleted.has(key));
     if (deleted.has(workspace.selectedKey)) workspace.selectedKey = workspace.tabs.at(-1) || null;
     if (deleted.has(workspace.splitKey)) workspace.splitKey = null;
-    if (workspace.situation) {
-      if (deleted.has(workspace.situation.anchorKey)) workspace.situation.anchorKey = null;
-      if (deleted.has(workspace.situation.targetKey)) workspace.situation.targetKey = null;
-      for (const key of deleted) delete workspace.situation.callsigns[key];
-    }
+    // validateWorkspace always constructs the situation, including legacy input.
+    if (deleted.has(workspace.situation.anchorKey)) workspace.situation.anchorKey = null;
+    if (deleted.has(workspace.situation.targetKey)) workspace.situation.targetKey = null;
+    for (const key of deleted) delete workspace.situation.callsigns[key];
     const attentionCursors = { ...this.data.attentionCursors };
     for (const key of keys) delete attentionCursors[key];
     // One atomic store replacement prevents stale renderer saves resurrecting history.

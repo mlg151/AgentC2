@@ -80,6 +80,20 @@ try {
   store.data.loopState = { [keys[0]]: { fixture: true }, 'host/tmux:retained': { fixture: true } };
   store.forgetSessions(keys); assert.deepEqual(store.data.workspace.tabs, []); assert.equal(store.data.workspace.situation.anchorKey, null);
   assert.deepEqual(Object.keys(store.data.loopState), ['host/tmux:retained']);
+  // Legacy pane input is normalized before tombstones are applied. The
+  // normalized situation and retained notes must survive a disk round trip.
+  for (const legacy of [{}, { situation: null }, { situation: {} }, { situation: { anchorKey: keys[0], targetKey: keys[1], callsigns: { [keys[0]]: '01', [keys[1]]: '02' } } }]) {
+    store.data.workspace = validateWorkspace({ tabs: [], metadata: {} });
+    store.data.deletedSessions = [keys[0]];
+    const migrated = store.saveWorkspace({ tabs: keys, selectedKey: keys[0], splitKey: keys[1], metadata: { [keys[0]]: { project: '', notes: 'Deleted note', pinned: false }, [keys[1]]: { project: '', notes: 'Retain owned note', pinned: false } }, ...legacy });
+    assert.deepEqual(migrated.tabs, [keys[1]]); assert.equal(migrated.selectedKey, keys[1]); assert.equal(migrated.splitKey, null);
+    assert.equal(migrated.situation.anchorKey, null); assert.equal(migrated.situation.targetKey, keys[1]);
+    assert.equal(migrated.situation.callsigns[keys[0]], undefined);
+    assert.equal(migrated.metadata[keys[0]], undefined); assert.equal(migrated.metadata[keys[1]].notes, 'Retain owned note');
+    const persisted = new Store(directory).data.workspace;
+    assert.equal(persisted.selectedKey, keys[1]); assert.equal(persisted.metadata[keys[0]], undefined); assert.equal(persisted.metadata[keys[1]].notes, 'Retain owned note');
+  }
+  store.data.deletedSessions = [];
   const many = Object.fromEntries(Array.from({ length: 10000 }, (_, i) => ['host/tmux:unit' + i, { project: '', notes: '', pinned: false }]));
   store.data.workspace.metadata = many;
   assert.throws(() => store.setSessionPinned('host/tmux:overflow', true), /metadata limit/);

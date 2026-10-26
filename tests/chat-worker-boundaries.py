@@ -177,6 +177,19 @@ class WorkerBoundaries(unittest.TestCase):
         self.assertEqual(fallback.credentials, 0)
         self.assertTrue(json.loads(b"".join(fallback.sent))["ok"])
 
+    def test_socket_rejects_missing_newlines_and_oversized_frames_without_mutation(self):
+        worker = self.worker()
+        server = types.SimpleNamespace(worker=worker, shutdown=Mock())
+        for incoming in (b"", b"{}", b"x" * (runtime.CONTRACT["limits"]["wireBytes"] + 1)):
+            with self.subTest(length=len(incoming)):
+                connection = TranscriptSocket(incoming)
+                runtime.Handler(connection, None, server)
+                response = json.loads(b"".join(connection.sent))
+                self.assertFalse(response["ok"])
+                self.assertIn("Invalid or oversized chat request", response["error"])
+                self.assertEqual(worker.journal.list_sessions(), [])
+        server.shutdown.assert_not_called()
+
     def test_serve_rejects_unsafe_lock_and_socket_before_provider_creation(self):
         for kind in ("hard-link-lock", "regular-socket", "symlink-socket", "held-lock"):
             with self.subTest(kind=kind):
