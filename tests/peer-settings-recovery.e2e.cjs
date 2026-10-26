@@ -59,6 +59,17 @@ async function mount() { loading = null; await page.evaluate(() => window.qaMoun
       await page.getByRole('status').filter({ hasText: 'Listening at ws://127.0.0.1:43211' }).waitFor();
       assert.equal(await name.inputValue(), 'Unsent peer draft'); assert.equal(await page.getByRole('alert').count(), 0);
     }
+    // Editing one field must still load the saved values of untouched fields.
+    await mount(); await name.fill('Partially edited peer');
+    loading.resolve(status({ enabled: true, deviceName: 'Old name', bindAddress: '10.0.0.9', port: 43219 })); await settled('peerSyncStatus');
+    assert.equal(await name.inputValue(), 'Partially edited peer');
+    assert.equal(await enabled.isChecked(), true, 'Untouched enabled state must load from saved configuration');
+    assert.equal(await address.inputValue(), '10.0.0.9'); assert.equal(await port.inputValue(), '43219');
+    await name.fill('  Trim this saved name  '); saving = null; await apply.click(); await until(() => saving, 'Partial edit save missing');
+    await port.fill('43220');
+    saving.resolve(status({ ...saving.input, deviceName: 'Trim this saved name' })); await settled('savePeerSync');
+    assert.equal(await name.inputValue(), 'Trim this saved name', 'Acknowledgement must normalize fields not edited during the save');
+    assert.equal(await port.inputValue(), '43220');
     // Ordinary untouched initialization and explicit save still read back the
     // server's normalized configuration.
     await mount(); loading.resolve(status({ deviceName: 'Loaded peer' })); await settled('peerSyncStatus');

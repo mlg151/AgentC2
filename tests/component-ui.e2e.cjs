@@ -228,7 +228,7 @@ async function peerSettings(page) {
   await page.getByLabel('Enable desktop sync', { exact: true }).check(); await page.getByLabel('Device name', { exact: true }).fill('Edited desktop'); await page.getByLabel('LAN / VPN bind address', { exact: true }).fill('127.0.0.1'); await page.getByLabel('Sync port', { exact: true }).fill('43201');
   failure = 'save'; await page.getByRole('button', { name: 'Apply desktop sync', exact: true }).click(); await page.getByRole('alert').filter({ hasText: 'Sync configuration refused' }).waitFor(); failure = '';
   await page.getByRole('button', { name: 'Apply desktop sync', exact: true }).click(); await page.getByRole('status').filter({ hasText: 'Listening at ws://127.0.0.1:43201' }).waitFor();
-  assert.deepEqual(last('savePeerSync')[1], { ...state, id: 'desktop', running: false, address: '', error: '', peers: [] }, 'The editor preserves the loaded configuration fields');
+  assert.deepEqual(last('savePeerSync')[1], { enabled: state.enabled, deviceName: state.deviceName, bindAddress: state.bindAddress, port: state.port }, 'The editor submits only the editable configuration fields');
   await page.getByRole('button', { name: 'Generate pairing code', exact: true }).click(); await page.getByLabel('Pairing code', { exact: true }).waitFor();
   assert.equal(await page.getByLabel('Pairing code', { exact: true }).inputValue(), 'fixture-pairing-code');
   await page.getByLabel('Peer address', { exact: true }).fill(' ws://127.0.0.1:43202 '); await page.getByLabel('Peer pairing code', { exact: true }).fill(' fixture-code ');

@@ -12,9 +12,18 @@ export function PeerSyncSettings() {
   const [now, setNow] = useState(Date.now());
   const draftRevision = useRef(0);
   const statusRevision = useRef(0);
+  const fieldRevisions = useRef<Partial<Record<keyof PeerSyncConfig, number>>>({});
   function edit(patch: Partial<PeerSyncConfig>) {
-    draftRevision.current++;
+    const revision = ++draftRevision.current;
+    for (const key of Object.keys(patch) as (keyof PeerSyncConfig)[]) fieldRevisions.current[key] = revision;
     setDraft((current) => ({ ...current, ...patch }));
+  }
+  function receiveDraft(value: PeerSyncConfig, revision: number) {
+    setDraft((current) => {
+      const fields = ['enabled', 'deviceName', 'bindAddress', 'port'] as const;
+      const edited = Object.fromEntries(fields.filter((key) => (fieldRevisions.current[key] || 0) > revision).map((key) => [key, current[key]]));
+      return { enabled: value.enabled, deviceName: value.deviceName, bindAddress: value.bindAddress, port: value.port, ...edited };
+    });
   }
   useEffect(() => {
     let active = true;
@@ -22,7 +31,7 @@ export function PeerSyncSettings() {
     void window.agentHQ!.peerSyncStatus().then((value) => {
       if (!active || statusRevision.current !== initialStatus) return;
       setStatus(value);
-      if (draftRevision.current === initialDraft) setDraft(value);
+      receiveDraft(value, initialDraft);
     }).catch((cause) => { if (active && statusRevision.current === initialStatus) setError(String(cause)); });
     const off = window.agentHQ!.onPeerSyncStatus((value) => { statusRevision.current++; setStatus(value); setPairing(null); });
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -38,7 +47,7 @@ export function PeerSyncSettings() {
     <label className="checkbox-label"><input type="checkbox" checked={draft.enabled} onChange={(event) => edit({ enabled: event.target.checked })} />Enable desktop sync</label>
     <div className="form-grid"><label>Device name<input value={draft.deviceName} maxLength={80} onChange={(event) => edit({ deviceName: event.target.value })} /></label><label>LAN / VPN bind address<input value={draft.bindAddress} onChange={(event) => edit({ bindAddress: event.target.value })} /></label><label>Sync port<input type="number" min={0} max={65535} value={draft.port} onChange={(event) => edit({ port: Number(event.target.value) })} /></label></div>
     <p className="field-note">Use this computer’s private IPv4 address, including a Tailscale address, or 127.0.0.1 with a tunnel. Allow the selected port through your firewall. Paired traffic is encrypted.</p>
-    <button className="button-primary" disabled={busy} onClick={() => void run(async () => { const revision = draftRevision.current; setPairing(null); const value = await window.agentHQ!.savePeerSync(draft); setStatus(value); if (draftRevision.current === revision) setDraft(value); })}>Apply desktop sync</button>
+    <button className="button-primary" disabled={busy} onClick={() => void run(async () => { const revision = draftRevision.current; setPairing(null); const value = await window.agentHQ!.savePeerSync(draft); setStatus(value); receiveDraft(value, revision); })}>Apply desktop sync</button>
     <p role="status">{status?.running ? `Listening at ${status.address}` : 'Desktop sync is off'}</p>
     {status?.running ? <>
       <button className="button-secondary" disabled={busy} onClick={() => void run(async () => setPairing(await window.agentHQ!.issuePeerPairing()))}>Generate pairing code</button>
