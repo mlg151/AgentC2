@@ -8,7 +8,7 @@ const { normalize } = require('../scripts/normalize-v8.cjs');
 
 // macOS exposes /var as an alias of /private/var; Node's CJS loader reports
 // canonical source paths. Use that same identity for the disposable source.
-const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agentc2-coverage-compilations-')));
+const directory = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'agentc2-coverage-compilations-')));
 try {
   fs.mkdirSync(path.join(directory, 'src'));
   const file = path.join(directory, 'src/fixture.ts');
@@ -61,5 +61,10 @@ try {
   const missingMap = spawnSync(process.execPath, [path.resolve(__dirname, '../scripts/coverage-javascript.cjs'), 'report', '--src', 'src', '--extension', '.ts', '--include', 'src/**/*.ts', '--exclude-after-remap', '--temp-directory', damaged, '--reports-dir', output], { cwd: directory, encoding: 'utf8' });
   assert.notEqual(missingMap.status, 0, 'Missing production TypeScript maps cannot become an apparently complete report');
   assert.match(missingMap.stderr, /Compiled TypeScript source map is missing/);
+} catch (error) {
+  // Keep real failing native reports: source-map cache aliases cannot be
+  // diagnosed from a percentage or a synthetic map alone.
+  if (process.env.AGENTC2_SUITE_ARTIFACTS) fs.cpSync(directory, path.join(process.env.AGENTC2_SUITE_ARTIFACTS, 'compiler-fixture'), { recursive: true });
+  throw error;
 } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 console.log('PASS independent compiled source maps and exact source counters retain uncalled callbacks across real V8 subprocess reports');

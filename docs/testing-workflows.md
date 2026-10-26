@@ -35,6 +35,16 @@ suite. It does not resolve the open UI audit items or establish application-wide
 100% coverage. The diff helper separately reaches 173/173 statements/lines
 and 68/68 branch exits with the existing hunk suite and new boundary suite.
 
+Additional isolated helper evidence now closes the code metrics for GitHub
+(87 statements/lines, 50 branch exits, 3 functions), SitRep (118 statements/lines,
+48 branch exits, 4 functions), and Joint Exercises (95 statements/lines,
+42 branch exits). These checks include stale and unavailable targets, read-only
+preview, omitted/binary/large work, verification timeout/cleanup, changed source,
+conflicting/failed promotion, and rejection before external mutation. The GitHub
+URL regression reproduces acceptance of lookalike hostnames before the fix and
+requires an exact `github.com` hostname afterward. Workflow/layer audit items
+below remain open.
+
 ## Remaining documentation and candidate evidence
 
 The following is a routing index for the unfinished audit. Test names are

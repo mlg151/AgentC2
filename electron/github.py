@@ -46,7 +46,7 @@ def github_request(payload):
     if operation == "issue":
         issue = payload.get("issue")
         if isinstance(issue, str):
-            match = re.fullmatch(r"https://github.com/([^/]+/[^/]+)/issues/([0-9]+)", issue)
+            match = re.fullmatch(r"https://github\.com/([^/]+/[^/]+)/issues/([0-9]+)", issue)
             if match:
                 if match[1].lower() != repo.lower():
                     raise ValueError("Issue URL belongs to another repository")

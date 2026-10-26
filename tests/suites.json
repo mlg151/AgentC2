@@ -1,6 +1,11 @@
 {
   "suites": [
     {
+      "id": "sitrep-boundaries-python",
+      "file": "tests/sitrep-boundaries.py",
+      "group": "linux-python"
+    },
+    {
       "id": "worktree-diff-boundaries-python",
       "file": "tests/worktree-diff-boundaries.py",
       "group": "linux-python"
