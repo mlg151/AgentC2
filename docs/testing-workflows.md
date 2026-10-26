@@ -184,3 +184,13 @@ asserts older/newer rendered history, no remote writes/resizes/control requests,
 and detach/reattach safety. This fixture covers xterm's local scrollback; live
 SSH/tmux uses the alternate screen and the separate retained-history dialog.
 Physical mobile/browser and publisher/platform limitations above remain open.
+
+
+`service-boundaries` tests the real service factory with isolated Store files and
+controlled process/clock boundaries. It covers health coalescing, CPU delta and
+GPU freshness recovery, active-channel evidence, child spawn/exit/stdin/output
+failures, bounded transport and stdin embedding, stale/disabled cached hosts,
+normal/chat preview provenance, search candidate/match limits, pre-mutation
+launch/permission/diff rejection, Flash queue disconnect/decision handling, and
+active terminal/chat settings guards. It never opens a native PTY or contacts a
+provider. Actual SSH, adapters, and native platform suites remain required.

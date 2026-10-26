@@ -1,6 +1,11 @@
 {
   "suites": [
     {
+      "id": "service-boundaries",
+      "file": "tests/service-boundaries.cjs",
+      "group": "core"
+    },
+    {
       "id": "terminal-touch",
       "file": "tests/terminal-touch.cjs",
       "group": "core"
