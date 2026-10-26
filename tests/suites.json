@@ -1,6 +1,11 @@
 {
   "suites": [
     {
+      "id": "chat-timeline-boundaries",
+      "file": "tests/chat-timeline-boundaries.cjs",
+      "group": "core"
+    },
+    {
       "id": "sitrep-boundaries-python",
       "file": "tests/sitrep-boundaries.py",
       "group": "linux-python"

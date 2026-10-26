@@ -125,8 +125,15 @@ for skips and platform limitations.
 
 ## Current status
 
-The 100% target is not yet met. The workflow audit and remaining production
-coverage gaps are unfinished. Cross-platform artifact aggregation and required
-coverage enforcement have regression tests; consult the actual CI checks for
-native collection and aggregation results on the current revision.
-Do not merge the coverage work as satisfying the target until those checks pass.
+The 100% target is not yet met. The [six-shard CI run for 6b134dc](https://github.com/mlg151/AgentC2/actions/runs/40259659594)
+passed all four native package jobs and both isolated Linux jobs. Its verified
+aggregate measured 15786/16385 statements and lines (96.34%), 11476/13333 branch
+exits (86.07%), and 2910/3284 functions (88.61%). There were 197 production
+file/metric gaps. The aggregate and Quality gate correctly failed the exact
+100% requirement. The combined HTML/JSON reports and source/suite provenance
+are retained in `Complete-coverage-QA` for 14 days.
+
+Further isolated helper and timeline tests do not replace a fresh complete
+aggregate. The [workflow audit](testing-workflows.md) remains unfinished.
+Do not merge the coverage work as satisfying the target until the complete
+coverage and workflow requirements pass on the final revision.
