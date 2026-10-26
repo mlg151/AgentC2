@@ -169,6 +169,14 @@ SPECOPS escalation/stage routing, host recovery, empty workspaces, and initial,
 peer-sync, and native Overwatch event races. Actual SSH and native window suites
 remain necessary for transport and OS behavior.
 
+`app-recovery.e2e` adds actual browser-only startup/retry, single/empty pane
+focus and cycling, duplicate pin-event idempotency, acknowledged cross-host
+creation beyond the inventory retry window without relaunch, target/anchor/last
+unit deletion, 120-unit callsign overflow, and the real five-second polling
+interval with pending/rejected requests during StrictMode cancellation. These
+checks use public bridge events and DOM interactions; no private component
+callbacks are invoked.
+
 The app suite also rejects renderer errors through repeated React StrictMode
 terminal disposal. xterm 5.5 fails this check with the upstream pending viewport
 callback error; xterm 6 and matching addons resolve it. The desktop wheel handler

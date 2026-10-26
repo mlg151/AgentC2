@@ -15,6 +15,13 @@ function installAppBridge({ settings, commander }) {
   if (scenario === 'initial-events' || scenario === 'failed-initial') { qa.hold.getState = true; qa.workspace.tabs.push(units[1].key); }
   if (scenario === 'late-window') qa.hold.overwatchWindowState = true;
   if (scenario === 'failed-window') { qa.fail.overwatchWindowState = 'Window fixture unavailable'; qa.fail.centcomState = 'Commander fixture unavailable'; }
+  if (scenario === 'empty') { qa.units = []; qa.workspace.tabs = []; qa.workspace.selectedKey = null; }
+  if (scenario === 'single') qa.units = units.slice(0, 1);
+  if (scenario === 'capacity') qa.units = Array.from({ length: 120 }, (_, index) => unit(index + 1, 'Fleet unit ' + (index + 1)));
+  if (scenario === 'poll-held') {
+    qa.hold.listFlashTraffic = true;
+    qa.flash = [{ id: '1'.repeat(32), name: units[0].id, hostId: 'alpha', hostName: 'Alpha theater', provider: 'claude', tool: 'Bash', action: 'echo reviewed-poll-fixture', state: 'pending', connected: true, createdAt: 1, expiresAt: 9999999999 }];
+  }
   const methods = {
     getState: () => ({ settings: clone(qa.settings), workspace: clone(qa.workspace), attention: clone(qa.attention) }),
     inventory: () => {
@@ -43,12 +50,14 @@ function installAppBridge({ settings, commander }) {
     launchSitrep: () => { qa.created = unit(nextUnit++, 'SitRep recipient'); qa.visibilityDelay = qa.sitrepVisibilityDelay || 2; return { name: qa.created.id, hostId: qa.created.hostId }; },
     searchHistory: () => ({ matches: [], searched: 0, total: qa.units.length, truncated: false, errors: [] }),
     create: (input) => {
-      qa.created = { ...unit(nextUnit++, input.title || 'Created fixture'), hostId: input.hostId };
+      qa.created = { ...unit(nextUnit++, input.title || 'Created fixture'), hostId: input.hostId, hostName: qa.settings.hosts.find((host) => host.id === input.hostId)?.name || input.hostId };
+      qa.created.key = input.hostId + '/tmux:' + qa.created.id;
       qa.visibilityDelay = qa.visibilityDelay || 2;
       if (qa.failInventoryAfterCreate) qa.fail.inventory = 'Inventory is unavailable after acknowledgement';
       return { name: qa.created.id };
     },
   };
+  if (scenario === 'browser-only') return;
   window.agentHQ = new Proxy({ platform: 'linux' }, { get(target, name) {
     if (name in target) return target[name];
     if (typeof name === 'string' && name.startsWith('on')) return (listener) => {

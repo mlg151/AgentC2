@@ -1,6 +1,11 @@
 {
   "suites": [
     {
+      "id": "app-recovery.e2e",
+      "file": "tests/app-recovery.e2e.cjs",
+      "group": "linux-web"
+    },
+    {
       "id": "service-lifecycle",
       "file": "tests/service-lifecycle.cjs",
       "group": "core"
