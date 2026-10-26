@@ -18,6 +18,18 @@ async function callbacks() {
     assert.deepEqual(sent.map((call) => call[2].length), [2048, 2048, 1, 1, 13, 1]);
     service.terminals.onOutput(record, 'terminal evidence'); assert.equal(sent.at(-1)[2], 'terminal evidence');
     service.chats.onDispose(record); service.terminals.onDispose(record);
+    const desktop = { id: 'desktop' }, viewId = 'terminal-url-view';
+    const urlRecord = { hostId: 'default', name: record.name };
+    service.terminals.handles.set(viewId, { id: viewId, client: desktop, record: urlRecord });
+    const forwards = [];
+    service.tunnels.open = async (host, key, url) => { forwards.push({ host, key, url }); return { url: 'http://127.0.0.1:43210/fixture?q=1' }; };
+    const destination = await service.openDevUrl(desktop, viewId, 'http://localhost:3000/fixture?q=1');
+    assert.equal(destination.url, 'http://127.0.0.1:43210/fixture?q=1');
+    assert.equal(forwards[0].host.id, 'default'); assert.equal(forwards[0].key, 'default/tmux:' + record.name);
+    assert.equal(forwards[0].url, 'http://localhost:3000/fixture?q=1');
+    assert.throws(() => service.openDevUrl({ id: 'observer' }, viewId, 'http://localhost:3000'), /Terminal is disconnected/);
+    service.terminals.handles.clear();
+
     service.centcom.observeChat = async () => { throw Error('Observation fixture failed'); };
     service.events.emit('commander:chat-evidence', record, []); await new Promise((resolve) => setImmediate(resolve));
     assert.ok(fixture.logs.some((row) => row.join(' ').includes('CENTCOM chat observation failed: Observation fixture failed')));
@@ -89,7 +101,12 @@ async function inventoryEdges() {
     const missing = 'default/tmux:hq-111111111111';
     let raised = true;
     service.loopBreaker.observe = () => { if (!raised) return []; raised = false; return [{ sessionKey: missing, id: 'a'.repeat(32), at: new Date().toISOString(), autoInterrupt: true, count: 3, label: 'Verified fixture failure', detail: 'Fixture unit disappeared' }]; };
+    const cacheUnits = service.store.cacheUnits;
+    service.store.cacheUnits = () => { throw Error('Fixture cache persistence refused'); };
     const snapshot = await service.inventory(); await new Promise((resolve) => setImmediate(resolve));
+    service.store.cacheUnits = cacheUnits;
+    assert.ok(snapshot.hosts.every((host) => host.connected), 'A cache persistence failure must not discard fresh host inventory');
+    assert.ok(fixture.logs.some((row) => row.join(' ').includes('Could not cache Fixture host inventory: Fixture cache persistence refused')));
     assert.equal(snapshot.sessions[0].outputActivity, undefined, 'Saved conversation rows have no native terminal activity');
     assert.equal(snapshot.attention.find((item) => item.signature.startsWith('loop:')).title, missing);
     assert.ok(fixture.logs.some((row) => row.join(' ').includes('Automatic interrupt failed: No eligible confirmed fault')));

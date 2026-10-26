@@ -1,6 +1,11 @@
 {
   "suites": [
     {
+      "id": "chat-recovery.e2e",
+      "file": "tests/chat-recovery.e2e.cjs",
+      "group": "linux-web"
+    },
+    {
       "id": "centcom-snapshot",
       "file": "tests/centcom-snapshot.cjs",
       "group": "core"

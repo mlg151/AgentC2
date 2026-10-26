@@ -65,6 +65,18 @@ async function transport() {
     assert.equal(fixture.calls.at(-1).embedded, true, 'Large request payloads travel on stdin rather than the process argument limit');
     assert.deepEqual(await service.worktrees('default'), { retained: true }); assert.equal(fixture.calls.at(-1).embedded, false);
     assert.equal(fixture.timers.size, 0, 'Every remote completion must clear its timeout');
+    const chatPayloads = []; let failChat = false;
+    fixture.setHandler((request) => {
+      chatPayloads.push(request.payload);
+      if (failChat) request.fail(1, 'Read-only chat bootstrap transport failed');
+      else request.respond([]);
+    });
+    await service.chats.list('default'); await service.chats.list('default');
+    failChat = true; await assert.rejects(service.chats.list('default'), /chat bootstrap transport failed/);
+    failChat = false; await service.chats.list('default');
+    assert.deepEqual(chatPayloads.map((payload) => Object.hasOwn(payload, 'chatFiles')), [true, false, false, true], 'A failed chat read invalidates the bootstrap cache for the next explicit read');
+    assert.ok(chatPayloads.every((payload) => payload.action === 'chat' && payload.request.action === 'list'), 'Bootstrap recovery must not replay a provider command');
+
   } finally { fixture.close(); }
 }
 
