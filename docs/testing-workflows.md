@@ -2,7 +2,9 @@
 
 This is the behavior audit for the five requested test layers. It complements
 [production coverage](testing-coverage.md); neither a list of tests nor a line
-coverage percentage proves that every workflow is tested. The audit is open. The historical focused V8 counts below are diagnostic;
+coverage percentage proves that every workflow is tested. The audit is open and
+its remaining items are follow-up work for the acceptance release, not a claim of
+100% workflow coverage. The historical focused V8 counts below are diagnostic;
 the original-source AST collector supersedes those denominators.
 
 A contract check verifies a boundary's accepted inputs, outputs, errors, and

@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { check, pythonSummary, declarationFiles } = require('../scripts/coverage.cjs');
+const { check, checkAcceptance, acceptanceMinimums, pythonSummary, declarationFiles } = require('../scripts/coverage.cjs');
 const { normalize } = require('./helpers/browser-coverage.cjs');
 const { nameAnonymousFunctions } = require('../scripts/normalize-v8.cjs');
 const complete = Object.fromEntries(['statements', 'branches', 'functions', 'lines'].map((metric) => [metric, { total: 100000, covered: 100000 }]));
@@ -19,6 +19,19 @@ assert.throws(() => check({}), /Empty coverage/);
 assert.throws(() => check({ total: complete }), /Empty coverage/);
 const empty = Object.fromEntries(Object.keys(complete).map((metric) => [metric, { total: 0, covered: 0 }]));
 assert.deepEqual(check({ 'electron/empty.cjs': empty }), []);
+const atFloor = Object.fromEntries(Object.entries(acceptanceMinimums).map(([metric, minimum]) => [metric, { total: 100000, covered: minimum * 1000 }]));
+assert.deepEqual(checkAcceptance({ 'electron/fixture.cjs': atFloor }), []);
+assert.equal(check({ 'electron/fixture.cjs': atFloor }).length, 4, 'Acceptance must not change the strict target');
+for (const metric of Object.keys(atFloor)) {
+  const below = structuredClone(atFloor);
+  below[metric].covered--;
+  below[metric].pct = acceptanceMinimums[metric];
+  assert.equal(checkAcceptance({ 'electron/fixture.cjs': below }).length, 1, 'Rounded percentages cannot pass a floor');
+}
+assert.throws(() => checkAcceptance({}), /Empty coverage/);
+assert.deepEqual(checkAcceptance({ 'electron/empty.cjs': empty }), [], 'A verified source can legitimately have no counters');
+assert.equal(checkAcceptance({ 'electron/fixture.cjs': complete }, ['electron/empty.cjs']).length, 1);
+assert.deepEqual(checkAcceptance({ total: complete, 'electron/fixture.cjs': atFloor }), [], 'Precomputed totals are never counted twice');
 const fixture = { meta: { branch_coverage: true }, files: { 'electron/fixture.py': {
   summary: { num_statements: 2, covered_lines: 1, num_branches: 2, covered_branches: 1 },
   functions: { '': { executed_lines: [1] }, used: { executed_lines: [2] }, unused: { executed_lines: [] } },

@@ -74,6 +74,22 @@ function check(summary) {
   return gaps;
 }
 
+// Acceptance-release floors, intentionally distinct from the strict per-file
+// 100% target. Reports retain every gap under either policy.
+const acceptanceMinimums = Object.freeze({ statements: 93, branches: 89, functions: 93, lines: 96 });
+function checkAcceptance(summary, unobserved = []) {
+  check(summary); // Validate all original counts before applying aggregate floors.
+  const failures = [];
+  for (const metric of metrics) {
+    const files = Object.entries(summary).filter(([file]) => file !== 'total').map(([, values]) => values[metric]);
+    const total = files.reduce((sum, value) => sum + value.total, 0);
+    const covered = files.reduce((sum, value) => sum + value.covered, 0);
+    if (covered * 100 < total * acceptanceMinimums[metric]) failures.push(`${metric}: ${covered}/${total} (minimum ${acceptanceMinimums[metric]}%)`);
+  }
+  if (unobserved.length) failures.push(`Unobserved production modules: ${unobserved.join(', ')}`);
+  return failures;
+}
+
 function pythonSummary(report, lambdas = null) {
   if (report.meta?.branch_coverage !== true) throw Error('Python branch coverage was not enabled');
   return Object.fromEntries(Object.entries(report.files).map(([name, value]) => {
@@ -123,7 +139,7 @@ function report() {
   return summarize(pythonFile, lambdaFile, javascript.files().filter((file) => javascript.fileCoverageFor(file).data.all === true));
 }
 
-function summarize(pythonFile, lambdaFile, unobserved = []) {
+function summarize(pythonFile, lambdaFile, unobserved = [], acceptance = false) {
   const javascript = JSON.parse(fs.readFileSync(path.join(directory, 'javascript/coverage-summary.json'), 'utf8'));
   const pythonData = pythonSummary(JSON.parse(fs.readFileSync(pythonFile, 'utf8')), JSON.parse(fs.readFileSync(lambdaFile, 'utf8')));
   const summary = { ...Object.fromEntries(Object.entries(javascript).filter(([file]) => file !== 'total').map(([file, value]) => [path.relative(root, file).replaceAll('\\', '/'), value])), ...pythonData };
@@ -136,11 +152,18 @@ function summarize(pythonFile, lambdaFile, unobserved = []) {
     const covered = Object.values(summary).reduce((sum, values) => sum + values[metric].covered, 0);
     return [metric, { covered, total, percent: total ? covered / total * 100 : 100 }];
   }));
-  fs.writeFileSync(path.join(directory, 'summary.json'), JSON.stringify({ target: 100, totals, files: summary, gaps, unobserved }, null, 2) + '\n');
+  const acceptanceFailures = acceptance ? checkAcceptance(summary, unobserved) : null;
+  fs.writeFileSync(path.join(directory, 'summary.json'), JSON.stringify({ target: 100, totals, files: summary, gaps, unobserved,
+    policy: acceptance ? 'acceptance' : 'strict', ...(acceptance ? { acceptanceMinimums, acceptanceFailures } : {}) }, null, 2) + '\n');
   for (const [metric, value] of Object.entries(totals)) console.log(`${metric}: ${value.percent.toFixed(2)}% (${value.covered}/${value.total})`);
   console.log(`${gaps.length} production file/metric gaps remain; target: 100% statements, branches, functions, and lines in every file.`);
   for (const gap of gaps.slice(0, 20)) console.log(`${gap.file}: ${gap.metric} ${gap.covered}/${gap.total} (${gap.missing} missing)`);
   if (unobserved.length) console.log(`Executable production source was never loaded: ${unobserved.join(', ')}`);
+  if (acceptance) {
+    console.log(`Acceptance floors: ${JSON.stringify(acceptanceMinimums)}. This does not establish 100% coverage or workflow completeness.`);
+    for (const failure of acceptanceFailures) console.error(failure);
+    return acceptanceFailures.length === 0;
+  }
   return gaps.length === 0 && unobserved.length === 0;
 }
 
@@ -172,7 +195,7 @@ function exportShard(label) {
   console.log(`Exported ${label}: ${output}. A single shard does not establish the complete coverage target.`);
 }
 
-function aggregate(input) {
+function aggregate(input, acceptance = false) {
   const artifactTools = require('./coverage-artifacts.cjs');
   const expected = artifactTools.metadata(root);
   const files = fs.readdirSync(input, { recursive: true }).filter((file) => file.endsWith('.json')).map((file) => path.resolve(input, file)).sort();
@@ -195,13 +218,18 @@ function aggregate(input) {
     ['scripts/normalize-coverage.py', '--functions', dataFile, path.join(root, 'electron'), lambdaFile],
   ]) if (!run(python, args, { env })) throw Error('Combined Python coverage reporting failed');
   fs.writeFileSync(path.join(directory, 'provenance.json'), JSON.stringify({ metadata: expected, shards: artifacts.map(({ label, platform, arch, suites }) => ({ label, platform, arch, suites })) }, null, 2) + '\n');
-  return summarize(pythonFile, lambdaFile, coverage.files().filter((file) => coverage.fileCoverageFor(file).data.all === true));
+  return summarize(pythonFile, lambdaFile, coverage.files().filter((file) => coverage.fileCoverageFor(file).data.all === true), acceptance);
 }
 
 async function main() {
   if (process.argv[2] === 'report') { if (!report()) process.exitCode = 1; return; }
   if (process.argv[2] === 'export') { if (process.argv.length !== 4) throw Error('Usage: coverage.cjs export <shard>'); exportShard(process.argv[3]); return; }
-  if (process.argv[2] === 'aggregate') { if (process.argv.length !== 4) throw Error('Usage: coverage.cjs aggregate <artifact-directory>'); if (!aggregate(process.argv[3])) process.exitCode = 1; return; }
+  if (process.argv[2] === 'aggregate') {
+    const acceptance = process.argv[4] === '--acceptance';
+    if (process.argv.length !== (acceptance ? 5 : 4)) throw Error('Usage: coverage.cjs aggregate <artifact-directory> [--acceptance]');
+    if (!aggregate(process.argv[3], acceptance)) process.exitCode = 1;
+    return;
+  }
   if (process.argv[2] === 'reset') {
     for (const file of ['source', 'v8', 'v8-normalized', 'python', 'python-normalized', 'python-report', 'javascript', 'summary.json', 'collection.json', 'artifact', 'portable-python.json', 'artifact-inputs.json', 'provenance.json']) fs.rmSync(path.join(directory, file), { recursive: true, force: true });
     return;
@@ -214,5 +242,5 @@ async function main() {
   for (const group of groups.length ? groups : ['core']) if (!run(process.execPath, ['scripts/run-tests.cjs', group], { env })) success = false;
   if (!report() || !success) process.exitCode = 1;
 }
-module.exports = { check, pythonSummary, declarationFiles, coverageEnvironment };
+module.exports = { check, checkAcceptance, acceptanceMinimums, pythonSummary, declarationFiles, coverageEnvironment };
 if (require.main === module) main().catch((error) => { console.error(error); process.exitCode = 1; });

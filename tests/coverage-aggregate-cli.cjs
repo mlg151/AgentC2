@@ -41,7 +41,7 @@ try {
   const inheritedDirectory = process.env.COVERAGE_FILE && path.dirname(process.env.COVERAGE_FILE);
   const inheritedFiles = inheritedDirectory && fs.existsSync(inheritedDirectory) ? new Set(fs.readdirSync(inheritedDirectory)) : new Set();
   const environment = { ...process.env, AGENTC2_COVERAGE: '0', COVERAGE_PROCESS_START: '', COVERAGE_FILE: path.join(directory, 'test-results/verifier-python/.coverage'), NODE_V8_COVERAGE: path.join(directory, 'test-results/verifier-v8') };
-  const run = () => spawnSync(process.execPath, ['scripts/coverage.cjs', 'aggregate', 'inputs'], { cwd: directory, encoding: 'utf8', env: environment });
+  const run = (...flags) => spawnSync(process.execPath, ['scripts/coverage.cjs', 'aggregate', 'inputs', ...flags], { cwd: directory, encoding: 'utf8', env: environment });
   write();
   const pass = run();
   assert.equal(pass.status, 0, pass.stdout + pass.stderr);
@@ -52,12 +52,17 @@ try {
   assert.ok(fs.existsSync(path.join(directory, 'test-results/coverage/python/html/index.html')));
   const provenance = JSON.parse(fs.readFileSync(path.join(directory, 'test-results/coverage/provenance.json'), 'utf8'));
   assert.equal(provenance.shards.length, 6);
+  const acceptance = run('--acceptance');
+  assert.equal(acceptance.status, 0, acceptance.stdout + acceptance.stderr);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(directory, 'test-results/coverage/summary.json'), 'utf8')).policy, 'acceptance');
+  assert.equal(run('--unknown').status, 1, 'Unknown options cannot silently choose a weaker policy');
   for (const artifact of artifacts) artifact.javascript[file].f[0] = 0;
   write();
   const fail = run();
   assert.equal(fail.status, 1, fail.stdout + fail.stderr);
   report = JSON.parse(fs.readFileSync(path.join(directory, 'test-results/coverage/summary.json'), 'utf8'));
   assert.deepEqual(report.gaps, [{ file, metric: 'functions', covered: 0, total: 1, missing: 1 }]);
+  assert.equal(run('--acceptance').status, 1, 'Acceptance still rejects uncovered functions below its floor');
   for (const artifact of artifacts) artifact.javascript[empty].all = true;
   artifacts[0].javascript[file].f[0] = 1;
   write();
@@ -66,10 +71,12 @@ try {
   assert.deepEqual(report.gaps, []);
   assert.deepEqual(report.unobserved, [empty], 'Even a zero-counter executable module must be observed at runtime');
   assert.match(unloaded.stdout, /Executable production source was never loaded/);
+  assert.equal(run('--acceptance').status, 1, 'Acceptance still requires runtime observation');
   assert.ok(fs.existsSync(path.join(directory, 'test-results/coverage/javascript/coverage-final.json')));
   assert.ok(fs.existsSync(path.join(directory, 'test-results/coverage/python/coverage.json')));
   fs.unlinkSync(path.join(directory, 'inputs', 'linux-ssh.json'));
   const missing = run(); assert.equal(missing.status, 1); assert.match(missing.stderr, /all six/);
+  const missingAcceptance = run('--acceptance'); assert.equal(missingAcceptance.status, 1); assert.match(missingAcceptance.stderr, /all six/);
   if (inheritedDirectory && fs.existsSync(inheritedDirectory)) {
     const reports = fs.readdirSync(inheritedDirectory).filter((name) => name.startsWith('.coverage.') && !inheritedFiles.has(name)).map((name) => path.join(inheritedDirectory, name));
     const script = [

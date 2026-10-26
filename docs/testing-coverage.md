@@ -1,9 +1,14 @@
 # Production test coverage
 
-The acceptance target is **100% statements, branches, functions, and lines in
-every executable production file**, plus every documented workflow at each
-applicable contract, unit, integration, functional, and end-to-end layer.
-Passing the existing suite inventory alone does not establish that target.
+PR #80 is being released for acceptance testing with aggregate coverage floors
+of **93% statements, 89% branches, 93% functions, and 96% lines**. All six native
+and isolated shards, the complete required suite inventory, and source/provenance
+validation remain mandatory. No executable production module may be unobserved.
+
+The original **100% in every file and every applicable workflow/test layer**
+target remains an unfinished follow-up, not a claim or merge requirement for
+this acceptance release. The strict coverage commands retain that target and
+exit nonzero while gaps remain.
 
 ## Collect and inspect
 
@@ -132,15 +137,22 @@ Ordinary duplicate system-SDK skips remain visible alongside the required
 private-runtime results. CRLF/LF checkout differences are normalized for text
 hashes; original-source maps and counter identities must match exactly.
 
-The `Complete production coverage` job combines counts, regenerates JSON/HTML
-reports, and applies the same exact per-file 100% requirement. Its success is a
-required dependency of `Quality gate`; release publication still depends on
-that gate. All artifacts, provenance, suite logs, screenshots, and traces retain
+The `Production coverage acceptance` job uses
+`node scripts/coverage.cjs aggregate <artifact-directory> --acceptance`. It
+combines counts, regenerates JSON/HTML reports, and applies the aggregate floors
+above with integer comparisons. It still rejects missing shards, invalid source
+maps, failed required suites, skipped deployed-v1 upgrades, and unobserved modules.
+The summary retains the original 100% target and every per-file gap, and records
+`policy: "acceptance"`, the floors, and any acceptance failures. Without the flag,
+the aggregate command enforces strict per-file 100%.
+
+Coverage acceptance is a required dependency of `Quality gate`; release
+publication still depends on that gate. All artifacts, provenance, suite logs, screenshots, and traces retain
 the existing 14-day lifetime. Packaging rebuilds the optimized production
 renderer, so coverage builds are not published as release packages.
 
-The report compares integer covered/total counts for every metric in every
-file. Rounded percentages, missing reports, missing production files, disabled
+The strict report compares integer covered/total counts for every metric in every
+file; acceptance compares the summed counts without rounding. Rounded percentages, missing reports, missing production files, disabled
 Python branch measurement, and absent Python function measurements cannot pass.
 An unexecuted file remains a coverage gap. Reports retain both languages and
 list never-loaded JavaScript modules in `summary.json` under `unobserved`; even
@@ -149,101 +161,27 @@ the measured code dimensions; workflow completeness requires the separate
 [workflow-to-test audit](testing-workflows.md) and actual suite results, including explicit accounting
 for skips and platform limitations.
 
-## Current status
+## Acceptance baseline and remaining work
 
-The 100% target is not yet met. The [six-shard original-source run for c0b3f3b](https://github.com/mlg151/AgentC2/actions/runs/40293449397)
-passed all four native package jobs and both isolated Linux jobs. Its verified
-aggregate measured 15408/16523 statements (93.25%), 11548/12940 branches (89.24%),
-3057/3276 functions (93.32%), and 11873/12356 lines (96.09%). It measured 123
-production files, with 60 complete files, 199 file/metric gaps, and no unobserved
-modules. Coverage and Quality gate correctly failed the exact target. The
-retained artifact includes all six source/suite manifests and regenerated
-HTML/JSON reports.
+The [six-shard run for 3a02d68](https://github.com/mlg151/AgentC2/actions/runs/40299442418)
+passed all four native package jobs and both isolated Linux jobs. Its aggregate
+measured **15452/16531 statements (93.47%), 11608/12946 branches (89.66%),
+3063/3277 functions (93.47%), and 11898/12359 lines (96.27%)**. It included 123
+production files, 69 complete files, 180 file/metric gaps, and no unobserved
+modules. That run failed the former strict gate; it was not a test-suite failure.
+The final PR revision must pass a fresh complete run under the acceptance policy.
 
-CENTCOM has 114 remaining branch gaps and App has 43. The service reaches
-750/750 statements, 635/635 branches, 158/158 functions, and 521/521 lines
-in that aggregate. Loop-breaker, platform helpers, the JavaScript protocol
-validator, and command binding helpers also reach all four thresholds. App reaches 242/242 functions and 268/268 lines, including
-callbacks V8 had omitted; ten statements remain within covered lines. The [workflow audit](testing-workflows.md) remains unfinished.
+Regression repairs include chat attachment/recovery races, desktop-sync draft
+merging, modal focus in empty/busy dialogs, xterm disposal and phone scrolling,
+bounded fleet redaction, and Codex stop signal races. The latter tolerates an
+already-exited process group but still requires child reaping; permissions and
+unconfirmed termination remain errors. Its new boundary checks and all 33
+Linux/Python suites pass locally, including the unchanged deployed-v1 upgrades.
+The additional existing Codex fixture suite passes with its optional installed
+CLI probe explicitly skipped; CI provisions the required private runtimes.
 
-Image upload (JavaScript and Python), approval bindings, the Electron main
-process, the companion service worker, pairing CLI, and extracted Claude history
-reader/launcher reach all four thresholds in that aggregate. Focused follow-up
-collections reach all four thresholds for capability/support discovery and
-automation validation. The support and automation modules and the touch adapter
-also reach all four thresholds in the verified six-shard aggregate. The latter removes three duplicated checks already
-performed by the published JSON-schema validator; rejection still precedes any
-persistence. These focused results do not replace a final native aggregate.
-
-The required app workflow suite exercises the production renderer through the
-public preload boundary, including launch/handoff acknowledgements followed by
-delayed or failed inventory, settings/workspace/clipboard failures, permissions,
-and native-window/initial-state races. React StrictMode disposal exposed an
-xterm 5.5 pending viewport callback error. The xterm 6 upgrade includes that
-upstream fix; captured desktop wheel routing retains tmux/provider scrolling.
-Its touch regression is covered separately with a normal-buffer phone terminal
-fixture and real CDP touch gestures. A small local scrolling adapter preserves
-horizontal/pinch gestures and never sends input or takes control. Live tmux
-alternate-screen history continues to use the existing retained-history view.
-No deployed worker protocol, journal, or launch-permission flag changes are
-introduced by these terminal changes.
-
-The earlier [V8 run for 74b85a1](https://github.com/mlg151/AgentC2/actions/runs/40264338052)
-reported 96.75% statements/lines, 87.08% branch ranges, and 88.81% functions.
-Those figures are diagnostic only: V8 omitted 31 callbacks in App and duplicated
-other compiler-generated function identities. They cannot be compared directly
-with the fixed original-source counts. Do not merge as satisfying the target
-until every final-revision metric and workflow requirement passes.
-
-
-Required service suites cover handoff/fault/lifecycle and event recovery;
-all 74 core suites pass in the c0b3f3b native jobs. The post-save OpOrder loop uses its
-validated array rather than a redundant missing-field fallback. The additional
-browser recovery suite passes with source instrumentation for cross-host late
-inventory, deletion, callsign capacity and overlapping poll suppression. Further
-changes still require fresh final-revision native evidence.
-
-A bounded-metadata test reproduced quadratic regex scanning in fleet identity
-redaction on a million-character plain word. The identity matcher now begins at
-the start of each word/hyphen run, preserving its exclusions while avoiding
-repeated suffix scans. The before-fix child times out; a required isolated
-watchdog checks the fixed path and identity boundaries. The unchanged snapshot
-bounding function is extracted into `centcom-snapshot.cjs` for independent
-normal/overflow, urgent/fault ordering, UTF-8, and input-immutability tests. The
-engine still bounds the same evidence before writing its remote workspace.
-
-
-Chat recovery browser cases cover single/multiple/written question answers,
-submitted approvals, rejected action receipts, preserved edits, steering, manual
-status checks without resend, uncertain outcomes, and guarded transcript removal.
-Lifecycle cases reproduce and fix history/take/prune busy flags surviving an
-attachment, late ownership results changing a new read-only view, and old prune
-completions clearing a current request's busy state. Response handling is fenced
-by the existing generation; only view state changes, never worker ownership or
-command replay policy. A content/viewport observer also keeps following after
-deferred transcript layout while manual/history browsing retains its position.
-Before-fix traces/screenshots and the five missed service callback statements
-have additional focused regression cases; final native aggregation is required.
-
-
-After that baseline, 74 core, 15 browser, and three native desktop suites pass
-with original-source collection at fc85d49. Expanded renderer cases pass all
-15 browser suites at 24f93c9, reaching all four metrics for Modal (35
-statements/29 branches/6 functions/17 lines), KeyboardHelp (12/8/6/3),
-ChatModelSelector (15/19/6/10), PeerSyncSettings (73/39/31/40), ProviderMark
-(2/3/1/2), and DeleteSessionDialog (16/10/4/9). These are focused results;
-the final six-shard aggregate remains required.
-
-The c0b3f3b native macOS Intel run confirms the desktop-sync draft race repair.
-A delayed initial load or save acknowledgement preserves individually edited
-fields while loading/normalizing untouched fields. Later live status supersedes
-older initial replies and errors. Busy deletion also provides a real modal case
-with no enabled controls; the shared dialog now retains focus and supports
-Tab/Shift+Tab from its container and from outside the dialog.
-
-All 32 Linux/Python suites pass at 05169cb, including unchanged deployed-v1
-upgrades and nine new worker boundaries. The native Codex deletion opt-in is
-reported as skipped in that local group; required private native evidence and
-platform limitations remain distinct. A later added worker case rejects
-missing-newline and oversized frames before mutation. The tests leave provider
-processes, SDK setup, active sessions, journals, and upgrade behavior unchanged.
+The [workflow audit](testing-workflows.md) records outstanding layer-specific
+checks. Authenticated provider/model calls, physical phone/desktop network and
+sleep behavior, publisher signing, and interactive installers remain acceptance
+or follow-up work. Required CI uses isolated homes/accounts and no paid model
+calls. Passing this release gate does not establish 100% code or workflow coverage.

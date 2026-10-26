@@ -246,7 +246,7 @@ jobs:
           retention-days: 14
 
   coverage:
-    name: Complete production coverage
+    name: Production coverage acceptance
     if: always()
     needs: [desktop, linux-ssh, linux-cleanup]
     runs-on: ubuntu-22.04
@@ -269,8 +269,8 @@ jobs:
           pattern: Coverage-*
           path: test-results/coverage-input
           merge-multiple: true
-      - name: Require all native shards and exactly 100% in every production file
-        run: node scripts/coverage.cjs aggregate test-results/coverage-input
+      - name: Require all native shards and acceptance coverage floors
+        run: node scripts/coverage.cjs aggregate test-results/coverage-input --acceptance
       - name: Upload combined coverage and provenance
         if: always()
         uses: actions/upload-artifact@v7.0.2

@@ -49,7 +49,7 @@ assert.ok(workflow.jobs['linux-ssh'].steps.some((step) => step.run === 'node scr
 console.log('PASS workflow connects the complete native matrix and isolated jobs to the release gate');
 assert.equal(workflow.jobs.coverage.if, 'always()');
 assert.deepEqual(workflow.jobs.coverage.needs, ['desktop', 'linux-ssh', 'linux-cleanup']);
-assert.ok(workflow.jobs.coverage.steps.some((step) => step.run === 'node scripts/coverage.cjs aggregate test-results/coverage-input'));
+assert.ok(workflow.jobs.coverage.steps.some((step) => step.run === 'node scripts/coverage.cjs aggregate test-results/coverage-input --acceptance'));
 for (const name of ['desktop', 'linux-ssh', 'linux-cleanup']) {
   const job = workflow.jobs[name];
   assert.equal(job.env.AGENTC2_COVERAGE, '1');
