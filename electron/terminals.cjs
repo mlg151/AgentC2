@@ -6,8 +6,8 @@ const dimensions = (cols, rows) => ({ cols: Math.floor(Math.max(20, Math.min(Num
 
 // One SSH PTY per remote session; handles belong to individual UI connections.
 class Terminals {
-  constructor({ spawn, configure, history, scroll, emit, onOutput, onDispose }) {
-    Object.assign(this, { spawn, configure, history, scroll, emit, onOutput, onDispose });
+  constructor({ spawn, configure, history, scroll, emit, onOutput, onDispose, platform = process.platform }) {
+    Object.assign(this, { spawn, configure, history, scroll, emit, onOutput, onDispose, platform });
     this.sessions = new Map();
     this.handles = new Map();
     this.opening = new Map();
@@ -56,6 +56,10 @@ class Terminals {
     // or smkx (application keypad, also with clear-on-attach disabled) only
     // after putting its client tty into raw mode. SSH banners/PTY creation
     // are not readiness: input sent then can be flushed by tmux startup.
+    // Windows ConPTY consumes both sequences while re-rendering the screen.
+    // It passes through DA2 (CSI > [0] c), which tmux's tty_send_requests emits
+    // after tty_start_tty. Use that boundary on Windows, including reattach;
+    // console setup, titles, banners and arbitrary output still cannot unlock input.
     let startupTail = '', initialized = false, ended = false;
     terminal.onData((data) => {
       if (record.disposed || record.terminal !== terminal) return;
@@ -63,7 +67,8 @@ class Terminals {
       let becameReady = false;
       if (!initialized) {
         const startup = startupTail + data;
-        initialized = startup.includes('\x1b[?1049h') || startup.includes('\x1b[?1h\x1b=');
+        initialized = startup.includes('\x1b[?1049h') || startup.includes('\x1b[?1h\x1b=') ||
+          this.platform === 'win32' && /\x1b\[>0?c/.test(startup);
         startupTail = initialized ? '' : startup.slice(-16);
         becameReady = initialized;
       }

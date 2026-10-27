@@ -68,7 +68,10 @@ const { Store } = require('../electron/config.cjs');
     assert.ok(downloads >= 2, 'Retry must fetch valid bytes after checksum rejection');
     console.log('PASS native updater feed discovery, explicit download, corrupt checksum rejection, retry, verified ready state, and explicit installer dispatch');
   } finally {
-    await app?.close(); server.close();
-    fs.rmSync(directory, { recursive: true, force: true });
+    try { await app?.close(); }
+    finally {
+      await new Promise((resolve) => server.close(resolve));
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
   }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

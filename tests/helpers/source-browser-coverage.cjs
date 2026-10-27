@@ -9,7 +9,7 @@ function install() {
   if (globalThis.__agentc2SourceCoverageSave) return;
   globalThis.__agentc2SourceCoverageEpoch = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
   globalThis.__agentc2SourceCoverageSave = () => {
-    if (!globalThis.__agentc2SourceCoverage) return;
+    if (!globalThis.__agentc2SourceCoverage || typeof globalThis.__agentc2SourceCoverageSink !== 'function') return;
     return globalThis.__agentc2SourceCoverageSink({ coverage: globalThis.__agentc2SourceCoverage, hashes: globalThis.__agentc2SourceHashes, epoch: globalThis.__agentc2SourceCoverageEpoch });
   };
   const save = () => { globalThis.__agentc2SourceCoverageSave()?.catch(() => {}); };
@@ -31,7 +31,15 @@ async function instrumentSourceCoverage(context) {
   await context.addInitScript(install);
   async function save(page) {
     if (page.isClosed()) return;
-    await page.evaluate(() => globalThis.__agentc2SourceCoverageSave?.()).catch((error) => { if (!page.isClosed() && !/Execution context was destroyed|Target closed|Target page.*closed/.test(error.message)) throw error; });
+    // Electron can remove Playwright's exposed bindings before closing the
+    // document. Pull counters directly at explicit boundaries so the final
+    // snapshot does not depend on a binding that is already being torn down.
+    const data = await page.evaluate(() => {
+      if (!globalThis.__agentc2SourceCoverage) return null;
+      globalThis.__agentc2SourceCoverageEpoch ||= globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+      return { coverage: globalThis.__agentc2SourceCoverage, hashes: globalThis.__agentc2SourceHashes, epoch: globalThis.__agentc2SourceCoverageEpoch };
+    }).catch((error) => { if (!page.isClosed() && !/Execution context was destroyed|Target closed|Target page.*closed/.test(error.message)) throw error; });
+    if (data) snapshot(data.coverage, data.hashes, identity + ':' + data.epoch, directory);
   }
   function attach(page) {
     if (pages.has(page)) return pages.get(page);
@@ -70,7 +78,7 @@ async function instrumentSourceCoverage(context) {
     if (errors.length) throw new AggregateError(errors, 'Browser source coverage collection failed');
   };
   const close = context.close.bind(context);
-  context.close = async (...args) => { await saveAll(); return close(...args); };
+  context.close = async (...args) => { try { await saveAll(); } finally { await close(...args); } };
   collectors.set(context, saveAll);
   await Promise.all(context.pages().map(attach));
   return saveAll;

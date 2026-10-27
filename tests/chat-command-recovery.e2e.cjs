@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { chromium } = require('playwright-core');
 const { createServer } = require('vite');
+const { poll: until } = require('./helpers/poll.cjs');
 const { contract, validateCommand } = require('../electron/chat-protocol.cjs');
 const directory = process.env.AGENTC2_SUITE_ARTIFACTS || fs.mkdtempSync(path.join(os.tmpdir(), 'agentc2-chat-commands-'));
 const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'agentc2-vite-chat-command-'));
@@ -17,10 +18,12 @@ const state = (id = current) => ({ id, sessionId, canControl: true, controller: 
 function snapshot(text = 'Current command attachment') { return { id: current, session: structuredClone(session), events: [{ protocolVersion: 1, sessionId, sequence: ++sequence, timestamp, provider: 'codex', providerSessionId: null, itemId: text, turnId: null, type: 'message.completed', data: { role: 'assistant', text } }], cursor: sequence, latestCursor: sequence, retainedFrom: 1, hasMore: false, truncated: false, pendingRequests: [], pendingCommands: [], state: state() }; }
 const receipt = (commandId, status = 'completed') => ({ commandId, sessionId, state: status, result: {}, error: null });
 const commands = () => calls.filter((call) => call[0] === 'submit');
-async function until(predicate, label) { for (let tick = 0; tick < 100; tick++) { if (predicate()) return; await new Promise((resolve) => setTimeout(resolve, 20)); } throw Error(label); }
 async function settled(name, id) { const count = calls.filter((call) => call[0] === name && call[1] === id).length; await page.waitForFunction(({ name, id, count }) => window.qaChatSettled.filter((call) => call.name === name && call.args[0] === id).length >= count, { name, id, count }); await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))); }
 async function publish(text) { await page.evaluate((value) => window.dispatchEvent(new CustomEvent('chat:events', { detail: value })), snapshot(text)); }
-async function mount(props) { await page.evaluate((props) => window.qaMountChat({ onRefresh: undefined, ...props }), props); }
+async function mount(props) {
+  await page.evaluate((props) => window.qaMountChat({ onRefresh: undefined, ...props }), props);
+  if (props.connected === false) await page.getByRole('status').filter({ hasText: /^Reconnecting$/ }).waitFor();
+}
 async function reconnect(label) { const previous = current; await mount({ connected: false }); await mount({ connected: true }); await until(() => current !== previous && calls.some((call) => call[0] === 'ready' && call[1] === current), 'Reconnected ready call missing'); await settled('ready', current); if (label) await publish(label); }
 (async () => {
   try {
