@@ -1,5 +1,6 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import { flushSync } from 'react-dom';
 import { HistorySearch } from '../../src/components/HistorySearch';
 import { SettingsDialog } from '../../src/components/SettingsDialog';
 import { ProviderMark } from '../../src/components/ProviderMark';
@@ -39,7 +40,9 @@ const components = { history: HistorySearch, settings: SettingsDialog, centcom: 
 window.qaMount = (name, props = {}) => {
   const close = () => { window.invokeBridge('closed'); root.render(<p>Dialog closed</p>); };
   const Component = components[name];
-  root.render(<Component key={crypto.randomUUID()} onClose={close} onSave={(settings) => window.invokeBridge('saveSettings', settings)} onExternalSettings={(settings) => window.invokeBridge('externalSettings', settings)} onSpecops={props.specops === false ? undefined : () => window.invokeBridge('specops')} {...props} />);
+  // The public fixture mount is a commit boundary for the next DOM action.
+  // Without it, requestSubmit can still target the previously enabled form.
+  flushSync(() => root.render(<Component key={crypto.randomUUID()} onClose={close} onSave={(settings) => window.invokeBridge('saveSettings', settings)} onExternalSettings={(settings) => window.invokeBridge('externalSettings', settings)} onSpecops={props.specops === false ? undefined : () => window.invokeBridge('specops')} {...props} />));
 };
 window.qaEmit = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
 window.qaUnmount = () => root.render(<p>Dialog unmounted</p>);
