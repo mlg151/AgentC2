@@ -15,8 +15,50 @@ class FakePty extends EventEmitter {
 }
 
 (async () => {
+  // Real Windows ConPTY consumes smcup/smkx and redraws the screen itself.
+  // Its output still contains tmux's secondary device-attributes query, sent
+  // by tty_send_requests only after tty_start_tty has entered raw mode.
+  for (const platform of ['win32', 'linux', 'darwin']) {
+    for (const query of ['\x1b[>c', '\x1b[>0c']) {
+      for (let split = 1; split < query.length; split++) {
+        const windowsPtys = [];
+        const windows = new Terminals({
+          platform,
+          spawn: () => { const pty = new FakePty(); windowsPtys.push(pty); return pty; },
+          configure: async () => {}, history: async () => ({}), scroll: async () => {}, emit: () => {},
+        });
+        const client = { id: 'desktop', name: 'Desktop' };
+        const id = await windows.open(client, 'hq-0123456789ab', 'windows', 100, 30);
+        const record = windows.get(client, id).record;
+        try {
+          await windows.ready(client, id);
+          windowsPtys[0].data('\x1b[2J\x1b[m\x1b[H\x1b]0;ssh.exe\x07\x1b[?25hSSH banner\r\n');
+          await record.queue;
+          assert.equal(windows.state(client, id).connection, 'connecting', 'ConPTY setup and SSH banners are not attachment');
+          await assert.rejects(windows.write(client, id, 'never replay'), /connecting/);
+          windowsPtys[0].data(query.slice(0, split));
+          await record.queue;
+          assert.equal(windows.state(client, id).connection, 'connecting', 'A partial query is not readiness');
+          windowsPtys[0].data(query.slice(split) + '\x1b[>q\x1b[HLoaded CLI');
+          await record.queue;
+          assert.equal(windowsPtys[0].lastWrite, undefined);
+          assert.equal(windows.state(client, id).connection, platform === 'win32' ? 'connected' : 'connecting', `${platform}: ConPTY-translated tmux startup must enable Windows input`);
+          if (platform !== 'win32') {
+            windowsPtys[0].data('\x1b[?1h');
+            await record.queue;
+            assert.equal(windows.state(client, id).connection, 'connecting');
+            windowsPtys[0].data('\x1b=');
+            await record.queue;
+          }
+          await windows.write(client, id, 'first command\r');
+          assert.equal(windowsPtys[0].lastWrite, 'first command\r');
+        } finally { windows.closeAll(); }
+      }
+    }
+  }
   const ptys = [], events = [];
   const terminals = new Terminals({
+    platform: 'win32',
     spawn: () => { const pty = new FakePty(); ptys.push(pty); return pty; },
     configure: async () => {}, history: async () => ({ text: '', truncated: false }), scroll: async () => {},
     emit: (client, event, value) => events.push({ client, event, value }),
@@ -52,11 +94,11 @@ class FakePty extends EventEmitter {
   await new Promise((resolve) => setTimeout(resolve, 1100));
   assert.equal(ptys.length, 2, 'Reconnect must use one replacement PTY');
   assert.equal(terminals.state(phone, phoneHandle).connection, 'reconnecting');
-  ptys[0].data('\x1b[?1049hstale redraw');
-  ptys[1].data('Reconnect banner\r\n\x1b[?1h');
+  ptys[0].data('\x1b[>cstale redraw');
+  ptys[1].data('Reconnect banner\r\n\x1b[>');
   await terminals.sessions.get(`default/${name}`).queue;
   assert.equal(terminals.state(phone, phoneHandle).connection, 'reconnecting');
-  ptys[1].data('\x1b=after\r\n');
+  ptys[1].data('cafter\r\n');
   await terminals.sessions.get(`default/${name}`).queue;
   assert.equal(terminals.state(phone, phoneHandle).connection, 'connected');
   assert.equal(terminals.state(phone, phoneHandle).canControl, true);
@@ -80,7 +122,7 @@ class FakePty extends EventEmitter {
   assert.equal(ptys[2].lastWrite, 'first command after reattach');
   terminals.close(phone, reattached);
   const interrupted = await terminals.open(desktop, name, 'default', 100, 30);
-  ptys[3].data('\x1b[?1049h');
+  ptys[3].data('\x1b[>c');
   ptys[3].exit(255);
   await terminals.sessions.get(`default/${name}`).queue;
   assert.equal(terminals.state(desktop, interrupted).connection, 'reconnecting', 'Queued redraw from an exited PTY must not restore readiness');

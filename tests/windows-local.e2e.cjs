@@ -56,20 +56,33 @@ const { localCommand } = require('../electron/local.cjs');
     for (const cwd of [path.parse(os.homedir()).root, os.homedir() + '\\', wsl('wslpath', ['-a', '-u', fixture])]) {
       const result = await page.evaluate((cwd) => window.agentHQ.create({ provider: 'codex', transport: 'terminal', presetId: 'path-fixture', hostId: 'default', cwd, title: 'Windows path fixture' }), cwd);
       created.push(result.name);
-      inventory = await page.evaluate(() => window.agentHQ.inventory());
+      await poll(async () => {
+        inventory = await page.evaluate(() => window.agentHQ.inventory());
+        return inventory.sessions.some((session) => session.id === result.name);
+      }, 'Created Windows path fixture did not appear in inventory');
       const expected = wsl('realpath', [/^[a-z]:/i.test(cwd) ? wsl('wslpath', ['-a', '-u', cwd]) : cwd]);
       assert.equal(inventory.sessions.find((session) => session.id === result.name)?.cwd, expected);
     }
-    // ConPTY must preserve tmux's startup acknowledgement too. Exercise actual
-    // WSL input immediately after the service advertises readiness on reattach.
+    // Check both the bridge state and rendered typing: ConPTY can redraw the
+    // CLI while stripping the escape sequences used by the readiness gate.
     const shell = await page.evaluate(() => window.agentHQ.create({ provider: 'terminal', hostId: 'default', cwd: '/tmp', title: 'WSL reattach fixture' }));
     created.push(shell.name);
+    await page.locator('.session-row').filter({ hasText: 'WSL reattach fixture' }).click();
+    const pane = page.locator('.session-pane.is-focused');
     for (let attempt = 0; attempt < 2; attempt++) {
       const handle = await page.evaluate((name) => window.agentHQ.openTerminal(name, 100, 30, 'default'), shell.name);
       await poll(() => page.evaluate(async (id) => (await window.agentHQ.terminalState(id)).connection === 'connected', handle), 'WSL tmux did not acknowledge startup');
-      await page.evaluate(({ handle, attempt }) => window.agentHQ.writeTerminal(handle, `printf 'WSL_READY_%s\\n' '${attempt}'\r`), { handle, attempt });
+      await pane.locator('.control-owner').filter({ hasText: 'You control' }).waitFor();
+      await pane.locator('.xterm-helper-textarea').focus();
+      await page.keyboard.type(`printf 'WSL_READY_%s\\n' '${attempt}'`);
+      await page.keyboard.press('Enter');
       await poll(() => page.evaluate(async ({ handle, attempt }) => (await window.agentHQ.readyTerminal(handle)).text.includes(`WSL_READY_${attempt}`), { handle, attempt }), 'WSL first input after attach was lost');
+      await pane.locator('.xterm-rows').filter({ hasText: `WSL_READY_${attempt}` }).waitFor();
       await page.evaluate((id) => window.agentHQ.closeTerminal(id), handle);
+      if (attempt === 0) {
+        await pane.getByRole('button', { name: 'Detach', exact: true }).click();
+        await pane.getByRole('button', { name: 'Attach', exact: true }).click();
+      }
     }
     assert.equal(await page.locator('vite-error-overlay').count(), 0); assert.deepEqual(errors, []);
     await page.screenshot({ path: path.join(screenshots, 'windows-local-startup-recovered.png') });
