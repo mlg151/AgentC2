@@ -59,6 +59,15 @@ let server, browser;
     assert.equal((await fetchText('/assets/item-40.css')).text, 'fixture:/assets/item-40.css');
     await context.setOffline(false);
     await save(); await save();
+    // Reproduce Electron teardown ordering with real browser source counters:
+    // page lifecycle callbacks must tolerate removal of the transport binding,
+    // and an explicit collector pull must still retain the executed document.
+    await page.evaluate(() => {
+      delete globalThis.__agentc2SourceCoverageSink;
+      window.runTimeline();
+      window.dispatchEvent(new Event('pagehide'));
+    });
+    await save();
     await page.reload(); await page.waitForFunction(() => window.runTimeline);
     await page.close();
     const popup = await context.newPage(); await popup.goto(origin); await popup.waitForFunction(() => window.runTimeline);
@@ -67,7 +76,7 @@ let server, browser;
     const report = source.report(raw);
     const file = report.fileCoverageFor('src/chatTimeline.ts').toJSON();
     const reducer = Object.entries(file.fnMap).find(([, value]) => value.name === 'reduceChatTimeline')[0];
-    assert.ok(file.f[reducer] >= 3, 'Navigation, page close, and context close must retain independent source epochs');
+    assert.ok(file.f[reducer] >= 4, 'Binding teardown, navigation, page close, and context close retain actual executions across source epochs');
     const serviceWorker = report.fileCoverageFor('public/companion-sw.js');
     assert.equal(serviceWorker.data.all, false, 'Worker execution must be recorded outside the page global');
     assert.equal(serviceWorker.toSummary().functions.pct, 100);

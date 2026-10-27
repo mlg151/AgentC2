@@ -20,7 +20,10 @@ const commands = () => calls.filter((call) => call[0] === 'submit');
 async function until(predicate, label) { for (let tick = 0; tick < 100; tick++) { if (predicate()) return; await new Promise((resolve) => setTimeout(resolve, 20)); } throw Error(label); }
 async function settled(name, id) { const count = calls.filter((call) => call[0] === name && call[1] === id).length; await page.waitForFunction(({ name, id, count }) => window.qaChatSettled.filter((call) => call.name === name && call.args[0] === id).length >= count, { name, id, count }); await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))); }
 async function publish(text) { await page.evaluate((value) => window.dispatchEvent(new CustomEvent('chat:events', { detail: value })), snapshot(text)); }
-async function mount(props) { await page.evaluate((props) => window.qaMountChat({ onRefresh: undefined, ...props }), props); }
+async function mount(props) {
+  await page.evaluate((props) => window.qaMountChat({ onRefresh: undefined, ...props }), props);
+  if (props.connected === false) await page.getByRole('status').filter({ hasText: /^Reconnecting$/ }).waitFor();
+}
 async function reconnect(label) { const previous = current; await mount({ connected: false }); await mount({ connected: true }); await until(() => current !== previous && calls.some((call) => call[0] === 'ready' && call[1] === current), 'Reconnected ready call missing'); await settled('ready', current); if (label) await publish(label); }
 (async () => {
   try {

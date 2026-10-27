@@ -15,7 +15,12 @@ const calls = [], errors = [], handlers = new Map();
 let server, browser, page, counter = 0, controlAllowed = true;
 function snapshot(id, text, sequence, retainedFrom = 1) { return { id, session, events: [{ protocolVersion: 1, sessionId, sequence, timestamp, provider: 'codex', providerSessionId: null, itemId: text, turnId: null, type: 'message.completed', data: { role: 'assistant', text } }], cursor: sequence, latestCursor: sequence, retainedFrom, hasMore: false, truncated: false, pendingRequests: [], pendingCommands: [], state: { id, sessionId, canControl: controlAllowed, controller: { id: 'desktop', name: 'Desktop' }, connection: 'connected' } }; }
 async function until(predicate, label) { for (let index = 0; index < 100; index++) { if (predicate()) return; await new Promise((resolve) => setTimeout(resolve, 20)); } throw Error(label); }
-async function mount(connected) { await page.evaluate((connected) => window.qaMountChat({ connected }), connected); }
+async function mount(connected) {
+  await page.evaluate((connected) => window.qaMountChat({ connected }), connected);
+  // root.render schedules work. Observe the offline commit before reconnecting
+  // so React cannot coalesce both prop updates and skip attachment cleanup.
+  if (!connected) await page.getByRole('status').filter({ hasText: /^Reconnecting$/ }).waitFor();
+}
 async function publish(value) { await page.evaluate((value) => window.dispatchEvent(new CustomEvent('chat:events', { detail: value })), value); }
 async function settled(name, id) {
   const count = calls.filter((call) => call[0] === name && call[1] === id).length;

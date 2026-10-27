@@ -1,6 +1,11 @@
 {
   "suites": [
     {
+      "id": "source-browser-coverage",
+      "file": "tests/source-browser-coverage.cjs",
+      "group": "core"
+    },
+    {
       "id": "navigation-boundaries.e2e",
       "file": "tests/navigation-boundaries.e2e.cjs",
       "group": "linux-web"
