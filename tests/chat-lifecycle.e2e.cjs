@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { chromium } = require('playwright-core');
 const { createServer } = require('vite');
+const { poll: until } = require('./helpers/poll.cjs');
 const { contract } = require('../electron/chat-protocol.cjs');
 const directory = process.env.AGENTC2_SUITE_ARTIFACTS || fs.mkdtempSync(path.join(os.tmpdir(), 'agentc2-chat-lifecycle-'));
 const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'agentc2-vite-chat-life-'));
@@ -14,7 +15,6 @@ const session = { id: sessionId, provider: 'codex', providerSessionId: null, tit
 const calls = [], errors = [], handlers = new Map();
 let server, browser, page, counter = 0, controlAllowed = true;
 function snapshot(id, text, sequence, retainedFrom = 1) { return { id, session, events: [{ protocolVersion: 1, sessionId, sequence, timestamp, provider: 'codex', providerSessionId: null, itemId: text, turnId: null, type: 'message.completed', data: { role: 'assistant', text } }], cursor: sequence, latestCursor: sequence, retainedFrom, hasMore: false, truncated: false, pendingRequests: [], pendingCommands: [], state: { id, sessionId, canControl: controlAllowed, controller: { id: 'desktop', name: 'Desktop' }, connection: 'connected' } }; }
-async function until(predicate, label) { for (let index = 0; index < 100; index++) { if (predicate()) return; await new Promise((resolve) => setTimeout(resolve, 20)); } throw Error(label); }
 async function mount(connected) {
   await page.evaluate((connected) => window.qaMountChat({ connected }), connected);
   // root.render schedules work. Observe the offline commit before reconnecting
