@@ -77,7 +77,9 @@ function commanderFacade({ chats, terminals, action, deleteSession, interruptFau
       protocolVersion: 1, commandId: crypto.randomUUID(), operation, sessionId: unit.chatSessionId, payload,
     }),
     terminalInput: async (client, handle, value) => {
-      await terminals.write(client, handle, value + '\r');
+      // A temporary commander view closes immediately after dispatch. A PTY
+      // write only queues bytes locally and can be truncated by that close.
+      await terminals.write(client, handle, value + '\r', { confirmed: true });
       return { delivery: 'terminal_input_written', taskCompletion: 'unverified' };
     },
   };

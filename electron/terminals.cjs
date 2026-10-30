@@ -6,8 +6,8 @@ const dimensions = (cols, rows) => ({ cols: Math.floor(Math.max(20, Math.min(Num
 
 // One SSH PTY per remote session; handles belong to individual UI connections.
 class Terminals {
-  constructor({ spawn, configure, history, scroll, emit, onOutput, onDispose, platform = process.platform }) {
-    Object.assign(this, { spawn, configure, history, scroll, emit, onOutput, onDispose, platform });
+  constructor({ spawn, configure, history, scroll, confirmInput, emit, onOutput, onDispose, platform = process.platform }) {
+    Object.assign(this, { spawn, configure, history, scroll, confirmInput, emit, onOutput, onDispose, platform });
     this.sessions = new Map();
     this.handles = new Map();
     this.opening = new Map();
@@ -211,7 +211,7 @@ class Terminals {
     } else if (client.id !== 'desktop') throw new Error('Open the session and take control first');
   }
 
-  async write(client, id, data) {
+  async write(client, id, data, { confirmed = false } = {}) {
     const { record } = this.get(client, id);
     this.assertOwner(client, record);
     if (typeof data !== 'string' || data.length > 1_000_000) throw new Error('Terminal input exceeds 1 MB');
@@ -219,7 +219,13 @@ class Terminals {
     if (record.historyActive) await this.scrollRemote(client, id, 'latest', 1);
     this.get(client, id);
     this.assertOwner(client, record);
-    record.terminal.write(data);
+    if (confirmed) {
+      if (!this.confirmInput) throw new Error('Acknowledged terminal input is unavailable');
+      await this.confirmInput(record, data, () => {
+        this.get(client, id);
+        this.assertOwner(client, record);
+      });
+    } else record.terminal.write(data);
   }
 
   resize(client, id, cols, rows) {

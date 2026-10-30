@@ -251,6 +251,12 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
       });
     },
     history: (name, hostId) => runRemote({ action: 'history', name }, hostId),
+    confirmInput: async (record, data, guard) => {
+      // take() has already established this session's control connection.
+      // Never reconnect or fall back after an uncertain input submission.
+      if (!record.control || record.control.closed) throw new Error('Acknowledged terminal control is unavailable');
+      await record.control.sendInput(data, guard);
+    },
     scroll: async (record, direction, count) => {
       const host = getHost(record.hostId);
       if (!record.control || record.control.closed) {

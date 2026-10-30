@@ -21,6 +21,36 @@ function fixture(host = 'fixture-host', env) {
 }
 
 async function main() {
+  const input = fixture();
+  let guarded = 0, delivered = false;
+  const text = 'x'.repeat(4095) + 'é☃\r';
+  const delivery = input.client.sendInput(text, () => { guarded++; }).then(() => { delivered = true; });
+  await Promise.resolve(); assert.equal(input.writes.length, 0);
+  await input.attach(); await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(input.writes.length, 1); assert.equal(delivered, false);
+  input.data('%begin 2\n%end 2\n'); await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(input.writes.length, 2); assert.equal(delivered, false, 'Local stdin writes are not remote acknowledgements');
+  input.data('%begin 3\n%end 3\n'); await delivery;
+  const bytes = input.writes.flatMap((line) => {
+    assert.ok(line.startsWith('send-keys -H '), 'Input targets the attached session without resolving its name again');
+    return line.trim().slice('send-keys -H '.length).split(' ').map((hex) => parseInt(hex, 16));
+  });
+  assert.equal(Buffer.from(bytes).toString('utf8'), text); assert.equal(guarded, 2);
+  await assert.rejects(input.client.sendInput(null, () => {}), /exceeds/);
+  await assert.rejects(input.client.sendInput('x'.repeat(1000001), () => {}), /exceeds/);
+  await input.client.sendInput('', () => {});
+  await assert.rejects(input.client.sendInput('blocked', () => { throw Error('Owner changed'); }), (error) => error.message === 'Owner changed' && !error.uncertain);
+  input.client.close();
+  await assert.rejects(input.client.sendInput('closed', () => {}), (error) => /closed/.test(error.message) && !error.uncertain);
+  const lost = fixture(); await lost.attach();
+  const uncertain = assert.rejects(lost.client.sendInput('single submission\r', () => {}), (error) => error.uncertain === true);
+  await new Promise((resolve) => setImmediate(resolve)); lost.child.emit('close'); await uncertain;
+  assert.equal(lost.writes.length, 1, 'Lost acknowledgement never replays terminal input');
+  const revoked = fixture(); await revoked.attach(); let checks = 0;
+  const stopped = assert.rejects(revoked.client.sendInput('x'.repeat(4097), () => { if (++checks === 2) throw Error('Controller disconnected'); }), (error) => error.uncertain === true && /disconnected/.test(error.message));
+  await new Promise((resolve) => setImmediate(resolve)); revoked.data('%begin 2\n%end 2\n'); await stopped;
+  assert.equal(revoked.writes.length, 1, 'A revoked controller cannot send the remaining input'); revoked.client.close();
+
   const env = { PATH: '/fixture' };
   const f = fixture('fixture-host', env);
   assert.deepEqual(f.launches, [['fixture-ssh', ['-o', 'BatchMode=yes', 'fixture-host', 'tmux', '-C', 'attach-session', '-f', 'no-output,ignore-size', '-t', 'hq-fixture'], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env }]]);

@@ -94,6 +94,9 @@ async function waitForInput(pane) {
     const { Store } = require('../electron/config.cjs');
     const firstKey = `default/tmux:${names[0]}`;
     new Store(dataDirectory).save('workspace', { tabs: [firstKey], selectedKey: firstKey, splitKey: null, metadata: {} });
+    // Terminal fixtures must never trigger real provider calls from fleet events.
+    fs.mkdirSync(path.join(dataDirectory, 'centcom'), { recursive: true });
+    fs.writeFileSync(path.join(dataDirectory, 'centcom', 'centcom.json'), JSON.stringify({ version: 1, paused: true }));
     await remote('setup');
     assert.equal((await remote('state')).length, names.length, 'SSH fixtures did not survive disconnect');
     const packaged = process.env.AGENT_HQ_QA_EXECUTABLE;
@@ -273,6 +276,12 @@ async function waitForInput(pane) {
     assert.equal((await remote('state'))[0].mode, '0');
     await page.keyboard.press('Control+u');
     console.log('PASS typing after shell history resumes live input');
+    const { TmuxControl } = require('../electron/tmux-control.cjs');
+    const acknowledged = new TmuxControl(ssh, ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes'], host, names[0]);
+    try { await acknowledged.sendInput("printf 'HQ_ACK_☃_é\\n'\r", () => {}); }
+    finally { acknowledged.close(); }
+    await poll(async () => (await remote('state'))[0].text.split('\n').includes('HQ_ACK_☃_é'), 'Acknowledged UTF-8 input did not execute completely');
+    console.log('PASS acknowledged UTF-8 input survives immediate control-client close');
     await page.getByRole('textbox', { name: 'Search sessions' }).fill('');
     await page.getByRole('button', { name: 'New unit', exact: true }).click();
     await page.getByRole('combobox', { name: 'Session type', exact: true }).selectOption('terminal');

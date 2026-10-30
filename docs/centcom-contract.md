@@ -1,7 +1,8 @@
 # CENTCOM control contract
 
 Implementation tracking: [issue #69](https://github.com/mlg151/AgentC2/issues/69).
-The issue remains open; the full capability and verification contract is still in progress.
+Issue #69 is closed. The executable registry and adapter coverage ledger remain
+the authority for supported operations and their required verification.
 
 ## Requests and outcomes
 
@@ -37,8 +38,9 @@ rules, provider permissions, revision evidence, and persistence constraints.
 Output contracts retain each adapter's actual return type, including native
 receipts, scalar metadata results, no-payload actions (`null`), configuration
 readback, and explicit partial-result markers. Upstream extension fields are
-bounded JSON and are not proof of project acceptance. The remaining adapter
-verification is still tracked in #69.
+bounded JSON and are not proof of project acceptance. The coverage ledger in
+`tests/fixtures/centcom-adapter-coverage.json` tracks all 69 advertised operations:
+66 implemented operations and three explicitly unsupported operations.
 
 `capabilities.support` requires `operation` and accepts `hostId`, `provider`,
 `transport`, `sessionKey`, `after`, and `limit`. It pages current support and
@@ -95,6 +97,11 @@ when available, `providerTurnCompletion`, and `projectAcceptance`. An adapter
 receipt alone leaves the latter two unverified. Use unit inspection/journal
 evidence and read-only artifact queries to assess the result; a command receipt
 never upgrades project acceptance automatically.
+
+Terminal directives wait for tmux to acknowledge every UTF-8 input chunk before
+releasing their temporary view. A lost acknowledgement leaves delivery uncertain
+and never triggers automatic replay. This confirms input delivery, not shell
+execution or artifact acceptance; inspect the resulting artifact independently.
 
 `unit.inspect` with the returned `commandId` reads the later native receipt
 without acquiring control. Its `command.facts` keeps submission, exact provider

@@ -123,7 +123,7 @@ async function main() {
   const submission = f.calls.at(-1); assert.equal(submission[0], 'submit'); assert.equal(submission[3].sessionId, chat.chatSessionId);
   assert.match(submission[3].commandId, /^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/);
   assert.deepEqual(await f.facade.terminalInput(commander, 'view', 'Reviewed command'), { delivery: 'terminal_input_written', taskCompletion: 'unverified' });
-  assert.deepEqual(f.calls.at(-1), ['write', commander, 'view', 'Reviewed command\r']);
+  assert.deepEqual(f.calls.at(-1), ['write', commander, 'view', 'Reviewed command\r', { confirmed: true }]);
   const routing = {}, forwarded = [], result = {};
   routeCommanderCommands(routing, { isCommander: (_host, id) => id === 'commander', submitCommand: (...args) => { forwarded.push(args); return result; } });
   assert.equal(routing.commandRouter(commander, 'view', {}, { sessionId: 'commander' }), null);
