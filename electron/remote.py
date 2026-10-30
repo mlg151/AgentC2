@@ -215,7 +215,10 @@ def claude_sessions():
                     "kind": "background", "canResume": True,
                 })
                 entry["state"] = agent.get("state") or "live"
-                entry["kind"] = agent.get("kind") or entry["kind"]
+                # Native Claude kinds are not AgentC2 inventory kinds. Keep
+                # external interactive sessions resumable without granting
+                # managed-session controls or invalidating the host cache.
+                entry["kind"] = {"interactive": "conversation", "background": "background"}.get(agent.get("kind"), entry["kind"])
                 entry["agentId"] = agent.get("id")
                 result[session_id] = entry
         except (ValueError, TypeError):

@@ -18,6 +18,15 @@ exec_sources(scope, (Path(__file__).resolve().parents[1] / "electron" / "remote.
 
 
 class LocalRequirements(unittest.TestCase):
+    def test_claude_native_kinds_stay_within_inventory_contract(self):
+        with tempfile.TemporaryDirectory(prefix="agentc2-claude-kinds-") as directory:
+            agents = [dict(id="fixture-" + kind, kind=kind, state="live") for kind in ("interactive", "background", "future-native-kind")]
+            response = subprocess.CompletedProcess([], 0, stdout=json.dumps(agents))
+            with patch.dict(scope, {"HOME": Path(directory), "run": lambda *args, **kwargs: response}):
+                sessions = scope["claude_sessions"]()
+            self.assertEqual([s["kind"] for s in sessions], ["conversation", "background", "background"])
+            self.assertTrue(all(s["canResume"] and not s.get("managed") and not s.get("canStop") for s in sessions))
+
     def test_noninteractive_ssh_finds_user_local_cli_without_overriding_path(self):
         with tempfile.TemporaryDirectory(prefix="agentc2-cli-path-") as directory:
             home = Path(directory)
