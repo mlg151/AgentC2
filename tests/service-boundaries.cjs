@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const { serviceFixture } = require('./fixtures/service-boundaries.cjs');
+const { contract } = require('../electron/chat-protocol.cjs');
 
 async function health() {
   const fixture = serviceFixture(), { service } = fixture;
@@ -69,13 +70,21 @@ async function transport() {
     fixture.setHandler((request) => {
       chatPayloads.push(request.payload);
       if (failChat) request.fail(1, 'Read-only chat bootstrap transport failed');
-      else request.respond([]);
+      else request.respond(request.payload.request.action === 'capabilities' ? contract.providers.map((provider) => ({ provider, version: 'fixture', status: 'supported', reason: null, ...Object.fromEntries(contract.capabilities.map((name) => [name, true])) })) : []);
     });
     await service.chats.list('default'); await service.chats.list('default');
     failChat = true; await assert.rejects(service.chats.list('default'), /chat bootstrap transport failed/);
     failChat = false; await service.chats.list('default');
     assert.deepEqual(chatPayloads.map((payload) => Object.hasOwn(payload, 'chatFiles')), [true, false, false, true], 'A failed chat read invalidates the bootstrap cache for the next explicit read');
     assert.ok(chatPayloads.every((payload) => payload.action === 'chat' && payload.request.action === 'list'), 'Bootstrap recovery must not replay a provider command');
+    // Another desktop may replace an idle worker after this client bootstraps it.
+    // Launch preparation must offer the current bundle again, even if reads succeeded.
+    await service.chats.capabilities('default');
+    await service.chats.capabilities('default', 'codex');
+    assert.equal(Object.hasOwn(chatPayloads.at(-2), 'chatFiles'), false, 'Ordinary capability reads retain the lightweight cache');
+    assert.ok(Object.hasOwn(chatPayloads.at(-1), 'chatFiles'), 'Explicit launch preparation must refresh a stale idle worker');
+    assert.equal(chatPayloads.at(-1).request.prepareProvider, 'codex');
+    assert.equal(chatPayloads.at(-1).allowUpgrade, true);
 
   } finally { fixture.close(); }
 }

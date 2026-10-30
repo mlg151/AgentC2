@@ -208,7 +208,11 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
       const host = getHost(hostId);
       const key = `${host.id}/${connectionKey(host)}`;
       try {
-        const result = await runRemote({ action: 'chat', sourceDigest: chatDigest, allowUpgrade: true, ...(!chatBootstrapped.has(key) ? { chatFiles } : {}), request }, hostId);
+        // A different desktop can replace an idle worker after our first read.
+        // Explicit launch preparation must offer this bundle again; the remote
+        // retirement guard still preserves workers that own sessions or work.
+        const prepareLaunch = request.action === 'capabilities' && request.prepareProvider;
+        const result = await runRemote({ action: 'chat', sourceDigest: chatDigest, allowUpgrade: true, ...(!chatBootstrapped.has(key) || prepareLaunch ? { chatFiles } : {}), request }, hostId);
         chatBootstrapped.add(key);
         return result;
       } catch (error) { chatBootstrapped.delete(key); throw error; }
