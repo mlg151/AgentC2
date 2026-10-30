@@ -18,6 +18,20 @@ exec_sources(scope, (Path(__file__).resolve().parents[1] / "electron" / "remote.
 
 
 class LocalRequirements(unittest.TestCase):
+    def test_noninteractive_ssh_finds_user_local_cli_without_overriding_path(self):
+        with tempfile.TemporaryDirectory(prefix="agentc2-cli-path-") as directory:
+            home = Path(directory)
+            local_bin = home / ".local" / "bin"
+            local_bin.mkdir(parents=True)
+            binary = local_bin / "codex"
+            binary.write_text("#!/bin/sh\nexit 0\n")
+            binary.chmod(0o700)
+            with patch.dict(os.environ, {"PATH": "/usr/bin:/bin"}), patch.object(Path, "home", return_value=home):
+                helper = {"__name__": "provider_path_fixture"}
+                exec_sources(helper, (Path(__file__).resolve().parents[1] / "electron" / "remote.py"))
+                self.assertEqual(os.environ["PATH"].split(os.pathsep)[:2], ["/usr/bin", "/bin"])
+                self.assertEqual(shutil.which("codex"), str(binary))
+
     def test_missing_tmux_fails_before_inventory_or_launch_side_effects(self):
         with tempfile.TemporaryDirectory(prefix="agentc2-no-tmux-") as directory:
             helper = {"__name__": "local_requirements_fixture"}

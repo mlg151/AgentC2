@@ -43,6 +43,7 @@ const { createAutomations } = require('../electron/centcom-automations.cjs');
         },
         session: null,
         status: 'halted',
+        error: 'Codex startup failed: the configured provider version is unavailable.',
         providerTurn: { commandId: 'fixture-command', turnId: 'fixture-provider-turn', status: 'uncertain', hostId: 'default', sessionId: 'chat-' + 'f'.repeat(32), cursor: 712, dispatchStarted: true },
         costUsd: 1.25,
         costKnown: false,
@@ -108,6 +109,7 @@ const { createAutomations } = require('../electron/centcom-automations.cjs');
     // Open CENTCOM Console
     await centcomBtn.click();
     await page.getByText('CENTCOM COMMAND CONSOLE').waitFor();
+    await page.getByRole('alert').filter({ hasText: 'Codex startup failed: the configured provider version is unavailable.' }).waitFor({ timeout: 5000 });
     await page.getByText('KNOWN SPEND: $1.25 · INCOMPLETE').waitFor();
     await page.getByText('Provider shutdown is unconfirmed.', { exact: false }).waitFor();
 

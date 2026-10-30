@@ -4,7 +4,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
-const version = '0.163.0';
+const version = process.argv[2] || '0.165.0';
+if (!['0.163.0', '0.164.0', '0.165.0'].includes(version)) throw new Error('Choose a reviewed Codex protocol version');
 const binary = process.env.AGENTC2_CODEX_BINARY || 'codex';
 const installed = execFileSync(binary, ['--version'], { encoding: 'utf8' }).trim();
 if (installed !== `codex-cli ${version}`) throw new Error(`Expected Codex ${version}; found ${installed}`);
@@ -43,6 +44,16 @@ try {
   execFileSync(binary, ['app-server', 'generate-json-schema', '--out', directory], { stdio: 'inherit' });
   const schemas = Object.fromEntries(names.map((name) => [name, prune(JSON.parse(fs.readFileSync(path.join(directory, `${name}.json`), 'utf8')))]));
   const target = path.join(__dirname, '..', 'electron', 'chat-codex-schema.json');
-  fs.writeFileSync(target, JSON.stringify({ version, source: 'codex app-server generate-json-schema', schemas }) + '\n');
+  const bundle = JSON.parse(fs.readFileSync(target, 'utf8'));
+  const versions = Object.fromEntries(Object.entries(bundle.versions || {}).map(([key, overrides]) => [key, { ...bundle.schemas, ...overrides }]));
+  if (version === bundle.version) bundle.schemas = schemas;
+  else versions[version] = schemas;
+  // Retain exact per-version contracts without repeating unchanged schemas.
+  bundle.versions = Object.fromEntries(Object.entries(versions).map(([key, entries]) => [key,
+    Object.fromEntries(Object.entries(entries).filter(([name, schema]) => JSON.stringify(schema) !== JSON.stringify(bundle.schemas[name]))),
+  ]));
+  const output = JSON.stringify(bundle) + '\n';
+  if (Buffer.byteLength(output) > 500000) throw new Error('Codex schemas exceed the worker bundle file limit');
+  fs.writeFileSync(target, output);
   console.log(`Generated ${names.length} protocol schemas for Codex ${version}`);
 } finally { fs.rmSync(directory, { recursive: true, force: true }); }
