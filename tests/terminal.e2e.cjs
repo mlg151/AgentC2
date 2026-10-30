@@ -303,15 +303,16 @@ async function waitForInput(pane) {
     await waitForInput(pane);
     // Keep the test shell isolated and print links at known terminal cells.
     await pane.locator('.xterm-helper-textarea').focus();
-    await page.keyboard.type("export HQ_REATTACH=retained; printf '\\033[2J\\033[Hhttps://example.com/agent-hq?from=desktop\\n'");
+    await page.keyboard.type("export HQ_REATTACH=retained; printf '\\033[2J\\033[Hhttps://example.com/agent-hq?from=desktop\\nINITIAL_%s\\n' \"$HQ_REATTACH\"");
     await page.keyboard.press('Enter');
     await poll(async () => (await pane.locator('.xterm-rows').innerText()).includes('https://example.com/agent-hq?from=desktop'), 'Link output did not render');
+    await poll(async () => (await pane.locator('.xterm-rows').innerText()).includes('INITIAL_retained'), 'Initial shell input was corrupted before detach');
     await app.evaluate(({ shell }) => { globalThis.qaExternalLinks = []; shell.openExternal = async (url) => { globalThis.qaExternalLinks.push(url); }; });
     const linkRow = pane.locator('.xterm-rows > div').filter({ hasText: /^https:\/\/example\.com\/agent-hq\?from=desktop/ }).first();
     const linkBounds = await linkRow.boundingBox();
     assert.ok(linkBounds, 'Rendered URL row is visible');
     await page.mouse.move(linkBounds.x + 40, linkBounds.y + linkBounds.height / 2);
-    await page.waitForTimeout(500);
+    await pane.locator('.xterm.xterm-cursor-pointer').waitFor({ timeout: 10000 });
     await page.mouse.click(linkBounds.x + 40, linkBounds.y + linkBounds.height / 2);
     await poll(async () => (await app.evaluate(() => globalThis.qaExternalLinks)).includes('https://example.com/agent-hq?from=desktop'), 'Desktop URL did not open in the system browser');
     await page.evaluate(() => { window.open('file:///C:/Windows/win.ini'); window.open('javascript:alert(1)'); });
