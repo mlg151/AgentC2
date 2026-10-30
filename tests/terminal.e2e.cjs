@@ -312,7 +312,7 @@ async function waitForInput(pane) {
     const linkBounds = await linkRow.boundingBox();
     assert.ok(linkBounds, 'Rendered URL row is visible');
     await page.mouse.move(linkBounds.x + 40, linkBounds.y + linkBounds.height / 2);
-    await pane.locator('.xterm.xterm-cursor-pointer').waitFor({ timeout: 10000 });
+    await pane.locator('.xterm-cursor-pointer').waitFor({ timeout: 10000 });
     await page.mouse.click(linkBounds.x + 40, linkBounds.y + linkBounds.height / 2);
     await poll(async () => (await app.evaluate(() => globalThis.qaExternalLinks)).includes('https://example.com/agent-hq?from=desktop'), 'Desktop URL did not open in the system browser');
     await page.evaluate(() => { window.open('file:///C:/Windows/win.ini'); window.open('javascript:alert(1)'); });

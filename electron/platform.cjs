@@ -9,6 +9,12 @@ function appDataDirectory(platform = process.platform, env = process.env, home =
 }
 
 function sshBinary(platform = process.platform, env = process.env) {
+  if (env.AGENTC2_SSH_BINARY) {
+    const binary = env.AGENTC2_SSH_BINARY;
+    const paths = platform === 'win32' ? path.win32 : path.posix;
+    if (typeof binary !== 'string' || binary.includes('\0') || !paths.isAbsolute(binary)) throw new Error('AGENTC2_SSH_BINARY must be an absolute executable path');
+    return binary;
+  }
   if (platform === 'win32') return path.win32.join(env.SystemRoot || 'C:\\Windows', 'System32', 'OpenSSH', 'ssh.exe');
   // Finder launches do not inherit an interactive shell's PATH.
   return platform === 'darwin' ? '/usr/bin/ssh' : 'ssh';

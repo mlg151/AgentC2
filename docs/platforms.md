@@ -37,6 +37,14 @@ Use ⌘K for quick switching, ⌘F for history search, ⌘C to copy terminal sel
 
 ## SSH configuration and authentication
 
+`AGENTC2_SSH_BINARY` can select an absolute SSH executable path instead of the
+platform default. It is passed directly to process creation, never a shell.
+Use the same client to verify authentication and host keys before launching the
+app. This also allows Windows installations affected by the OpenSSH 9.5 console
+parser bug ([upstream issue](https://github.com/PowerShell/Win32-OpenSSH/issues/2275))
+to use a separately installed client containing the upstream fix.
+Keep its installation intact, and restart AgentC2 after changing the environment.
+
 First connect using the same system `ssh` binary in a normal terminal. Verify the server's host-key fingerprint through a trusted source and accept it there. AgentC2 uses `BatchMode=yes` and `StrictHostKeyChecking=yes`, so it cannot answer password, passphrase, or unknown-host prompts. Configure an SSH alias, port, and key in `~/.ssh/config`, or `%USERPROFILE%\.ssh\config` on Windows, and enter the alias in Settings → SSH hosts. Set the same port in AgentC2 if your alias uses a non-default port.
 
 Use an SSH agent or an appropriately protected key that works without interactive prompts. Encrypted keys must be unlocked in the agent before launching AgentC2. On Linux, ensure GUI applications inherit `SSH_AUTH_SOCK`; on macOS, use your configured system agent/Keychain integration and test a Finder launch separately. AgentC2 neither reads private keys nor runs a login shell locally to discover agent configuration. Provider aliases/presets run on the remote Linux host as before. Stop is still restricted to managed sessions, and opening links still permits only HTTP(S).
