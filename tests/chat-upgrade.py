@@ -103,7 +103,10 @@ class UpgradeTests(unittest.TestCase):
         identifier, _ = self.create()
         value = command("send", dict(text="pending-upgrade"), identifier)
         rpc(self.root, request("command", command=value))
-        before = poll(lambda: rpc(self.root, request("history", sessionId=identifier)), lambda p: bool(p["pendingRequests"]))
+        # History and pending requests are read separately. An approval can
+        # arrive between those reads, so wait for a coherent waiting snapshot.
+        before = poll(lambda: rpc(self.root, request("history", sessionId=identifier)),
+                      lambda p: bool(p["pendingRequests"]) and p["session"]["state"] == "waiting")
         self.assertEqual(before["session"]["state"], "waiting")
         self.assertEqual(self.updated("history", sessionId=identifier), before)
         self.assertEqual(self.updated("receipt", bundle=False, commandId=value["commandId"])["state"], "dispatching")
