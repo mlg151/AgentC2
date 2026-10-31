@@ -18,11 +18,19 @@ const { Store, validateSettings } = require('../electron/config.cjs');
       await page.locator('.session-row').first().waitFor();
       await page.getByRole('button', { name: 'Settings', exact: true }).click();
       await page.getByRole('button', { name: 'Desktop sync', exact: true }).click();
-      await page.getByRole('textbox', { name: 'Device name', exact: true }).fill(name);
+      const deviceName = page.getByRole('textbox', { name: 'Device name', exact: true });
+      // Wait for the asynchronously loaded configuration before setting up
+      // this pairing fixture; delayed-draft behavior is tested separately.
+      await poll(async () => {
+        const loaded = await page.evaluate(() => window.agentHQ.peerSyncStatus());
+        return Boolean(loaded.deviceName) && await deviceName.inputValue() === loaded.deviceName;
+      }, 'Initial desktop sync configuration did not load');
+      await deviceName.fill(name);
       await page.getByRole('checkbox', { name: 'Enable desktop sync', exact: true }).check();
       await page.getByRole('spinbutton', { name: 'Sync port', exact: true }).fill('0');
       await page.getByRole('button', { name: 'Apply desktop sync', exact: true }).click();
       await page.getByRole('button', { name: 'Generate pairing code', exact: true }).waitFor();
+      assert.equal((await page.evaluate(() => window.agentHQ.peerSyncStatus())).deviceName, name, 'Pairing fixture must persist the requested device name');
       return page;
     }
     const a = await launch('Command desktop'), b = await launch('Field laptop');
