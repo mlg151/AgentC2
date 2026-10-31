@@ -30,6 +30,25 @@ async function closeDialog(page) { await page.keyboard.press('Escape'); await pa
     await page.route('**/favicon.ico', (route) => route.fulfill({ status: 204 }));
     const url = `http://127.0.0.1:${server.httpServer.address().port}/`;
     await page.goto(url); await page.locator('.session-row').filter({ hasText: 'Alpha unit' }).waitFor();
+    // Simulate an old workspace tab, followed by the service's commander-free
+    // inventory. A hidden internal session must not survive as a stale tab.
+    await page.evaluate(() => {
+      const commander = { ...window.qa.units[0], id: 'hq-cccccccccccc', key: 'alpha/tmux:hq-cccccccccccc', title: 'CENTCOM // CODEX (fixture)' };
+      window.qa.units.push(commander); window.qa.emit('onInventory', window.qa.inventory());
+    });
+    await page.locator('.session-row').filter({ hasText: 'CENTCOM //' }).click();
+    await page.getByRole('tab', { name: 'CENTCOM // CODEX (fixture)', exact: true }).waitFor();
+    await page.evaluate(() => {
+      const internalSessionKeys = [window.qa.units.pop().key];
+      window.qa.emit('onInventory', { ...window.qa.inventory(), internalSessionKeys });
+    });
+    await page.getByRole('tab', { name: 'CENTCOM // CODEX (fixture)', exact: true }).waitFor({ state: 'hidden' });
+    assert.equal(await page.locator('.session-row').filter({ hasText: 'CENTCOM //' }).count(), 0);
+    assert.equal(await page.locator('.session-row').count(), 3);
+    await page.getByRole('button', { name: 'CENTCOM', exact: true }).click();
+    await page.getByText('CENTCOM COMMAND CONSOLE', { exact: true }).waitFor();
+    await closeDialog(page);
+    await page.screenshot({ path: path.join(screenshots, 'commander-free-roster.png'), timeout: 60000 });
     await page.locator('.session-row').filter({ hasText: 'Bravo unit' }).click();
     await page.locator('.session-row').filter({ hasText: 'Charlie unit' }).click();
     assert.equal(await page.getByRole('tab').count(), 3);

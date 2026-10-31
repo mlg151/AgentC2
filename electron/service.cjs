@@ -114,7 +114,8 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
         for (const order of store.data.settings.opOrders || []) if (order.hostId === h.id) { opOrderSynced.delete(order.id); opOrderAttempts.delete(order.id); }
         return { id: h.id, name: h.name, target: h.target, connected: false, error: result.reason.message };
       });
-      const sessions = hosts.flatMap((h) => (hostCache.get(h.id) || []).map((s) => ({ ...s, stale: !statuses.find((status) => status.id === h.id).connected }))).filter((session) => !store.data.deletedSessions.includes(session.key));
+      const roster = centcom.rosterInventory({ sessions: hosts.flatMap((h) => (hostCache.get(h.id) || []).map((s) => ({ ...s, stale: !statuses.find((status) => status.id === h.id).connected }))).filter((session) => !store.data.deletedSessions.includes(session.key)), attention: store.data.attention, faults: loopBreaker.faults() });
+      const sessions = roster.sessions;
       for (const session of sessions) if (session.key.startsWith(`${session.hostId}/tmux:`)) session.outputActivity = terminals.activity(session.id, session.hostId);
       attention.resolveRequests(sessions.filter((s) => !s.stale).flatMap((s) => s.resolvedRequestIds || []));
       attention.update(sessions.filter((s) => !s.stale));
@@ -130,7 +131,7 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
         if (mission) session.specops = { id: mission.id, state: mission.state, breadcrumb: mission.workflow.stages.map((s) => s.id === mission.stage ? `[*${s.id}*]` : `[${s.id}]`).join(' → ') };
       }
       const missionSummaries = missions.map(({ id, hostId, repo, state, stage, error, workflow, costUsd, costKnown, canResume, canRetry }) => ({ id, hostId, repo, state, stage, error, workflow, costUsd, costKnown, canResume, canRetry, visits: [] }));
-      const snapshot = { capturedAt: new Date().toISOString(), missions: missionSummaries, hosts: statuses, sessions, attention: store.data.attention, faults: loopBreaker.faults() };
+      const snapshot = centcom.rosterInventory({ capturedAt: new Date().toISOString(), missions: missionSummaries, hosts: statuses, sessions, internalSessionKeys: roster.internalSessionKeys, attention: store.data.attention, faults: loopBreaker.faults() });
       snapshot.conflicts = [...opOrderConflicts.values()];
       events.emit('inventory:updated', snapshot);
       return snapshot;
