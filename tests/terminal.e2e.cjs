@@ -94,6 +94,9 @@ async function waitForInput(pane) {
     const { Store } = require('../electron/config.cjs');
     const firstKey = `default/tmux:${names[0]}`;
     new Store(dataDirectory).save('workspace', { tabs: [firstKey], selectedKey: firstKey, splitKey: null, metadata: {} });
+    // Terminal fixtures must never trigger real provider calls from fleet events.
+    fs.mkdirSync(path.join(dataDirectory, 'centcom'), { recursive: true });
+    fs.writeFileSync(path.join(dataDirectory, 'centcom', 'centcom.json'), JSON.stringify({ version: 1, paused: true }));
     await remote('setup');
     assert.equal((await remote('state')).length, names.length, 'SSH fixtures did not survive disconnect');
     const packaged = process.env.AGENT_HQ_QA_EXECUTABLE;
@@ -273,6 +276,12 @@ async function waitForInput(pane) {
     assert.equal((await remote('state'))[0].mode, '0');
     await page.keyboard.press('Control+u');
     console.log('PASS typing after shell history resumes live input');
+    const { TmuxControl } = require('../electron/tmux-control.cjs');
+    const acknowledged = new TmuxControl(ssh, ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes'], host, names[0]);
+    try { await acknowledged.sendInput("printf 'HQ_ACK_☃_é\\n'\r", () => {}); }
+    finally { acknowledged.close(); }
+    await poll(async () => (await remote('state'))[0].text.split('\n').includes('HQ_ACK_☃_é'), 'Acknowledged UTF-8 input did not execute completely');
+    console.log('PASS acknowledged UTF-8 input survives immediate control-client close');
     await page.getByRole('textbox', { name: 'Search sessions' }).fill('');
     await page.getByRole('button', { name: 'New unit', exact: true }).click();
     await page.getByRole('combobox', { name: 'Session type', exact: true }).selectOption('terminal');
@@ -294,15 +303,16 @@ async function waitForInput(pane) {
     await waitForInput(pane);
     // Keep the test shell isolated and print links at known terminal cells.
     await pane.locator('.xterm-helper-textarea').focus();
-    await page.keyboard.type("export HQ_REATTACH=retained; printf '\\033[2J\\033[Hhttps://example.com/agent-hq?from=desktop\\n'");
+    await page.keyboard.type("export HQ_REATTACH=retained; printf '\\033[2J\\033[Hhttps://example.com/agent-hq?from=desktop\\nINITIAL_%s\\n' \"$HQ_REATTACH\"");
     await page.keyboard.press('Enter');
     await poll(async () => (await pane.locator('.xterm-rows').innerText()).includes('https://example.com/agent-hq?from=desktop'), 'Link output did not render');
+    await poll(async () => (await pane.locator('.xterm-rows').innerText()).includes('INITIAL_retained'), 'Initial shell input was corrupted before detach');
     await app.evaluate(({ shell }) => { globalThis.qaExternalLinks = []; shell.openExternal = async (url) => { globalThis.qaExternalLinks.push(url); }; });
     const linkRow = pane.locator('.xterm-rows > div').filter({ hasText: /^https:\/\/example\.com\/agent-hq\?from=desktop/ }).first();
     const linkBounds = await linkRow.boundingBox();
     assert.ok(linkBounds, 'Rendered URL row is visible');
     await page.mouse.move(linkBounds.x + 40, linkBounds.y + linkBounds.height / 2);
-    await page.waitForTimeout(500);
+    await pane.locator('.xterm-cursor-pointer').waitFor({ timeout: 10000 });
     await page.mouse.click(linkBounds.x + 40, linkBounds.y + linkBounds.height / 2);
     await poll(async () => (await app.evaluate(() => globalThis.qaExternalLinks)).includes('https://example.com/agent-hq?from=desktop'), 'Desktop URL did not open in the system browser');
     await page.evaluate(() => { window.open('file:///C:/Windows/win.ini'); window.open('javascript:alert(1)'); });

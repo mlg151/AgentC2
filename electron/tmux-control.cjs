@@ -68,6 +68,27 @@ class TmuxControl {
     });
   }
 
+  async sendInput(text, guard) {
+    if (typeof text !== 'string' || text.length > 1_000_000) throw new Error('Terminal input exceeds 1 MB');
+    await this.ready;
+    const bytes = Buffer.from(text, 'utf8');
+    let submitted = false;
+    try {
+      for (let offset = 0; offset < bytes.length; offset += 4096) {
+        guard();
+        if (this.closed) throw new Error('tmux control connection is closed');
+        // Hex keys preserve arbitrary text without tmux/shell interpolation.
+        // No -t: address the attached session, never a reused session name.
+        const keys = [...bytes.subarray(offset, offset + 4096)].map((byte) => byte.toString(16).padStart(2, '0')).join(' ');
+        submitted = true;
+        await this.command('send-keys -H ' + keys);
+      }
+    } catch (error) {
+      if (submitted) error.uncertain = true;
+      throw error;
+    }
+  }
+
   fail(error) {
     if (this.closed) return;
     this.closed = true;

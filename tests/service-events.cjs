@@ -8,6 +8,11 @@ async function callbacks() {
     for (const name of ['', 'bad/name', 'x'.repeat(81)]) await assert.rejects(service.terminals.configure(name, 'default'), /Invalid tmux session name/);
     await service.terminals.configure('external-valid', 'default');
     assert.equal(fixture.calls.length, 0, 'External terminal configuration must not mutate remote session options');
+    await assert.rejects(service.terminals.confirmInput({}, 'never send', () => {}), /Acknowledged terminal control/);
+    await assert.rejects(service.terminals.confirmInput({ control: { closed: true } }, 'never replay', () => {}), /Acknowledged terminal control/);
+    let guardedInput = false;
+    await service.terminals.confirmInput({ control: { async sendInput(data, guard) { assert.equal(data, 'reviewed input'); guard(); } } }, 'reviewed input', () => { guardedInput = true; });
+    assert.equal(guardedInput, true);
     const sent = [];
     service.tunnels.feed = (...args) => sent.push(args);
     service.chats.onEvents({ hostId: 'default', session: {} }, [{ type: 'message.completed', data: { text: 'excluded' } }]);

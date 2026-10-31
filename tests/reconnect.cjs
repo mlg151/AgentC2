@@ -105,6 +105,7 @@ class FakePty extends EventEmitter {
   assert.equal(terminals.state(desktop, desktopHandle).canControl, false);
   assert.equal(terminals.sessions.get(`default/${name}`).sequence, initialSequence + 2);
   await terminals.write(phone, phoneHandle, 'approved after reconnection');
+  await assert.rejects(terminals.write(phone, phoneHandle, 'must not fall back', { confirmed: true }), /Acknowledged terminal input is unavailable/);
   assert.equal(ptys[1].lastWrite, 'approved after reconnection');
   assert.equal(events.filter((item) => item.event === 'terminal:exit').length, 0);
   ptys[1].exit(255);
@@ -129,15 +130,27 @@ class FakePty extends EventEmitter {
   terminals.close(desktop, interrupted);
   const commander = { id: 'centcom-commander', name: 'CENTCOM' };
   const facade = commanderFacade({ terminals });
+  let acknowledge, delivered;
+  const acknowledgement = new Promise((resolve) => { acknowledge = resolve; });
+  terminals.confirmInput = async (_record, data, guard) => {
+    guard();
+    await acknowledgement;
+    guard();
+    delivered = data;
+  };
   const dispatch = facade.commanderControl(commander, { key: `default/tmux:${name}`, id: name, hostId: 'default' }, async (id) => {
     assert.equal(terminals.state(commander, id).connection, 'connected');
-    await terminals.write(commander, id, 'reviewed command');
+    await facade.terminalInput(commander, id, 'reviewed command');
   });
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.equal(ptys[4].lastWrite, undefined, 'Commander must not dispatch before tty startup');
   ptys[4].data('\x1b[?1049h');
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  assert.equal(terminals.sessions.size, 1, 'Do not tear down the temporary view while input is unacknowledged');
+  assert.equal(ptys[4].lastWrite, undefined, 'Confirmed sends must not use a locally buffered PTY write');
+  acknowledge();
   await dispatch;
-  assert.equal(ptys[4].lastWrite, 'reviewed command');
+  assert.equal(delivered, 'reviewed command\r');
   assert.equal(terminals.sessions.size, 0, 'Commander must release its private attachment');
   const stalled = await terminals.open(desktop, name, 'default', 100, 30);
   await assert.rejects(terminals.waitForConnection(desktop, stalled, 20), /timed out/);

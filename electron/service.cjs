@@ -208,7 +208,11 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
       const host = getHost(hostId);
       const key = `${host.id}/${connectionKey(host)}`;
       try {
-        const result = await runRemote({ action: 'chat', sourceDigest: chatDigest, allowUpgrade: true, ...(!chatBootstrapped.has(key) ? { chatFiles } : {}), request }, hostId);
+        // A different desktop can replace an idle worker after our first read.
+        // Explicit launch preparation must offer this bundle again; the remote
+        // retirement guard still preserves workers that own sessions or work.
+        const prepareLaunch = request.action === 'capabilities' && request.prepareProvider;
+        const result = await runRemote({ action: 'chat', sourceDigest: chatDigest, allowUpgrade: true, ...(!chatBootstrapped.has(key) || prepareLaunch ? { chatFiles } : {}), request }, hostId);
         chatBootstrapped.add(key);
         return result;
       } catch (error) { chatBootstrapped.delete(key); throw error; }
@@ -247,6 +251,12 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
       });
     },
     history: (name, hostId) => runRemote({ action: 'history', name }, hostId),
+    confirmInput: async (record, data, guard) => {
+      // take() has already established this session's control connection.
+      // Never reconnect or fall back after an uncertain input submission.
+      if (!record.control || record.control.closed) throw new Error('Acknowledged terminal control is unavailable');
+      await record.control.sendInput(data, guard);
+    },
     scroll: async (record, direction, count) => {
       const host = getHost(record.hostId);
       if (!record.control || record.control.closed) {

@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "electron"))
 from chat_journal import Journal
 from chat_protocol import CONTRACT
 from chat_codex import CodexAdapter
+from chat_adapters import probe_capabilities
 from chat_antigravity import AntigravityAdapter
 from chat_claude import ClaudeAdapter
 from chat_opencode import OpenCodeAdapter
@@ -82,6 +83,10 @@ def main():
         journal = Journal(root / "journal")
         marker = "AGENTC2_SMOKE_" + uuid.uuid4().hex[:12]
         capabilities = dict(provider=args.provider, version="live-smoke", status="supported", reason=None, **{name: name in ("streaming", "resume", "interrupt") for name in CONTRACT["capabilities"]})
+        if args.provider == "codex":
+            capabilities = probe_capabilities("codex")
+            if capabilities["status"] != "supported":
+                raise RuntimeError("Installed Codex version has not been validated")
         native = None
         evidence = []
         try:

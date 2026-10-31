@@ -23,9 +23,9 @@ import uuid
 
 
 HOME = Path.home()
-# The OpenCode installer uses this directory; GUI and noninteractive SSH
-# sessions may not inherit the interactive shell PATH. Keep existing PATH first.
-os.environ["PATH"] = os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin") + os.pathsep + str(HOME / ".opencode" / "bin")
+# Standalone provider installers use user-local directories that noninteractive
+# SSH sessions may omit. Keep explicitly configured executables first.
+os.environ["PATH"] = os.pathsep.join([os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"), str(HOME / ".local" / "bin"), str(HOME / ".opencode" / "bin")])
 PROVIDERS = {"codex": "codex", "claude": "claude", "antigravity": "agy", "opencode": "opencode"}
 SESSION_PROVIDERS = {*PROVIDERS, "terminal"}
 PERMISSION_FLAGS = {
@@ -215,7 +215,10 @@ def claude_sessions():
                     "kind": "background", "canResume": True,
                 })
                 entry["state"] = agent.get("state") or "live"
-                entry["kind"] = agent.get("kind") or entry["kind"]
+                # Native Claude kinds are not AgentC2 inventory kinds. Keep
+                # external interactive sessions resumable without granting
+                # managed-session controls or invalidating the host cache.
+                entry["kind"] = {"interactive": "conversation", "background": "background"}.get(agent.get("kind"), entry["kind"])
                 entry["agentId"] = agent.get("id")
                 result[session_id] = entry
         except (ValueError, TypeError):

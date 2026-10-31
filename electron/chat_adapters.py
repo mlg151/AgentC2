@@ -45,8 +45,8 @@ def probe_capabilities(provider):
         if version in SUPPORTED_VERSIONS:
             return dict(provider=provider, version=version, status="supported", reason="OpenCode ACP; host credentials and project configuration apply. Gated launch is unavailable.", **{name: name in ("streaming", "history", "resume", "interrupt", "approvals", "questions") for name in CONTRACT["capabilities"]})
     if provider == "codex":
-        from chat_codex_schema import BUNDLE
-        if version == BUNDLE["version"]:
+        from chat_codex_schema import SUPPORTED_VERSIONS
+        if version in SUPPORTED_VERSIONS:
             return dict(provider=provider, version=version, status="supported", reason=None, **{name: name in ("streaming", "history", "resume", "interrupt", "approvals", "questions", "steering") for name in CONTRACT["capabilities"]})
     if provider == "claude":
         from chat_claude import SUPPORTED_SDK_VERSION, SUPPORTED_CLI_VERSIONS, auth_available

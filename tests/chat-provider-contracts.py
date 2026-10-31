@@ -65,6 +65,17 @@ class Registry(unittest.TestCase):
         self.assertIn("authentication", self.probe("antigravity", sdk=antigravity.SUPPORTED_SDK_VERSION)["reason"])
         self.assertEqual(self.probe("antigravity", sdk=antigravity.SUPPORTED_SDK_VERSION, authenticated=True)["status"], "supported")
 
+    def test_codex_upgrade_preserves_old_version_and_rejects_unverified_versions(self):
+        for version in ("0.163.0", "0.164.0", "0.165.0"):
+            with self.subTest(version=version):
+                value = self.probe("codex", version)
+                self.assertEqual(value["status"], "supported")
+                self.assertEqual(value["version"], version)
+                self.assertTrue(value["approvals"])
+                self.assertTrue(value["resume"])
+        for version in ("0.162.0", "0.166.0", "1.0.0"):
+            self.assertEqual(self.probe("codex", version)["status"], "unverified")
+
     def test_factory_routes_only_currently_verified_providers(self):
         journal = object()
         for provider, module, name in [("codex", codex, "CodexAdapter"), ("opencode", opencode, "OpenCodeAdapter"), ("claude", claude, "ClaudeAdapter"), ("antigravity", antigravity, "AntigravityAdapter")]:
@@ -82,6 +93,19 @@ class Registry(unittest.TestCase):
 
 
 class NativeSchema(unittest.TestCase):
+    def test_codex_version_specific_responses_preserve_the_deployed_contract(self):
+        account = dict(account=dict(type="chatgpt", email=None, planType="sci"), requiresOpenaiAuth=True)
+        image = dict(threadId="thread", turnId="turn", completedAtMs=1, item=dict(type="imageGeneration", id="image", status="completed", fileId="file"))
+        for name, value in [("v2/GetAccountResponse", account), ("v2/ItemCompletedNotification", image)]:
+            with self.subTest(name=name):
+                self.assertIs(schema.validate_native(name, value, "0.165.0"), value)
+                with self.assertRaisesRegex(ValueError, "Invalid Codex"):
+                    schema.validate_native(name, value, "0.163.0")
+                with self.assertRaisesRegex(ValueError, "Unsupported Codex protocol version"):
+                    schema.validate_native(name, value, "0.166.0")
+        with self.assertRaisesRegex(ValueError, "Invalid Codex"):
+            schema.validate_native("v2/AgentMessageDeltaNotification", dict(delta="text"), "0.165.0")
+
     def accepts(self, definition, value, valid=True):
         with patch.dict(schema.BUNDLE["schemas"], {"UnitFixture": definition}):
             if valid:

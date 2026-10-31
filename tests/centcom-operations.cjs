@@ -357,7 +357,7 @@ async function terminalControl() {
     get(client, id) { const value = this.handles.get(id); assert.equal(value.client.id, client.id); return value; },
     async take(client, _id, captureOwner) { captureOwner?.(record.owner); record.owner = client; }, publish() {},
     close(_client, id) { this.handles.delete(id); record.handles.delete(id); },
-    async write(client, _id, data) { assert.equal(record.owner.id, client.id); assert.equal(data, 'Run fixture\r'); },
+    async write(client, _id, data, options) { assert.equal(record.owner.id, client.id); assert.equal(data, 'Run fixture\r'); assert.equal(options?.confirmed, true, 'Temporary commander handles must wait for remote input acknowledgement before closing'); },
   };
   const facade = commanderFacade({ chats: {}, terminals: views });
   const result = await facade.commanderControl(commander, u, (handle) => facade.terminalInput(commander, handle, 'Run fixture'));

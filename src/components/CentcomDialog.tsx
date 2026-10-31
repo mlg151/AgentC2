@@ -102,7 +102,7 @@ export function CentcomDialog({ settings, onClose }: { settings: Settings; onClo
           </button>
         </nav>
 
-        {error ? <p role="alert" className="form-error">{error}</p> : null}
+        {error || state?.error ? <p role="alert" className="form-error">{error || state?.error}</p> : null}
         {state?.providerTurn && ['cancelling', 'uncertain'].includes(state.providerTurn.status) ? (
           <p role="status" className="form-error">Provider shutdown is unconfirmed. Control remains reserved. Retry your request to reconcile before starting another turn.</p>
         ) : null}

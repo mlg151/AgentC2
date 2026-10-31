@@ -10,7 +10,10 @@ const { packagePath } = require('../scripts/package-path.cjs');
 (async () => {
   assert.equal(sshBinary('win32', {}), 'C:\\Windows\\System32\\OpenSSH\\ssh.exe');
   assert.equal(sshBinary('darwin', { PATH: '/nothing' }), '/usr/bin/ssh');
-  assert.equal(sshBinary('linux'), 'ssh');
+  assert.equal(sshBinary('linux', {}), 'ssh');
+  assert.equal(sshBinary('win32', { AGENTC2_SSH_BINARY: 'C:\\Program Files\\Git\\usr\\bin\\ssh.exe' }), 'C:\\Program Files\\Git\\usr\\bin\\ssh.exe');
+  assert.equal(sshBinary('linux', { AGENTC2_SSH_BINARY: '/opt/ssh/bin/ssh' }), '/opt/ssh/bin/ssh');
+  for (const binary of ['ssh', '/opt/ssh\0ignored', true]) assert.throws(() => sshBinary('linux', { AGENTC2_SSH_BINARY: binary }), /absolute executable path/);
   assert.equal(sshBinary(), sshBinary(process.platform, process.env));
   assert.equal(appDataDirectory('linux', {}, '/home/qa'), path.join('/home/qa', '.config'));
   assert.equal(appDataDirectory('linux', { XDG_CONFIG_HOME: '/config' }, '/home/qa'), '/config');
