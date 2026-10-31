@@ -3,7 +3,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { fleetReadiness } = require('./readiness.cjs');
-const { activeFleet, commanderIdentity } = require('./centcom-fleet.cjs');
+const { activeFleet, commanderIdentity, rosterInventory } = require('./centcom-fleet.cjs');
 const { createOperations } = require('./centcom-operations.cjs');
 const { createEvidence } = require('./centcom-evidence.cjs');
 const { createTurnLifecycle } = require('./centcom-turn.cjs');
@@ -175,6 +175,8 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
     if (identity && !state.commanderIdentities.some((s) => s.hostId === identity.hostId && s.key === identity.key)) state.commanderIdentities.push(identity);
     state.session = null;
   }
+  const currentIdentity = commanderIdentity(state.session);
+  if (currentIdentity && !state.commanderIdentities.some((s) => s.hostId === currentIdentity.hostId && s.key === currentIdentity.key)) state.commanderIdentities.push(currentIdentity);
   if (state.contextRevision !== CONTEXT_REVISION) {
     retireSession();
     state.contextRevision = CONTEXT_REVISION;
@@ -330,6 +332,45 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
   let wakeTimer = null;
   let wakeFlight = null;
   const turnLifecycle = createTurnLifecycle({ chats, client, state, persist: writeState, outcome: recordOutcome });
+  let retirementFlight = null;
+  async function reconcileRetiredSessions() {
+    if (retirementFlight) return retirementFlight;
+    retirementFlight = (async () => {
+      for (const identity of state.commanderIdentities) {
+        if (disposed) break;
+        if (!identity.chatSessionId || identity.retirement?.status === 'stopped' ||
+          (state.session?.hostId === identity.hostId && state.session.chatSessionId === identity.chatSessionId) ||
+          (state.providerTurn?.hostId === identity.hostId && state.providerTurn.sessionId === identity.chatSessionId)) continue;
+        const retirement = identity.retirement ||= {};
+        if (retirement.checkedAt && Date.now() - retirement.checkedAt < 30000) continue;
+        retirement.checkedAt = Date.now();
+        try {
+          const page = await chats.read(identity.hostId, identity.chatSessionId, 0, 1);
+          if (disposed) break;
+          if (page.session?.id !== identity.chatSessionId) throw new Error('Retired commander identity mismatch');
+          if (page.session.state === 'stopped') { retirement.status = 'stopped'; retirement.error = ''; writeState(); continue; }
+          if (!retirement.command && (!['idle', 'failed'].includes(page.session.state) || page.pendingCommands?.length || page.pendingRequests?.length)) {
+            retirement.status = 'deferred'; retirement.error = 'Provider is active or its state is unknown'; writeState(); continue;
+          }
+          let receipt;
+          if (retirement.command) {
+            // A crash/timeout may have happened after delivery. Query the saved
+            // receipt; never replay an uncertain stop, even after app restart.
+            receipt = await chats.request(identity.hostId, 'receipt', { commandId: retirement.command.commandId });
+          } else {
+            retirement.command = { protocolVersion: 1, commandId: crypto.randomUUID(), operation: 'stop', sessionId: identity.chatSessionId, payload: {} };
+            retirement.status = 'stopping'; writeState();
+            receipt = await chats.request(identity.hostId, 'command', { command: retirement.command });
+          }
+          if (receipt?.commandId !== retirement.command.commandId || receipt.sessionId !== identity.chatSessionId) throw new Error('Retired commander stop receipt is unconfirmed');
+          retirement.status = receipt.state === 'completed' ? 'stopped' : 'uncertain';
+          retirement.error = receipt.state === 'completed' ? '' : receipt.error || 'Provider stop is unconfirmed';
+        } catch (error) { retirement.status = 'uncertain'; retirement.error = error.message; }
+        writeState();
+      }
+    })().finally(() => { retirementFlight = null; });
+    return retirementFlight;
+  }
 
   function enqueue(action) {
     const flight = queue.then(() => withoutLaunchContext(action));
@@ -344,6 +385,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
       return state.session;
     }
     retireSession();
+    writeState();
     const host = service.getHost(state.config.hostId);
     const managedName = `hq-centcom-${crypto.randomBytes(3).toString('hex')}`;
     const initialDoctrine = buildDoctrinePrompt();
@@ -922,6 +964,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
   }
   async function observeFleet(snapshot) {
     if (disposed) return;
+    void reconcileRetiredSessions().catch((error) => console.warn('CENTCOM retirement reconciliation failed:', error.message));
     const f = activeFleet(snapshot, service.store.data.deletedSessions || [], state.commanderIdentities);
     if (state.config.triggers.onLoopFault) for (const fault of f.inventory?.faults || []) {
       if (['pending', 'review'].includes(fault.status)) queueAlert({ type: 'fault', sessionKey: fault.sessionKey, status: fault.status }, `fault:${fault.sessionKey}:${fault.status}`);
@@ -1029,6 +1072,8 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
   return {
     state: publicState,
     guardLaunch: launchGuard.run,
+    rosterInventory: (snapshot) => rosterInventory(snapshot, state.commanderIdentities),
+    reconcileRetiredSessions,
     isCommander, submitCommand,
     capabilities: operations.catalog,
     reconcile: () => enqueue(async () => { await turnLifecycle.reconcile(); return publicState(); }),
@@ -1064,7 +1109,9 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
     resetSession: () => {
       interrupt();
       return enqueue(async () => {
-        if (!await turnLifecycle.stop()) throw new Error(`Previous CENTCOM provider turn remains uncertain; cannot reset its ownership: ${state.providerTurn?.error || 'Provider stop is unconfirmed'}`);
+        if (!await turnLifecycle.stop(state.session)) throw new Error(`Previous CENTCOM provider turn remains uncertain; cannot reset its ownership: ${state.providerTurn?.error || 'Provider stop is unconfirmed'}`);
+        const retired = state.commanderIdentities.find((s) => s.hostId === state.session?.hostId && s.chatSessionId === state.session?.chatSessionId);
+        if (retired) retired.retirement = { status: 'stopped', checkedAt: Date.now() };
         retireSession();
         state.status = 'idle'; state.error = ''; writeState();
         await ensureSession();

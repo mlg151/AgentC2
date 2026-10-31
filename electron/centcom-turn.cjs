@@ -139,6 +139,7 @@ function createTurnLifecycle({ chats, client, state, persist, outcome, now = () 
   async function reconcile() {
     const turn = state.providerTurn;
     if (!turn) { release(); return true; }
+    if (turn.stopCommand) return stop();
     const deadline = now() + (state.config.cancellationDeadlineSeconds || 10) * 1000;
     try {
       await wait(acquire(turn), deadline);
@@ -196,7 +197,12 @@ function createTurnLifecycle({ chats, client, state, persist, outcome, now = () 
       }
     }
   }
-  async function stop() {
+  async function stop(session) {
+    // Reset also owns an idle session after its last turn reservation cleared.
+    if (!state.providerTurn && session?.chatSessionId) {
+      state.providerTurn = { hostId: session.hostId, sessionId: session.chatSessionId, commandId: crypto.randomUUID(), status: 'cancelling', cursor: 0, startedAt: now() };
+      persist();
+    }
     const turn = state.providerTurn;
     if (!turn) { release(); return true; }
     const deadline = now() + (state.config.cancellationDeadlineSeconds || 10) * 1000;
@@ -205,9 +211,10 @@ function createTurnLifecycle({ chats, client, state, persist, outcome, now = () 
       // Explicit reset retires this session permanently. A confirmed worker
       // stop fences even a send rejected before acceptance (with no receipt),
       // and late cancellations cannot affect the replacement session.
+      const pendingStop = Boolean(turn.stopCommand);
       turn.stopCommand ||= { protocolVersion: 1, commandId: crypto.randomUUID(), operation: 'stop', sessionId: turn.sessionId, payload: {} };
       turn.status = 'cancelling'; persist();
-      let receipt = await wait(chats.request(turn.hostId, 'command', { command: turn.stopCommand }), deadline);
+      let receipt = await wait(pendingStop ? chats.request(turn.hostId, 'receipt', { commandId: turn.stopCommand.commandId }) : chats.request(turn.hostId, 'command', { command: turn.stopCommand }), deadline);
       while (true) {
         if (receipt?.commandId !== turn.stopCommand.commandId || receipt.sessionId !== turn.sessionId) throw new Error('CENTCOM stop receipt identity mismatch');
         turn.stopReceipt = receipt; persist();

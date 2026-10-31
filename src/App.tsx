@@ -86,11 +86,12 @@ export default function App() {
 
   const acceptInventory = useCallback((next: Inventory) => {
     setInventory(next); setAttention(next.attention);
+    const internal = new Set(next.internalSessionKeys || []);
     const external = new Set(next.sessions.filter((session) => !isManagedSession(session) && session.kind !== 'conversation').map((session) => session.key));
-    setWorkspace((current) => current.tabs.reduce((result, key) => external.has(key) ? closeWorkspaceTab(result, key) : result, current));
+    setWorkspace((current) => current.tabs.reduce((result, key) => external.has(key) || internal.has(key) ? closeWorkspaceTab(result, key) : result, current));
     setKnown((current) => {
       const keys = new Set(next.sessions.map((s) => s.key));
-      const stale = Object.fromEntries(Object.entries(current).map(([key, s]) => [key, keys.has(key) ? s : { ...s, stale: true, missing: true }]));
+      const stale = Object.fromEntries(Object.entries(current).filter(([key]) => !internal.has(key)).map(([key, s]) => [key, keys.has(key) ? s : { ...s, stale: true, missing: true }]));
       return { ...stale, ...Object.fromEntries(next.sessions.map((s) => [s.key, s])) };
     });
   }, []);

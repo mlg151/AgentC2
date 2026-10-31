@@ -1,6 +1,24 @@
 const assert = require('node:assert/strict');
 const { serviceFixture } = require('./fixtures/service-boundaries.cjs');
 
+async function commanderRoster() {
+  const fixture = serviceFixture(), { service } = fixture;
+  const commander = { id: 'hq-cccccccccccc', key: 'tmux:hq-cccccccccccc', kind: 'managed', managed: true, transport: 'chat', title: 'CENTCOM // CODEX (fixture)', cwd: '/home/fixture/.cache/agentc2/centcom', state: 'live', chatState: 'idle' };
+  const unit = { ...commander, id: 'hq-aaaaaaaaaaaa', key: 'tmux:hq-aaaaaaaaaaaa', title: 'User task', cwd: '/fixture/project' };
+  fixture.setHandler((request) => request.respond({ sessions: [commander, unit] }));
+  service.store.data.attention = [{ id: 'commander-alert', sessionKey: 'default/' + commander.key, acknowledged: false }];
+  try {
+    const snapshot = await service.inventory();
+    assert.ok(snapshot.sessions.length > 0);
+    assert.ok(snapshot.sessions.every((s) => s.title === 'User task'));
+    assert.ok(snapshot.internalSessionKeys.includes('default/' + commander.key));
+    assert.ok(!snapshot.attention.some((item) => item.id === 'commander-alert'));
+    fixture.setHandler((request) => request.fail(1, 'Offline fixture'));
+    const cached = await service.inventory();
+    assert.deepEqual(cached.sessions.map((s) => s.key), snapshot.sessions.map((s) => s.key), 'Offline cached inventory must not resurrect commanders');
+  } finally { fixture.close(); }
+}
+
 async function acknowledgedFailures() {
   const fixture = serviceFixture(), { service } = fixture;
   try {
@@ -93,4 +111,4 @@ async function uncertainDeletion() {
   } finally { service.chats.handles.clear(); service.chats.sessions.clear(); fixture.close(); }
 }
 
-(async () => { await acknowledgedFailures(); await imageOwnership(); await persistedTargets(); await uncertainDeletion(); console.log('PASS service acknowledged mutations without replay after malformed refresh, image-transfer ownership races, deleting/deleted target fences, rename disappearance without cache resurrection, and uncertain chat stop preserving session state'); })().catch((error) => { console.error(error); process.exitCode = 1; });
+(async () => { await commanderRoster(); await acknowledgedFailures(); await imageOwnership(); await persistedTargets(); await uncertainDeletion(); console.log('PASS service commander-free live/cached inventory, acknowledged mutations without replay after malformed refresh, image-transfer ownership races, deleting/deleted target fences, rename disappearance without cache resurrection, and uncertain chat stop preserving session state'); })().catch((error) => { console.error(error); process.exitCode = 1; });

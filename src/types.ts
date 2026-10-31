@@ -55,6 +55,7 @@ export interface SpecopsRun { launchAdmission?: { status: string; blockers: stri
 export interface GithubResult { [key: string]: unknown }
 
 export interface Inventory {
+  internalSessionKeys?: string[];
   capturedAt?: string;
   missions?: SpecopsRun[];
   hosts: { id: string; name: string; target: string; user?: string; connected: boolean; error?: string }[];

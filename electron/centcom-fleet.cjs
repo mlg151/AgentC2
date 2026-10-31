@@ -8,6 +8,24 @@ function commanderIdentity(session) {
   };
 }
 
+function isCommanderSession(session, commanders = []) {
+  return commanders.some((c) => c.hostId === session.hostId &&
+    ((c.key && c.key === session.key) || (c.name && c.name === (session.id || session.name)) || (c.chatSessionId && c.chatSessionId === session.chatSessionId))) ||
+    // Older installations did not persist every commander identity. This is a
+    // display-only fallback, never authority to stop an unregistered session.
+    ((session.managed === true && session.transport === 'chat' || session.kind === 'conversation') && /^CENTCOM \/\//.test(session.title || '') &&
+      /(?:^|\/)\.cache\/agentc2\/centcom\/?$/.test((session.cwd || '').replace(/\\/g, '/')));
+}
+
+function rosterInventory(inventory, commanders = []) {
+  const hidden = new Set([...(inventory.internalSessionKeys || []), ...commanders.map((c) => c.key).filter(Boolean)]);
+  for (const session of inventory.sessions || []) if (isCommanderSession(session, commanders)) hidden.add(session.key);
+  return { ...inventory, internalSessionKeys: [...hidden],
+    sessions: (inventory.sessions || []).filter((s) => !hidden.has(s.key)),
+    attention: (inventory.attention || []).filter((item) => !hidden.has(item.sessionKey)),
+    faults: (inventory.faults || []).filter((item) => !hidden.has(item.sessionKey)) };
+}
+
 function activeFleet(inventory, deleted = [], commanders = []) {
   const tombstones = new Set(deleted);
   const connected = new Set((inventory?.hosts || []).filter((h) => h.connected).map((h) => h.id));
@@ -18,8 +36,7 @@ function activeFleet(inventory, deleted = [], commanders = []) {
     ['live', 'waiting', 'waiting_for_input', 'blocked', 'requires_action'].includes(s.state) &&
     !['stopped', 'failed', 'unknown', 'starting'].includes(s.chatState) &&
     connected.has(s.hostId) && !s.stale && !s.missing && !tombstones.has(s.key) &&
-    !commanders.some((c) => c.hostId === s.hostId &&
-      (c.key === s.key || c.name === (s.id || s.name) || (c.chatSessionId && c.chatSessionId === s.chatSessionId))));
+    !isCommanderSession(s, commanders));
   const keys = new Set(sessions.map((s) => s.key));
   const identities = new Map(sessions.flatMap((s) => [s.key, s.id, s.name, s.chatSessionId, s.providerSessionId].filter(Boolean).map((id) => [`${s.hostId}/${id}`, s])));
   const find = (value, hostId) => sessions.find((s) => s.key === value && (!hostId || s.hostId === hostId)) || (hostId ? identities.get(`${hostId}/${value}`) : sessions.find((s) => [s.id, s.name, s.chatSessionId, s.providerSessionId].includes(value)));
@@ -53,4 +70,4 @@ function activeFleet(inventory, deleted = [], commanders = []) {
     flash: (items) => (items || []).filter((f) => f.connected && find(f.name, f.hostId)).map((f) => clean(f)).filter(Boolean) };
 }
 
-module.exports = { activeFleet, commanderIdentity };
+module.exports = { activeFleet, commanderIdentity, rosterInventory };

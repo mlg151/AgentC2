@@ -1,9 +1,18 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { activeFleet } = require('../electron/centcom-fleet.cjs');
+const { activeFleet, rosterInventory } = require('../electron/centcom-fleet.cjs');
 const name = 'hq-' + 'a'.repeat(12), key = `alpha/tmux:${name}`;
 const unit = { key, id: name, hostId: 'alpha', kind: 'managed', managed: true, state: 'live' };
+const commander = { ...unit, key: 'alpha/tmux:hq-bbbbbbbbbbbb', id: 'hq-bbbbbbbbbbbb', title: 'Renamed commander' };
+const legacy = { ...unit, key: 'alpha/tmux:hq-cccccccccccc', id: 'hq-cccccccccccc', transport: 'chat', title: 'CENTCOM // CODEX (fixture)', cwd: '/home/fixture/.cache/agentc2/centcom' };
+const ordinary = { ...unit, title: 'CENTCOM // CODEX (fixture)', cwd: '/fixture/project', transport: 'chat' };
+const roster = rosterInventory({ sessions: [ordinary, commander, legacy], attention: [{ sessionKey: key }, { sessionKey: legacy.key }], faults: [{ sessionKey: commander.key }] }, [{ hostId: 'alpha', name: commander.id, key: commander.key }]);
+assert.deepEqual(roster.sessions, [ordinary], 'Current, retired, and legacy commanders must not enter the roster');
+assert.deepEqual(roster.attention, [{ sessionKey: key }]);
+assert.deepEqual(roster.faults, []);
+assert.deepEqual(new Set(roster.internalSessionKeys), new Set([commander.key, legacy.key]));
+assert.equal(activeFleet({ hosts: [{ id: 'alpha', connected: true }], sessions: [legacy] }).sessions.length, 0);
 const fleet = activeFleet({ hosts: [{ id: 'alpha', connected: true }], sessions: [unit] });
 for (const [input, expected] of [
   [key, key], [`(${key})`, `(${key})`], [`other/tmux:${name}`, '[Excluded session]'],
