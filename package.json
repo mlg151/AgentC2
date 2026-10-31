@@ -1,6 +1,6 @@
 {
   "name": "agentc2",
-  "version": "0.4.14",
+  "version": "0.4.15",
   "private": true,
   "description": "Desktop SSH manager for Codex, Claude, and Antigravity CLI sessions",
   "main": "electron/main.cjs",
