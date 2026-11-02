@@ -60,7 +60,15 @@ async function transport() {
     fixture.setHandler(() => {});
     const timed = service.worktrees('default'); await new Promise((resolve) => setImmediate(resolve));
     const timer = [...fixture.timers.values()].find((timer) => timer.delay === 40000); assert.ok(timer); timer.callback();
-    await assert.rejects(timed, /SSH connection failed/); assert.equal(fixture.timers.size, 0);
+    await assert.rejects(timed, /Remote helper timed out after 40 seconds/); assert.equal(fixture.timers.size, 0);
+    const largeSync = service.github({ hostId: 'default', fixture: 'x'.repeat(65000) });
+    await new Promise((resolve) => setImmediate(resolve));
+    const largeTimer = [...fixture.timers.values()].find((timer) => timer.delay === 120000);
+    assert.ok(largeTimer, 'Large CENTCOM snapshots need a bounded transfer deadline beyond ordinary probes');
+    const beforeTimeout = fixture.calls.length;
+    largeTimer.callback();
+    await assert.rejects(largeSync, /Remote helper timed out after 120 seconds/);
+    assert.equal(fixture.calls.length, beforeTimeout, 'A transfer timeout must never replay the request');
     fixture.setHandler((request) => request.respond({ retained: true }));
     assert.deepEqual(await service.github({ hostId: 'default', fixture: 'x'.repeat(65000) }), { retained: true });
     assert.equal(fixture.calls.at(-1).embedded, true, 'Large request payloads travel on stdin rather than the process argument limit');
