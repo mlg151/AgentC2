@@ -7,7 +7,7 @@ import { Modal } from './Modal';
 const ChatView = lazy(() => import('./ChatView').then((module) => ({ default: module.ChatView })));
 
 const MODEL_PRESETS: Record<string, string[]> = {
-  codex: ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-5.5', 'fable'],
+  codex: ['gpt-6.1-terra', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-5.5', 'fable'],
   claude: ['claude-3-5-sonnet-20241022', 'claude-3-opus-20240229', 'claude-3-5-haiku-20241022'],
   antigravity: ['gemini-2.0-flash-exp', 'gemini-1.5-pro', 'argon'],
   opencode: ['default'],
@@ -441,6 +441,17 @@ export function CentcomDialog({ settings, onClose }: { settings: Settings; onClo
                 </button>
               ))}
             </div>
+
+            <label>
+              Standing assignment
+              <textarea
+                rows={5}
+                maxLength={8000}
+                value={configDraft.objective || ''}
+                onChange={(e) => setConfigDraft({ ...configDraft, objective: e.target.value })}
+              />
+              <small>Saved across restarts and included in every assessment. Specify the theaters to supervise, the work to keep moving, and when to ask you for a decision. Current authority and safeguards still apply.</small>
+            </label>
 
             <h4>C2 Authority Mode</h4>
             <div className="authority-picker">

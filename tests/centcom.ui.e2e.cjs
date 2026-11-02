@@ -161,6 +161,10 @@ const { createAutomations } = require('../electron/centcom-automations.cjs');
     await page.getByRole('button', { name: 'Configuration & ROE' }).click();
     await page.getByText('Gated C2 (Recommended)').waitFor();
     await page.getByText('Autonomous C2').waitFor();
+    await page.getByRole('button', { name: 'gpt-6.1-terra', exact: true }).click();
+    assert.equal(await page.getByLabel('Model ID', { exact: true }).inputValue(), 'gpt-6.1-terra');
+    const objective = 'Supervise Primary Theater coding tasks; answer routine questions and escalate missing authority.';
+    await page.getByLabel('Standing assignment', { exact: false }).fill(objective);
     const fallback = page.getByLabel('Fallback status interval (seconds)', { exact: false });
     assert.equal(await fallback.inputValue(), '600');
     await fallback.fill('0');
@@ -172,6 +176,10 @@ const { createAutomations } = require('../electron/centcom-automations.cjs');
     assert.equal(persisted.config.triggers.fallbackSeconds, 0);
     assert.equal(persisted.config.turnDeadlineSeconds, 1200);
     assert.equal(persisted.config.cancellationDeadlineSeconds, 20);
+    assert.equal(persisted.config.objective, objective);
+    assert.equal(persisted.config.model, 'gpt-6.1-terra');
+    await page.locator('.centcom-tab-content').evaluate((element) => { element.scrollTop = 0; });
+    await page.screenshot({ path: path.join(screenshotDir, 'centcom-standing-assignment.png') });
 
     // Responsive check at 960x800
     await page.setViewportSize({ width: 960, height: 800 });

@@ -150,6 +150,7 @@ export interface CentcomConfig {
   provider: Exclude<Provider, 'terminal'>;
   model: string;
   authority: CentcomAuthority;
+  objective?: string;
   triggers: CentcomTriggers;
   maxDirectivesPerTurn: number;
   maxBudgetUsd: number | null;

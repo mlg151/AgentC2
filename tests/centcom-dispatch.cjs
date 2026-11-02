@@ -40,6 +40,9 @@ async function main() {
   rejects(() => f.dispatch(payload), /CENTCOM authorization changed/);
   f.authority.mode = 'gated'; f.authority.commander = 'new-session';
   rejects(() => f.dispatch(payload), /CENTCOM authorization changed/);
+  f.authority.commander = f.scope.commander;
+  f.authority.objectiveHash = 'new-assignment';
+  rejects(() => f.dispatch(payload), /CENTCOM authorization changed/);
 
   const actions = ['create', 'configure', 'rename', 'worktree_launch', 'worktree_archive', 'oporder_sync', 'exercise_promote', 'flash_decide', 'diff_hunk', 'interrupt', 'stop'];
   for (const action of actions) {

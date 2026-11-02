@@ -25,6 +25,14 @@ function page(items, { after = '', limit = 20 } = {}, key = (item) => item.id) {
 }
 
 function createEvidence({ service: s, isCommander, activeKeys }) {
+  function transcriptTail(value, maxBytes) {
+    const safe = redact(value);
+    let text = safe.slice(-maxBytes);
+    // Bound serialized UTF-8 bytes, including escaped terminal controls. Keep
+    // the question at the tail visible even for large Unicode transcripts.
+    while (Buffer.byteLength(JSON.stringify(text)) > maxBytes) text = text.slice(Math.max(1, Math.ceil(text.length / 4)));
+    return { text, truncated: text.length < safe.length };
+  }
   async function inventory() {
     const inv = await s.inventory();
     const deleted = new Set(s.store.data.deletedSessions || []);
@@ -73,12 +81,21 @@ function createEvidence({ service: s, isCommander, activeKeys }) {
     const detail = canonical(inv).find((u) => u.relationship.representations.some((r) => r.key === sessionKey));
     const controlKeys = await activeKeys(inv);
     const runtime = s.commanderInspection ? await s.commanderInspection(unit, commandId).catch((error) => unknown(error.message)) : unknown('Runtime inspection service is unavailable');
+    const transcriptBytes = commandId ? 1000 : 4000;
+    let transcript = unit.outputTail ? { ...transcriptTail(unit.outputTail, transcriptBytes), source: 'inventory', sourceUpdatedAt: unit.updatedAt || null } : unknown('No transcript evidence in this inventory');
+    if (unit.transport !== 'chat' && controlKeys.has(sessionKey) && s.terminalPreviews) {
+      try {
+        const preview = (await s.terminalPreviews([sessionKey])).find((item) => item.key === sessionKey);
+        if (!preview || preview.error || typeof preview.text !== 'string') throw new Error('Fresh terminal preview unavailable');
+        transcript = { ...transcriptTail(preview.text, transcriptBytes), source: 'terminal_preview', sampledAt: preview.sampledAt ?? null };
+      } catch (error) { transcript.refreshError = error.message; }
+    }
     const inspection = { ...detail, inspectedKey: sessionKey, runtime: { state: runtime.sessionState || 'unknown', sampledAt: runtime.sampledAt || null }, control: { eligible: controlKeys.has(sessionKey), reason: controlKeys.has(sessionKey) ? null : 'Only connected active managed sessions can be controlled', ownership: runtime.ownership || unknown('No control observation') },
       capabilities: runtime.capabilities || unknown('Capabilities unavailable', unit.transport === 'chat' ? 'unknown' : 'unsupported'),
       ...(commandId ? { command: runtime.command || unknown(runtime.reason || 'Command receipt unavailable', unit.transport === 'chat' ? 'unknown' : 'unsupported') } : {}),
       pendingRequests: runtime.pendingRequests || unknown('Structured request inspection unavailable', unit.transport === 'chat' ? 'unknown' : 'unsupported'),
       currentTask: runtime.currentTask || detail.currentTask, journal: runtime.journal || null,
-      transcript: unit.outputTail ? { text: unit.outputTail.slice(-12000), truncated: unit.outputTail.length > 12000, source: 'inventory', sourceUpdatedAt: unit.updatedAt || null } : unknown('No transcript evidence in this inventory'),
+      transcript,
     };
     // Query outcomes have a 12 KB per-result delivery limit. Keep the live
     // operational summary outside a bounded preview of large journal details.
@@ -88,6 +105,7 @@ function createEvidence({ service: s, isCommander, activeKeys }) {
       runtime: bounded(inspection.runtime, 500), control: bounded(inspection.control, 1000),
       currentTask: { ...bounded(inspection.currentTask, 1000), ...(inspection.currentTask.turnId ? { turnId: inspection.currentTask.turnId } : {}) },
       pendingRequests: bounded(inspection.pendingRequests, 2000),
+      transcript,
       ...(commandId ? { command: inspection.command } : {}) };
   }
   async function hosts({ hostId } = {}) {
