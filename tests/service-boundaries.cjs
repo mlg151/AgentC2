@@ -70,6 +70,8 @@ async function transport() {
     await assert.rejects(largeSync, /Remote helper timed out after 120 seconds/);
     assert.equal(fixture.calls.length, beforeTimeout, 'A transfer timeout must never replay the request');
     fixture.setHandler((request) => request.respond({ retained: true }));
+    assert.deepEqual(await service.github({ hostId: 'default', fixture: 'x'.repeat(26000) }), { retained: true });
+    assert.equal(fixture.calls.at(-1).embedded, process.platform === 'win32', 'Medium C2 continuations must avoid the Windows 32767-character process command-line limit');
     assert.deepEqual(await service.github({ hostId: 'default', fixture: 'x'.repeat(65000) }), { retained: true });
     assert.equal(fixture.calls.at(-1).embedded, true, 'Large request payloads travel on stdin rather than the process argument limit');
     assert.deepEqual(await service.worktrees('default'), { retained: true }); assert.equal(fixture.calls.at(-1).embedded, false);
