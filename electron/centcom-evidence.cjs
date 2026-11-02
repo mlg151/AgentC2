@@ -83,6 +83,13 @@ function createEvidence({ service: s, isCommander, activeKeys }) {
     const runtime = s.commanderInspection ? await s.commanderInspection(unit, commandId).catch((error) => unknown(error.message)) : unknown('Runtime inspection service is unavailable');
     const transcriptBytes = commandId ? 1000 : 4000;
     let transcript = unit.outputTail ? { ...transcriptTail(unit.outputTail, transcriptBytes), source: 'inventory', sourceUpdatedAt: unit.updatedAt || null } : unknown('No transcript evidence in this inventory');
+    if (unit.transport === 'chat' && runtime.journal) {
+      const messages = runtime.journal.events.filter((event) => event.type === 'message.completed' && ['user', 'assistant'].includes(event.data.role));
+      if (messages.length) {
+        const tail = transcriptTail(messages.map((event) => `${event.data.role}: ${event.data.text}`).join('\n'), transcriptBytes);
+        transcript = { ...tail, truncated: tail.truncated || Boolean(runtime.journal.truncated), source: 'chat_journal', cursor: runtime.journal.cursor, sourceTimestamp: messages.at(-1).timestamp };
+      }
+    }
     if (unit.transport !== 'chat' && controlKeys.has(sessionKey) && s.terminalPreviews) {
       try {
         const preview = (await s.terminalPreviews([sessionKey])).find((item) => item.key === sessionKey);

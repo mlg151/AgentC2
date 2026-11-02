@@ -98,6 +98,13 @@ const health = () => [{ hostId: 'alpha', connected: true, sampledAt: Date.now(),
     assert.equal(largeCommand.command.facts.providerTurnCompletion, 'completed', 'Large transcripts cannot hide command correlation');
     assert.ok(Buffer.byteLength(JSON.stringify(largeCommand)) < 16000);
     validate(commandSchema, largeCommand, commandSchema.$defs);
+    journal.push({ ...terminalEvent, sequence: 5, type: 'message.completed', data: { role: 'assistant', text: 'Should this isolated test use unittest or pytest?' } });
+    const questionInspection = await evidence.inspect({ sessionKey: first.key });
+    assert.equal(questionInspection.transcript.source, 'chat_journal');
+    assert.match(questionInspection.transcript.text, /Should this isolated test use unittest or pytest\?$/);
+    assert.equal(questionInspection.transcript.truncated, true);
+    assert.ok(Buffer.byteLength(JSON.stringify(questionInspection)) < 12000);
+    journal.pop();
     f.responses.push(envelope({ queries: [{ ...query('unit.inspect', { sessionKey: first.key }), id: 'large-inspection' }] }));
     await f.engine.submit('Inspect the current turn despite large retained output');
     const delivered = f.engine.outcomes({ collection: 'query', clientRequestId: 'large-inspection' }).entries.find((item) => item.status === 'ok').result;
