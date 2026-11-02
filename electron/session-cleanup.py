@@ -46,7 +46,9 @@ def cleanup_activity(provider, ignore_pid=None):
             executables = {Path(os.fsdecode(arg)).name for arg in args if arg}
             if command in names or names.intersection(executables) or (provider == "claude" and any("/claude-code/" in os.fsdecode(arg) for arg in args)):
                 return "A live provider process cannot be safely correlated; stop it before cleanup"
-        except FileNotFoundError:
+        except (FileNotFoundError, ProcessLookupError):
+            # procfs can report ENOENT or ESRCH when a process exits between
+            # enumeration and inspection. Unreadable live processes still block.
             continue
         except (OSError, ValueError):
             return "Process activity is ambiguous"
