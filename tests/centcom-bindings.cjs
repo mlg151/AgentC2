@@ -24,12 +24,13 @@ async function changedIdentities() {
     assert.equal((await resolve(f, draft)).state, 'failed', field);
     assert.ok(!f.calls.some((c) => c.operation === 'unit.stop'));
   }
-  for (const change of ['route', 'authority', 'roe']) {
+  for (const change of ['route', 'authority', 'roe', 'objective']) {
     const f = make(change);
     const [draft] = await f.propose([action('unit.stop', { sessionKey: f.sessions[0].key })]);
     if (change === 'route') f.state.settings.hosts[0].target = 'different.invalid';
     if (change === 'authority') f.engine.configure({ ...f.engine.state().config, authority: 'autonomous' });
     if (change === 'roe') f.state.settings.roe = { version: 1, hostDefaults: { alpha: 'full' } };
+    if (change === 'objective') f.engine.configure({ ...f.engine.state().config, objective: 'Inspect only; stop all supervision actions.' });
     assert.equal((await resolve(f, draft)).state, 'failed', change);
     assert.ok(!f.calls.some((c) => c.operation === 'unit.stop'));
   }

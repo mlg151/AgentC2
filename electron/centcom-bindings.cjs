@@ -16,7 +16,8 @@ function identity(unit) {
 
 function createBindings({ service: s, state, resolve, request }) {
   async function capture(entry, input, pre, controlling, admissionUnknowns, worktreeRecoveries) {
-    const startScope = fingerprint({ hosts: s.store.data.settings.hosts, roe: s.store.data.settings.roe, authority: state.config.authority, commander: state.session?.chatSessionId });
+    const authorizationScope = () => ({ hosts: s.store.data.settings.hosts, roe: s.store.data.settings.roe, authority: state.config.authority, commander: state.session?.chatSessionId, objective: state.config.objective || '' });
+    const startScope = fingerprint(authorizationScope());
     const target = await resolve(entry, input, pre);
     const units = target ? (Array.isArray(target) ? target : [target]) : [];
     if (!units.length && Object.keys(pre).some((key) => key !== 'sessionKey')) throw new Error('Precondition does not apply to this operation target');
@@ -111,9 +112,10 @@ function createBindings({ service: s, state, resolve, request }) {
       if (!/^[a-f0-9]{40,64}$/.test(operationEvidence.status?.headCommit || '')) throw new Error('Worktree HEAD revision is unavailable');
     }
     const authority = { mode: state.config.authority, commander: state.session?.chatSessionId || null, hosts, roe: settings.roe || null,
+      ...(state.config.objective ? { objectiveHash: fingerprint(state.config.objective) } : {}),
       preset: input.presetId ? settings.presets.find((p) => p.id === input.presetId) || null : null,
       presets: [...new Set((input.contestants || (entry.operation === 'exercise.control' ? operationEvidence?.contestants : []) || []).map((item) => item.presetId).filter(Boolean))].sort().map((id) => ({ id, value: settings.presets.find((preset) => preset.id === id) || null })) };
-    if (startScope !== fingerprint({ hosts: s.store.data.settings.hosts, roe: s.store.data.settings.roe, authority: state.config.authority, commander: state.session?.chatSessionId })) throw new Error('Authorization changed while inspecting approval evidence');
+    if (startScope !== fingerprint(authorizationScope())) throw new Error('Authorization changed while inspecting approval evidence');
     return { targets, authority, requestEvidence, operationEvidence, admissionUnknowns: [...admissionUnknowns].sort(), worktreeRecoveries: structuredClone(worktreeRecoveries) };
   }
   async function bind(directive, entry, input) {

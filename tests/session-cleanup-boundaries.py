@@ -112,6 +112,12 @@ class CleanupBoundaries(unittest.TestCase):
                 return read_text(path, *args, **kwargs)
             with patch.object(Path, "read_text", unreadable):
                 self.assertEqual(self.call("cleanup_activity", "codex"), "Process activity is ambiguous")
+            def exited(path, *args, **kwargs):
+                if path == ordinary / "comm":
+                    raise ProcessLookupError("Process exited during proc inspection")
+                return read_text(path, *args, **kwargs)
+            with patch.object(Path, "read_text", exited):
+                self.assertEqual(self.call("cleanup_activity", "codex"), "", "ESRCH is evidence of an exited process, not unreadable live activity")
         with patch.object(Path, "iterdir", side_effect=PermissionError("No proc access")):
             self.assertEqual(self.call("cleanup_activity", "codex"), "Process activity cannot be verified")
         self.assertTrue(own.exists())

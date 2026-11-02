@@ -135,7 +135,7 @@ const { packagePath } = require('../scripts/package-path.cjs');
       delete globalThis.__agentc2ClipboardBefore;
     }).catch(() => {});
     await app?.close();
-    fs.rmSync(directory, { recursive: true, force: true });
+    fs.rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     clearTimeout(deadline);
   }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -37,6 +37,7 @@ function defaults(defaultHostId = 'default') {
     provider: 'codex',
     model: 'gpt-6-astra',
     authority: 'gated',
+    objective: '',
     triggers: {
       onSpecopsHalt: true,
       onLoopFault: true,
@@ -63,6 +64,7 @@ function validateConfig(input) {
   if (!PROVIDERS.includes(input.provider)) throw new Error('Unsupported provider for CENTCOM');
   const model = text(input.model, 200, 'model ID');
   if (!AUTHORITIES.includes(input.authority)) throw new Error('Invalid authority mode');
+  if (input.objective !== undefined && (typeof input.objective !== 'string' || input.objective.length > 8000 || input.objective.includes('\0'))) throw new Error('Invalid standing assignment');
   const t = input.triggers || {};
   if (
     typeof t.onSpecopsHalt !== 'boolean' ||
@@ -90,6 +92,7 @@ function validateConfig(input) {
     provider: input.provider,
     model,
     authority: input.authority,
+    objective: (input.objective || '').trim(),
     triggers: {
       onSpecopsHalt: t.onSpecopsHalt,
       onLoopFault: t.onLoopFault,
@@ -509,6 +512,8 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
 
         check();
         const turnCommandId = queryHop === initialHop && consoleCommand ? consoleCommand.command.commandId : crypto.randomUUID();
+        const doctrine = buildDoctrinePrompt();
+        const doctrineHash = fingerprint(doctrine);
         const contextualPrompt = [
           `<UNTRUSTED_FLEET_EVIDENCE>`,
           `SITUATION SNAPSHOT (DEFCON ${snapshot.defcon || '—'} · ${snapshot.defconLabel}):`,
@@ -516,13 +521,15 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
           ...(snapshot.truncation ? ['SITUATION.json is partial. Read its truncation totals and omitted counts before assessing the fleet.'] : []),
           `</UNTRUSTED_FLEET_EVIDENCE>`,
           '',
-          ...(!session.doctrineDelivered ? [buildDoctrinePrompt(), ''] : []),
+          ...(session.doctrineHash !== doctrineHash ? [doctrine, ''] : []),
+          ...(state.config.objective ? ['Standing assignment from the Watch Officer (subject to current authority and control doctrine):', redact(state.config.objective), ''] : []),
           redact(nextPrompt),
         ].join('\n');
 
         const finalAssistantText = await turnLifecycle.run({ session, commandId: turnCommandId, text: contextualPrompt, signal: abort.signal, logicalTurnId: turnId,
           dispatched: queryHop === initialHop && consoleCommand ? consoleCommand.dispatched : undefined });
         session.doctrineDelivered = true;
+        session.doctrineHash = doctrineHash;
         writeState();
         check();
 
@@ -884,7 +891,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
     if (fingerprint(admission?.recoveries || []) !== fingerprint(directive.binding?.evidence.worktreeRecoveries || [])) throw new Error('Worktree recovery revision changed; inspect and review again');
     if (admission?.status === 'blocked' || (admission?.status === 'unknown' && (!directive.approvedAt || admission.unknowns.some((reason) => !directive.binding?.evidence.admissionUnknowns?.includes(reason))))) throw new Error('Launch admission requires review: ' + [...admission.blockers, ...admission.unknowns].join('; '));
     if (admission) directive.admission = admission;
-    return mutationContext.run({ directive, authority: () => ({ mode: state.config.authority, commander: state.session?.chatSessionId || null }) }, () => operations.execute(r.operation, r.input, 'action', directive.preconditions, check));
+    return mutationContext.run({ directive, authority: () => ({ mode: state.config.authority, commander: state.session?.chatSessionId || null, ...(state.config.objective ? { objectiveHash: fingerprint(state.config.objective) } : {}) }) }, () => operations.execute(r.operation, r.input, 'action', directive.preconditions, check));
   }
 
   // Persist event references immediately, including events observed during a turn.
@@ -1081,6 +1088,7 @@ function createCentcom({ directory, service, chats, emit, timers = { setTimeout,
     manifest: capabilityManifest,
     configure: (newConfig) => {
       const config = validateConfig(newConfig);
+      if (config.objective !== state.config.objective) interrupt();
       if (state.session && ['hostId', 'provider', 'model'].some((k) => config[k] !== state.config[k])) { interrupt(); retireSession(); }
       state.config = config;
       writeState();

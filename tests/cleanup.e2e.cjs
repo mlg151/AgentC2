@@ -88,6 +88,11 @@ async function launch() {
     await page.getByRole('combobox', { name: 'History provider', exact: true }).selectOption('claude');
     await page.getByRole('button', { name: 'Preview old histories', exact: true }).click();
     await page.getByRole('heading', { name: 'Review 2 histories', exact: true }).waitFor();
+    for (const index of [0, 1]) {
+      const checkbox = page.getByLabel(`Delete history ${marker} ${index}`, { exact: true });
+      assert.equal(await checkbox.isEnabled(), true, await page.getByRole('region', { name: 'Cleanup preview', exact: true }).innerText());
+      assert.equal(await checkbox.isChecked(), true, 'Both reviewed fixtures must be selected before introducing the stale-file change');
+    }
     await remote('change');
     await page.getByLabel('Confirm permanent history deletion', { exact: true }).check();
     await page.getByRole('button', { name: 'Delete selected histories', exact: true }).click();

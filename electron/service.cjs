@@ -165,7 +165,9 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
     payload = assertDispatchScope(getHost(hostId), payload, store.data.settings);
     return new Promise((resolve, reject) => {
       const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
-      const embedded = encoded.length > 60000;
+      // Windows limits the complete CreateProcess command line to 32767 UTF-16
+      // characters. Leave room for executable, SSH/WSL arguments, and quoting.
+      const embedded = encoded.length > (process.platform === 'win32' ? 24000 : 60000);
       const execution = host.kind === 'local' ? localCommand('python3', ['-', ...(embedded ? [] : [encoded])]) : { binary: SSH_BINARY, args: [...sshArgs(host), host.target, 'python3', '-', ...(embedded ? [] : [encoded])], env: process.env };
       const child = spawn(execution.binary, execution.args, {
         windowsHide: true,
@@ -175,7 +177,11 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
       let output = '';
       let errors = '';
       let settled = false;
-      const timeout = setTimeout(() => child.kill(), payload.request?.prepareProvider ? 330000 : payload.action === 'cleanup_delete' && payload.provider === 'antigravity' ? 300000 : 40000);
+      // Snapshot and bootstrap transfers include the helper plus megabytes of
+      // context. Keep them bounded without treating them as short SSH probes.
+      const deadlineMs = payload.request?.prepareProvider ? 330000 : payload.action === 'cleanup_delete' && payload.provider === 'antigravity' ? 300000 : embedded ? 120000 : 40000;
+      let timedOut = false;
+      const timeout = setTimeout(() => { timedOut = true; child.kill(); }, deadlineMs);
 
       child.stdout.on('data', (chunk) => {
         output += chunk.toString();
@@ -190,6 +196,7 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
         if (settled) return;
         settled = true;
         clearTimeout(timeout);
+        if (timedOut) return reject(new Error(`Remote helper timed out after ${deadlineMs / 1000} seconds; command delivery is unconfirmed. Inspect state before resubmitting.`));
         if (code !== 0) return reject(new Error(errors.trim() || (host.kind === 'local' ? 'Local execution failed. Install Python 3 and tmux (inside the default WSL distribution on Windows).' : 'SSH connection failed')));
         try {
           const response = JSON.parse(output.trim());
