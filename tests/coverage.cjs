@@ -111,6 +111,8 @@ assert.equal(baseline({ release: false, run: (args) => { assert.equal(args[1], '
   console.log('Coverage collection and failure-path integration passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });
 const previousRef = process.env.GITHUB_BASE_REF;
+delete process.env.GITHUB_BASE_REF;
+assert.equal(baseline({ release: false, run: (args) => { assert.equal(args[2], 'origin/main'); return 'base'; } }), 'base');
 process.env.GITHUB_BASE_REF = 'coverage-fixture';
 assert.equal(baseline({ release: false, run: (args) => { assert.equal(args[2], 'origin/coverage-fixture'); return 'base'; } }), 'base');
 if (previousRef === undefined) delete process.env.GITHUB_BASE_REF; else process.env.GITHUB_BASE_REF = previousRef;
