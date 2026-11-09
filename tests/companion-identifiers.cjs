@@ -1,0 +1,12 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const { compileTypeScript } = require('./fixtures/ts-coverage.cjs');
+const crypto = require('node:crypto').webcrypto;
+const filename = require('node:path').resolve(__dirname, '../src/companion/identifier.ts');
+assert.ok(fs.existsSync(filename), 'Phone settings and worktree actions need secure IDs on private HTTP origins');
+const exportsObject = {};
+compileTypeScript(filename, ['exports', 'crypto'])(exportsObject, { getRandomValues: crypto.getRandomValues.bind(crypto) });
+const ids = Array.from({ length: 32 }, () => exportsObject.randomIdentifier());
+for (const id of ids) assert.match(id, /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
+assert.equal(new Set(ids).size, ids.length);
+console.log('PASS cryptographic launch/settings IDs work on private HTTP without randomUUID');

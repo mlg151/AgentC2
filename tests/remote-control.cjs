@@ -109,6 +109,7 @@ async function connect(url, cookie, origin = url) {
     assert.deepEqual(pinEvents.at(-1), [key, true]);
     assert.equal(terminals.state(desktop, desktopHandle).canControl, true);
     stale.metadata[key].notes = 'Desktop notes edited concurrently';
+    service.updateMetadata(key, { notes: stale.metadata[key].notes });
     service.saveWorkspace(stale);
     assert.equal((await a.request('state')).metadata[key].pinned, true);
     assert.equal((await a.request('state')).metadata[key].notes, stale.metadata[key].notes);
@@ -123,8 +124,11 @@ async function connect(url, cookie, origin = url) {
     await a.request('terminal:take', [aHandle]);
     await assert.rejects(terminals.write(desktop, desktopHandle, 'no'), /Take control/);
     await assert.rejects(a.request('saveSettings', [{}]), /Unsupported/);
-    await assert.rejects(a.request('cleanup:preview', [{ hostId: 'default', provider: 'claude', days: 30 }]), /Unsupported/);
-    await assert.rejects(a.request('cleanup:execute', ['unknown', []]), /Unsupported/);
+    await assert.rejects(a.request('cleanup:preview', [{ hostId: 'missing', provider: 'claude', days: 30 }]), /unavailable|Unknown/i);
+    await assert.rejects(a.request('cleanup:execute', ['unknown', []]), /preview/i);
+    assert.ok((await a.request('state:get')).capabilities.includes('settings:save'));
+    await a.request('metadata:update', [key, { notes: 'Updated from phone' }]);
+    assert.equal((await b.request('state')).metadata[key].notes, 'Updated from phone');
     await a.request('terminal:write', [aHandle, 'HQ_PHONE_OUTPUT\r\n']);
     const snapshot = await b.request('terminal:ready', [bHandle]);
     assert.ok(snapshot.text.includes('HQ_PHONE_OUTPUT'));
@@ -160,7 +164,7 @@ async function connect(url, cookie, origin = url) {
     assert.equal((await fetch(url + '/api/v1/state', { headers: { Cookie: cookie } })).status, 401);
     terminals.close(desktop, desktopHandle); assert.equal(ptys[0].killed, true);
     const restored = fixture(directory);
-    assert.equal(restored.gateway.data.requests.length, 3);
+    assert.equal(restored.gateway.data.requests.length, 5);
     const savedCreate = restored.gateway.data.requests.find((entry) => entry.key.endsWith('/' + requestId));
     assert.deepEqual(await restored.gateway.once({ id: deviceId }, { id: requestId, method: 'create', args: [{}] }, () => { throw new Error('Must not repeat after restart'); }), created);
     savedCreate.done = false;

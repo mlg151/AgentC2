@@ -15,6 +15,8 @@ const { packagePath } = require('../scripts/package-path.cjs');
   const packaged = process.argv.includes('--packaged');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agentc2-desktop-'));
   const store = new Store(directory);
+  const metadataKey = 'default/tmux:hq-123456789abc';
+  store.save('workspace', { ...store.data.workspace, metadata: { [metadataKey]: { pinned: false, project: 'Shared fixture', notes: 'Before' } } });
   store.save('settings', { ...store.data.settings, hosts: [{ id: 'default', name: 'Offline smoke fixture', target: '127.0.0.1', port: 1, enabled: true }] });
   let app, clipboardBefore;
   const errors = [];
@@ -36,6 +38,13 @@ const { packagePath } = require('../scripts/package-path.cjs');
     assert.equal(await page.locator('vite-error-overlay').count(), 0);
     assert.equal(await page.evaluate(() => typeof window.require), 'undefined');
     assert.equal(await page.evaluate(() => window.agentHQ.platform), process.platform);
+    await page.evaluate(async (key) => {
+      let shared;
+      const off = window.agentHQ.onSharedState((state) => { shared = state; });
+      await window.agentHQ.updateSessionMetadata(key, { notes: 'Edited through scoped IPC' });
+      if (shared.metadata[key].notes !== 'Edited through scoped IPC') throw new Error('Shared state event did not deliver metadata');
+      off();
+    }, metadataKey);
     await app.evaluate(async ({ clipboard }) => {
       const items = await clipboard.read();
       const image = items.find((item) => item.types.includes('image/png'));

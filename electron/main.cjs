@@ -118,6 +118,8 @@ app.whenReady().then(async () => {
     service.events.on('health:updated', (value) => send('health:updated', value));
     service.events.on('session:pinned', (key, pinned) => send('session:pinned', key, pinned));
     service.events.on('sessions:deleted', (keys) => send('sessions:deleted', keys));
+    service.events.on('remote:updated', (value) => { updateTray(); send('remote:updated', value); });
+    service.events.on('state:updated', () => { const { settings, workspace, attention } = service.store.data; send('state:updated', { settings, metadata: workspace.metadata, attention }); });
     for (const item of service.store.data.attention) notified.add(item.id);
     if (gateway.data.enabled) await gateway.start().catch((error) => { gateway.error = error.message; });
     updateTray();
@@ -143,6 +145,7 @@ app.whenReady().then(async () => {
   handle('fault:interrupt-all', () => service.interruptFaults(desktop));
   handle('fault:reset', (key) => service.resetFault(key));
   handle('workspace:save', (input) => service.saveWorkspace(input));
+  handle('metadata:update', (key, patch) => service.updateMetadata(key, patch));
   handle('session:pin', (key, pinned) => service.setSessionPinned(key, pinned));
   handle('session:delete', (key) => service.deleteSession(desktop, key));
   handle('cleanup:preview', (input) => service.cleanup.preview(input));

@@ -222,13 +222,13 @@ class Store {
       if (deleted.has(workspace.situation.targetKey)) workspace.situation.targetKey = null;
       for (const key of deleted) delete workspace.situation.callsigns[key];
     }
-    // Pin mutations have their own API. An older desktop snapshot must not undo
-    // a companion change, even when that snapshot predates the metadata entry.
+    // Metadata edits use narrow APIs. Layout snapshots must never overwrite
+    // newer notes/projects/pins from desktop or another paired device.
     for (const [key, metadata] of Object.entries(workspace.metadata)) {
       metadata.pinned = this.data.workspace.metadata[key]?.pinned || false;
     }
     for (const [key, metadata] of Object.entries(this.data.workspace.metadata)) {
-      if (!Object.hasOwn(workspace.metadata, key)) workspace.metadata[key] = metadata;
+      workspace.metadata[key] = metadata;
     }
     if (Object.keys(workspace.metadata).length > 10000) throw new Error('Session metadata limit reached');
     return this.save('workspace', validateWorkspace(workspace));

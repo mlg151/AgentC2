@@ -1,6 +1,12 @@
+const legacyMethods = ['state', 'inventory', 'health', 'acknowledge', 'session:pin', 'create', 'chat:capabilities', 'chat:open', 'chat:ready', 'chat:history', 'chat:take', 'chat:submit', 'chat:receipt', 'chat:prune', 'chat:close', 'interrupt', 'stop', 'terminal:open', 'terminal:ready', 'terminal:state', 'terminal:take', 'terminal:write', 'terminal:resize', 'terminal:history', 'terminal:close'];
+
 type Listener = (value: unknown) => void;
 
 export class CompanionClient {
+  private capabilities: Set<string> | null = null;
+
+  setCapabilities(methods: string[] = []) { this.capabilities = new Set([...legacyMethods, ...methods]); }
+
   private socket: WebSocket | null = null;
   private listeners = new Map<string, Set<Listener>>();
   private pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
@@ -15,6 +21,10 @@ export class CompanionClient {
   }
 
   private emit(event: string, value: unknown) { this.listeners.get(event)?.forEach((listener) => listener(value)); }
+
+  resume() {
+    if (!this.socket && !this.stopped) { clearTimeout(this.retry); this.connect(); }
+  }
 
   connect() {
     if (this.stopped) return;
@@ -45,6 +55,7 @@ export class CompanionClient {
   }
 
   request<T>(method: string, ...args: unknown[]): Promise<T> {
+    if (this.capabilities && !this.capabilities.has(method)) return Promise.reject(new Error('Update AgentC2 on your computer to use this workflow.'));
     if (this.socket?.readyState !== WebSocket.OPEN) return Promise.reject(new Error('Desktop is disconnected'));
     // randomUUID is unavailable on private HTTP origins; getRandomValues is.
     const bytes = crypto.getRandomValues(new Uint8Array(16));

@@ -21,3 +21,7 @@ id_ed25519*
 workspace.json
 remote-access.json
 companion-invitation.json
+
+# Coverage reports and local Android build configuration.
+coverage/
+android/local.properties

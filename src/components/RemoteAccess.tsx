@@ -28,7 +28,7 @@ export function RemoteAccess() {
   async function save() {
     setBusy(true); setError(''); setPairing(null);
     try { setStatus(await window.agentHQ!.saveRemote({ enabled, port, url, transport })); }
-    catch (cause) { setError(String(cause)); setStatus(await window.agentHQ!.remoteStatus()); }
+    catch (cause) { setError(`${String(cause)} Reconnect after changing remote access settings.`); void window.agentHQ!.remoteStatus().then(setStatus).catch(() => {}); }
     finally { setBusy(false); }
   }
   async function pair() {

@@ -4,6 +4,9 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { WebSocketServer, WebSocket } = require('ws');
 const { Pairing } = require('./pairing.cjs');
+const { companionOperations } = require('./companion-operations.cjs');
+const { tailscaleStatus } = require('./platform.cjs');
+const { PreviewGateway } = require('./companion-preview.cjs');
 
 const hash = (value) => crypto.createHash('sha256').update(value).digest('hex');
 const token = () => crypto.randomBytes(32).toString('base64url');
@@ -28,6 +31,14 @@ class Gateway {
     this.attempts = new Map();
     this.flights = new Map();
     this.error = '';
+    this.operations = companionOperations(this);
+    this.forwardedEvents = {
+      'session:pinned': (key, pinned) => this.broadcast('session:pinned', { key, pinned }),
+      'sessions:deleted': (keys) => this.broadcast('sessions:deleted', keys),
+      'tunnel:updated': (value) => this.broadcast('tunnel:updated', value),
+      'remote:updated': (value) => this.broadcast('remote:updated', value),
+    };
+    for (const [event, listener] of Object.entries(this.forwardedEvents)) service.events.on(event, listener);
     this.onClient = (id, event, value) => {
       const record = this.sockets.get(id);
       if (record) this.send(record.ws, { event, value });
@@ -74,6 +85,7 @@ class Gateway {
     if (next.enabled) {
       try { await this.start(); } catch (error) { this.error = error.message; throw error; }
     }
+    this.service.events.emit('remote:updated', this.status());
     return this.status();
   }
 
@@ -86,6 +98,7 @@ class Gateway {
     this.data.devices = this.data.devices.filter((device) => device.id !== id);
     this.persist();
     for (const record of this.sockets.values()) if (record.device.id === id) this.drop(record, 4001, 'Device revoked');
+    this.service.events.emit('remote:updated', this.status());
     return this.status();
   }
 
@@ -111,7 +124,22 @@ class Gateway {
 
   bootstrap() {
     const { settings, workspace, attention } = this.service.store.data;
-    return { settings, metadata: workspace.metadata, attention };
+    return { settings, metadata: workspace.metadata, attention, capabilities: Object.keys(this.operations) };
+  }
+
+  tailscale() { return tailscaleStatus(); }
+
+  async previewUrl(record, id, url) {
+    const target = await this.service.openDevUrl(record.client, id, url);
+    if (!this.previewFlight) {
+      const origin = new URL(this.data.url);
+      origin.port = origin.port === '8443' ? '9443' : '8443';
+      this.preview = new PreviewGateway({ port: this.data.port === 65535 ? 65534 : this.data.port + 1, origin: origin.origin, secure: this.secureCookie(), deviceActive: (deviceId) => this.data.devices.some((device) => device.id === deviceId && device.expiresAt > Date.now()) });
+      this.previewFlight = this.preview.start().catch((error) => { this.previewFlight = null; throw new Error(`Preview endpoint unavailable: ${error.message}. Check the additional Tailscale Serve endpoint.`); });
+    }
+    await this.previewFlight;
+    if (record.client.closed || !this.data.devices.some((device) => device.id === record.device.id)) throw new Error('Device revoked');
+    return this.preview.issue(record.device.id, target);
   }
 
   send(ws, value) {
@@ -159,6 +187,9 @@ class Gateway {
 
   async stop() {
     clearInterval(this.timer);
+    await this.previewFlight?.catch(() => {});
+    await this.preview?.close();
+    this.previewFlight = null;
     for (const record of [...this.sockets.values()]) this.drop(record, 4000, 'Remote access disabled');
     const server = this.server;
     this.server = null;
@@ -172,6 +203,7 @@ class Gateway {
     events.off('inventory:updated', this.onInventory);
     events.off('health:updated', this.onHealth);
     events.off('state:updated', this.onState);
+    for (const [event, listener] of Object.entries(this.forwardedEvents)) events.off(event, listener);
     return this.stop();
   }
 
@@ -186,7 +218,7 @@ class Gateway {
   }
 
   connect(ws, device) {
-    const client = { id: `web:${crypto.randomUUID()}`, name: device.name };
+    const client = { id: `web:${crypto.randomUUID()}`, name: device.name, admin: true };
     const record = { ws, client, device, alive: true, count: 0, reset: Date.now() + 1000, inFlight: 0, opening: 0 };
     this.sockets.set(client.id, record);
     ws.on('error', () => {});
@@ -240,13 +272,17 @@ class Gateway {
     const args = request.args;
     const service = this.service;
     const terminals = service.terminals;
+    if (Object.hasOwn(this.operations, request.method)) {
+      const operation = this.operations[request.method];
+      return operation.mutation ? this.once(device, request, () => operation.run(record, args)) : operation.run(record, args);
+    }
     switch (request.method) {
       case 'state': return this.bootstrap();
       case 'inventory': return service.inventory();
       case 'health': return service.health();
       case 'acknowledge': return service.acknowledge(args[0]);
       case 'session:pin': return service.setSessionPinned(args[0], args[1]);
-      case 'create': return this.once(device, request, () => service.create(args[0], true));
+      case 'create': return this.once(device, request, () => service.create(args[0], false));
       case 'chat:capabilities': return service.chats.capabilities(args[0]);
       case 'chat:open': {
         if (record.opening + [...service.chats.handles.values()].filter((handle) => handle.client.id === client.id).length >= 4) throw new Error('Close a chat view before opening another');

@@ -68,7 +68,7 @@ try {
   stale.metadata[firstKey].notes = 'Edited while the phone unpinned.';
   store.saveWorkspace(stale);
   assert.equal(store.data.workspace.metadata[firstKey].pinned, false);
-  assert.equal(store.data.workspace.metadata[firstKey].notes, stale.metadata[firstKey].notes);
+  assert.equal(store.data.workspace.metadata[firstKey].notes, 'Check release notes.', 'Layout snapshots cannot replace authoritative shared notes');
   store.setSessionPinned(secondKey, true);
   store.saveWorkspace({ ...stale, tabs: [secondKey], selectedKey: secondKey, splitKey: null });
   assert.equal(store.data.workspace.metadata[secondKey].pinned, true);

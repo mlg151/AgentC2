@@ -22,6 +22,12 @@ contextBridge.exposeInMainWorld('agentHQ', {
   interruptFaults: () => ipcRenderer.invoke('fault:interrupt-all'),
   resetFault: (key) => ipcRenderer.invoke('fault:reset', key),
   saveWorkspace: (workspace) => ipcRenderer.invoke('workspace:save', workspace),
+  updateSessionMetadata: (key, patch) => ipcRenderer.invoke('metadata:update', key, patch),
+  onSharedState: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on('state:updated', listener);
+    return () => ipcRenderer.removeListener('state:updated', listener);
+  },
   setSessionPinned: (key, pinned) => ipcRenderer.invoke('session:pin', key, pinned),
   previewCleanup: (input) => ipcRenderer.invoke('cleanup:preview', input),
   executeCleanup: (token, keys) => ipcRenderer.invoke('cleanup:execute', token, keys),

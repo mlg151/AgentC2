@@ -1,6 +1,6 @@
 {
   "name": "agentc2",
-  "version": "0.4.1",
+  "version": "0.4.17",
   "private": true,
   "description": "Desktop SSH manager for Codex, Claude, and Antigravity CLI sessions",
   "main": "electron/main.cjs",
@@ -37,7 +37,13 @@
     "test:chat:ssh": "npm run build && node tests/chat-launch.e2e.cjs",
     "test:chat:sdk-evaluation": "python3 tests/antigravity-sdk-evaluation.py",
     "test:companion:filters": "npm run build && node tests/companion-filters.e2e.cjs",
-    "test:chat:local": "npm run build && cross-env AGENTC2_CHAT_TEST_LOCAL=1 node tests/chat-launch.e2e.cjs"
+    "test:chat:local": "npm run build && cross-env AGENTC2_CHAT_TEST_LOCAL=1 node tests/chat-launch.e2e.cjs",
+    "coverage:collect": "node scripts/coverage-collect.cjs -- npm run test:coverage:suite",
+    "coverage:check": "node scripts/coverage-check.cjs",
+    "test:coverage-tools": "node tests/coverage.cjs && node tests/coverage-release.cjs",
+    "test:companion:workflows": "node tests/companion-workflows.e2e.cjs",
+    "test:companion:unit": "node tests/companion-operations.cjs && node tests/companion-metadata.cjs && node tests/companion-image.cjs && node tests/companion-api.cjs && node tests/companion-identifiers.cjs && node tests/companion-image-ui.cjs && node tests/companion-preview.cjs && node tests/companion-capabilities.cjs && node tests/companion-clipboard.cjs && node tests/gateway-parity.cjs && node tests/companion-components.cjs && node tests/companion-panels.cjs && node tests/companion-terminal-ui.cjs && node tests/metadata-bridge.cjs && node tests/companion-foreground.cjs && node tests/companion-remote-ui.cjs && node tests/desktop-components.cjs",
+    "test:coverage:suite": "npm run test:ci && npm run test:coverage-tools && npm run test:companion:unit && npm run test:companion:workflows && npm run test:desktop:sessions && npm run test:desktop"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
@@ -61,12 +67,15 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "c8": "^10.1.3",
     "concurrently": "^9.1.0",
     "cross-env": "^7.0.3",
     "electron": "^44.9.0",
     "electron-builder": "26.15.3",
+    "istanbul-lib-coverage": "^3.2.2",
     "playwright-core": "^1.64.1",
     "typescript": "^5.7.2",
+    "v8-to-istanbul": "^9.3.0",
     "vite": "^6.0.5",
     "wait-on": "^8.0.1"
   },

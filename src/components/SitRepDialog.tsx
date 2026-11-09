@@ -1,3 +1,4 @@
+import { randomIdentifier } from '../companion/identifier';
 import { useEffect, useRef, useState } from 'react';
 import type { Provider, Session, Settings, SitrepLaunchInput, SitrepPreview } from '../types';
 import { Modal } from './Modal';
@@ -14,7 +15,7 @@ export function SitRepDialog({ source, settings, initialSummary, onLaunched, onC
   const [summary, setSummary] = useState(initialSummary);
   const [nextSteps, setNextSteps] = useState('Review the applied changes and continue the objective.');
   const [testCommand, setTestCommand] = useState('');
-  const [operationId] = useState(() => crypto.randomUUID().replaceAll('-', ''));
+  const [operationId] = useState(() => randomIdentifier().replaceAll('-', ''));
   const [preview, setPreview] = useState<SitrepPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');

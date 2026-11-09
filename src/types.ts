@@ -92,7 +92,7 @@ export interface HistoryMatches { matches: { key: string; line: number; excerpt:
 export interface PairedDevice { id: string; name: string; createdAt: string; expiresAt: number }
 export interface RemoteConfig { enabled: boolean; port: number; url: string; transport?: 'https' | 'tailnet-http' }
 export interface RemoteStatus extends RemoteConfig { running: boolean; error: string; devices: PairedDevice[] }
-export interface CompanionState { settings: Settings; metadata: Record<string, SessionMetadata>; attention: AttentionItem[] }
+export interface CompanionState { capabilities?: string[]; settings: Settings; metadata: Record<string, SessionMetadata>; attention: AttentionItem[] }
 
 export interface CreateInput {
   launchId?: string;
@@ -136,6 +136,8 @@ export interface AgentHQApi {
   listFlashTraffic(): Promise<FlashRequest[]>;
   decideFlashTraffic(input: { hostId: string; name: string; id: string; decision: 'allow' | 'deny' }): Promise<{ id: string; state: string; decision: string; duplicate: boolean }>;
   saveWorkspace(workspace: Workspace): Promise<Workspace>;
+  updateSessionMetadata(key: string, patch: Partial<Pick<SessionMetadata, 'project' | 'notes'>>): Promise<SessionMetadata>;
+  onSharedState(callback: (state: CompanionState) => void): () => void;
   setSessionPinned(key: string, pinned: boolean): Promise<boolean>;
   onSessionPinned(callback: (key: string, pinned: boolean) => void): () => void;
   onSessionsDeleted(callback: (keys: string[]) => void): () => void;

@@ -156,7 +156,17 @@ class WorkerProcessTests(unittest.TestCase):
         return receipt["sessionId"], result
 
     def wait_receipt(self, value):
-        return poll(lambda: rpc(self.root, request("receipt", commandId=value["commandId"])), lambda receipt: receipt["state"] in ("completed", "failed", "unknown"))
+        def receipt():
+            try:
+                return rpc(self.root, request("receipt", commandId=value["commandId"]))
+            except ValueError as error:
+                # A client that deliberately disconnects without reading an ACK
+                # can race the worker's acceptance on another socket. Keep the
+                # same command ID and wait; never resubmit the command.
+                if str(error) == "Command receipt is unavailable; do not automatically resubmit":
+                    return None
+                raise
+        return poll(receipt, lambda value: value is not None and value["state"] in ("completed", "failed", "unknown"))
 
     def test_client_disconnect_does_not_kill_worker_or_owned_provider(self):
         identifier, created = self.create()
