@@ -4,6 +4,7 @@ const original = serviceModule.createService;
 serviceModule.createService = (options) => {
   const service = original(options);
   const unit = { key: 'remote/tmux:hq-123456abcdef', id: 'hq-123456abcdef', title: 'Shared fixture mission', provider: 'codex', kind: 'managed', managed: true, state: 'exited', canAttach: false, canStop: false, cwd: '/fixture', hostId: 'remote', hostName: 'Shared host' };
+  service.store.setSessionPinned(unit.key, Boolean(service.store.data.workspace.metadata[unit.key]?.pinned));
   service.inventory = async () => {
     const value = { capturedAt: new Date().toISOString(), hosts: [{ id: 'remote', name: 'Shared host', connected: true }], sessions: [unit], attention: service.store.data.attention, faults: [] };
     service.events.emit('inventory:updated', value); return value;

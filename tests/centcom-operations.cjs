@@ -196,7 +196,7 @@ async function consoleIntegration() {
   await f.chats.take(phone, companion);
   const companionCommand = command(session.chatSessionId, 'Companion assessment');
   f.responses.push(envelope({ directives: [action('unit.pin', { sessionKey: f.sessions[0].key, pinned: true })] }));
-  const rpc = () => Gateway.prototype.rpc.call({ service: { chats: f.chats } }, { client: phone }, { method: 'chat:submit', args: [companion, companionCommand] });
+  const rpc = () => Gateway.prototype.rpc.call({ operations: {}, service: { chats: f.chats } }, { client: phone }, { method: 'chat:submit', args: [companion, companionCommand] });
   assert.equal((await rpc()).commandId, companionCommand.commandId);
   await settle(f);
   const directives = f.engine.state().directives.length;

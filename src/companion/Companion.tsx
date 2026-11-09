@@ -8,6 +8,8 @@ import { CompanionClient } from './client';
 import { PhoneRename } from './PhoneRename';
 import { PhoneTerminal } from './PhoneTerminal';
 import { PhoneChat } from './PhoneChat';
+import { createCompanionApi } from './api';
+import { PhoneTools } from './PhoneTools';
 
 function isManaged(session: Session) { return session.managed === true || session.kind === 'managed'; }
 
@@ -49,7 +51,7 @@ export default function Companion() {
   useEffect(() => {
     const off = [
       client.on('connection', (value) => setConnection(value as string)),
-      client.on('connected', (value) => { setState(value as CompanionState); setGeneration((number) => number + 1); setError(''); refresh(); void client.request<HostHealth[]>('health').then(setHealth).catch(() => {}); }),
+      client.on('connected', (value) => { client.setCapabilities((value as CompanionState).capabilities); setState(value as CompanionState); setGeneration((number) => number + 1); setError(''); refresh(); void client.request<HostHealth[]>('health').then(setHealth).catch(() => {}); }),
       client.on('inventory:updated', (value) => setInventory(value as Inventory)),
       client.on('health:updated', (value) => setHealth(value as HostHealth[])),
       client.on('state:updated', (value) => setState(value as CompanionState)),
@@ -67,7 +69,19 @@ export default function Companion() {
     const timer = window.setInterval(() => setClock(Date.now()), 5000);
     return () => { cancelled = true; clearInterval(timer); };
   }, []);
-  useEffect(() => { if (paired) client.connect(); }, [paired, client]);
+  useEffect(() => { if (paired) { window.agentHQ = createCompanionApi(client); client.connect(); } }, [paired, client]);
+  useEffect(() => {
+    function foreground() {
+      if (document.visibilityState !== 'visible' || !paired) return;
+      if (connected) {
+        refresh();
+        void client.request<CompanionState>('state').then(setState).catch((cause) => setError(String(cause)));
+      } else client.resume();
+    }
+    document.addEventListener('visibilitychange', foreground);
+    window.addEventListener('agentc2:foreground', foreground);
+    return () => { document.removeEventListener('visibilitychange', foreground); window.removeEventListener('agentc2:foreground', foreground); };
+  }, [connected, paired, client, refresh]);
   useEffect(() => () => client.close(), [client]);
   useEffect(() => {
     if (!inventory) return;
@@ -152,6 +166,7 @@ export default function Companion() {
     {alert && !inbox ? <div className="phone-alert" role="status"><div><strong>{alert.kind === 'input' ? 'Input needed' : alert.kind === 'failed' ? 'Session failed' : 'Completed'}{alert.confidence === 'inferred' ? ' · inferred' : ''}</strong><span>{alert.title}</span></div><button onClick={() => { setInbox(true); setAlert(null); }}>Review</button><button aria-label="Dismiss alert" onClick={() => setAlert(null)}>×</button></div> : null}
     {error ? <p role="alert" className="phone-error">{error}<button aria-label="Dismiss error" onClick={() => setError('')}>×</button></p> : null}
     <nav className="phone-nav" aria-label="Companion navigation"><button className={!inbox ? 'active' : ''} onClick={() => { setInbox(false); setSelectedKey(null); }}><TerminalSquare size={17} />Sessions</button><button className={inbox ? 'active' : ''} onClick={() => setInbox(true)}><Bell size={17} />Attention <b>{unread.length}</b></button><button disabled={!connected} onClick={() => { setCreateError(''); setDialog(null); }}><Plus size={17} />New</button></nav>
+    {state ? <PhoneTools client={client} state={state} inventory={inventory} selected={selected || null} connected={connected} onSettings={(settings) => setState((current) => ({ ...current!, settings }))} onSelect={(session) => { setInbox(false); setSelectedKey(session?.key || null); }} onRefresh={refresh} /> : null}
     <main className="phone-main">
       {inbox ? <section><div className="phone-section-heading"><h1>Attention inbox</h1><button disabled={!connected} onClick={() => void client.request('acknowledge', 'all').catch((cause) => setError(String(cause)))}>Acknowledge all</button></div><p className="phone-muted">Review completion, failures, and input requests.</p><label className="checkbox-label"><input type="checkbox" checked={showAcknowledged} onChange={(e) => setShowAcknowledged(e.target.checked)} /> Show acknowledged</label>{attention.length ? attention.slice().reverse().map((item) => <article className="phone-attention" key={item.id}><div className="phone-section-heading"><strong>{item.title}</strong><span className={item.confidence === 'inferred' ? 'phone-inferred' : ''}>{item.confidence}</span></div><p>{item.detail}</p><small>{item.provider} · {item.kind} · {new Date(item.createdAt).toLocaleString()}</small><div className="phone-actions"><button onClick={() => { setSelectedKey(item.sessionKey); setInbox(false); }}>Open session</button><button disabled={!connected || item.acknowledged} onClick={() => void client.request('acknowledge', item.id).catch((cause) => setError(String(cause)))}>{item.acknowledged ? 'Acknowledged' : 'Acknowledge'}</button></div></article>) : <div className="phone-empty">No attention items.</div>}</section> : selected ? <><div className="phone-detail-actions"><button className="phone-back" onClick={() => setSelectedKey(null)}><ArrowLeft size={16} />All sessions</button>{pinButton(selected)}</div>{selected.managed ? <PhoneRename key={selected.key} session={selected} connected={connected} client={client} onRefresh={refresh} /> : null}{selected.transport === 'chat' ? <PhoneChat key={`${selected.key}/${generation}`} client={client} session={selected} connected={connected} onResume={() => { setCreateError(''); setDialog(selected); }} onRefresh={refresh} /> : <PhoneTerminal key={`${selected.key}/${generation}`} client={client} session={selected} connected={connected} onResume={() => { setCreateError(''); setDialog(selected); }} onRefresh={refresh} />}{state?.metadata[selected.key]?.notes ? <section className="phone-notes"><h2>Notes & handoff</h2><pre>{state.metadata[selected.key].notes}</pre></section> : null}</> : selectedKey ? <div className="phone-empty">Session unavailable. Refresh the session list.<button onClick={() => { setSelectedKey(null); refresh(); }}>Back to sessions</button></div> : <section>
         <div className="phone-section-heading"><h1>Sessions</h1><button aria-label="Refresh sessions" disabled={!connected} onClick={refresh}><RefreshCw size={17} /></button></div>
@@ -162,6 +177,6 @@ export default function Companion() {
     </main>
     <aside className="phone-health" aria-label="Host resources">{health.map((reading) => { const stale = !connected || !reading.connected || !reading.sampledAt || clock - reading.sampledAt > 20000; return <div key={reading.hostId}><strong>{reading.name}</strong><span>{stale ? 'Stale / unavailable' : `CPU ${reading.cpuPercent == null ? 'Sampling' : `${Math.round(reading.cpuPercent)}%`} · RAM ${Math.round((reading.memoryUsed || 0) / 1024 ** 3 * 10) / 10}/${Math.round((reading.memoryTotal || 0) / 1024 ** 3)} GiB`}</span>{reading.disks?.map((disk) => <small key={disk.path}>{disk.path} · {Math.round(disk.free / 1024 ** 3)} / {Math.round(disk.total / 1024 ** 3)} GiB free</small>)}</div>; })}</aside>
     <footer className="phone-footer"><span>Private connection through your desktop</span><button onClick={() => void fetch('/api/v1/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' } }).then((response) => { if (!response.ok) throw new Error('Could not disconnect device'); client.close(); location.reload(); }).catch((cause) => setError(String(cause)))}>Forget this device</button></footer>
-    {dialog !== undefined && state ? <CreateDialog resume={dialog} settings={state.settings} hostId={host} onClose={closeDialog} onSubmit={(input) => void create(input)} busy={busy} error={createError} presetsOnly /> : null}
+    {dialog !== undefined && state ? <CreateDialog resume={dialog} settings={state.settings} hostId={host} onClose={closeDialog} onSubmit={(input) => void create(input)} busy={busy} error={createError} /> : null}
   </div>;
 }

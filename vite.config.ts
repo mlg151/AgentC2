@@ -46,5 +46,5 @@ export default defineConfig({
   base: './',
   server: { host: '127.0.0.1', port: 5173, strictPort: true },
   // Preserve generated statement boundaries when mapping V8 coverage to TSX.
-  build: { sourcemap: process.env.AGENTC2_COVERAGE === '1', minify: process.env.AGENTC2_COVERAGE !== '1', rollupOptions: { input: { desktop: 'index.html', companion: 'companion.html' } } },
+  build: { sourcemap: true, minify: process.env.AGENTC2_COVERAGE !== '1', rollupOptions: { input: { desktop: 'index.html', companion: 'companion.html' } } },
 });

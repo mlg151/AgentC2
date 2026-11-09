@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { check } = require('../scripts/quality-gate.cjs');
 const { validate } = require('../scripts/run-tests.cjs');
-const success = Object.fromEntries(['desktop', 'linux-ssh', 'linux-cleanup', 'coverage'].map((name) => [name, { result: 'success' }]));
+const success = Object.fromEntries(['desktop', 'linux-ssh', 'linux-cleanup', 'coverage', 'android', 'companion-coverage'].map((name) => [name, { result: 'success' }]));
 assert.doesNotThrow(() => check(success));
 for (const name of Object.keys(success)) {
   for (const result of ['failure', 'cancelled', 'skipped', 'pending', undefined]) assert.throws(() => check({ ...success, [name]: { result } }));
@@ -59,3 +59,5 @@ for (const name of ['desktop', 'linux-ssh', 'linux-cleanup']) {
 for (const name of ['desktop', 'linux-ssh', 'linux-cleanup', 'coverage']) assert.ok(workflow.jobs[name].steps.some((step) => step.uses === 'actions/setup-python@v7.1.0' && step.with['python-version'] === '3.11'), 'Native collectors must use an explicit compatible Python interpreter');
 assert.ok(workflow.jobs.desktop.steps.some((step) => step.env?.AGENTC2_COVERAGE === '0' && step.run === 'npm run build'), 'Published packages must retain the optimized production build');
 console.log('PASS all six native coverage shards feed the required complete coverage gate while release packages retain optimized builds');
+
+assert.match(workflow.jobs['companion-coverage'].steps.find((step) => step.name === 'Enforce coverage gate').env.RELEASE_BUILD, /refs\/heads\/main/, 'Main releases must compare changed coverage against the prior release tag');

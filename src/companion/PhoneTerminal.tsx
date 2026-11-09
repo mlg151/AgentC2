@@ -1,3 +1,5 @@
+import { PhoneDevUrls } from './PhoneDevUrls';
+import { readPhoneClipboard, writePhoneClipboard } from './clipboard';
 import { useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -5,6 +7,7 @@ import { enableTerminalLinks } from '../terminalLinks';
 import { enableTerminalTouchScroll } from '../terminalTouch';
 import type { Session, TerminalSnapshot, TerminalState } from '../types';
 import { CompanionClient } from './client';
+import { imagePayload } from './image';
 
 const keys = [['Enter', '\r'], ['Esc', '\x1b'], ['Tab', '\t'], ['↑', '\x1b[A'], ['↓', '\x1b[B'], ['←', '\x1b[D'], ['→', '\x1b[C'], ['Ctrl-C', '\x03']];
 
@@ -16,6 +19,7 @@ export function PhoneTerminal({ client, session, connected, onResume, onRefresh 
   const writable = useRef(false);
   const [control, setControl] = useState<TerminalState | null>(null);
   const [draft, setDraft] = useState('');
+  const [previewLink, setPreviewLink] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -35,7 +39,7 @@ export function PhoneTerminal({ client, session, connected, onResume, onRefresh 
     let sequence = 0;
     const pending: { data: string; sequence: number }[] = [];
     const term = new Terminal({ cols: 100, rows: 30, fontFamily: 'Cascadia Code, Consolas, monospace', fontSize: 12, scrollback: 5000, disableStdin: true, theme: { background: '#0a1218', foreground: '#dbe6ec', cursor: '#35c9cc', selectionBackground: '#255b68' } });
-    const addon = new FitAddon(); term.loadAddon(addon); enableTerminalLinks(term); term.open(node); terminal.current = term; fit.current = addon;
+    const addon = new FitAddon(); term.loadAddon(addon); enableTerminalLinks(term, (url) => { if (handle.current) void client.request<string>('tunnel:open', handle.current, url).then((preview) => { setPreviewLink(preview); window.open(preview, '_blank', 'noopener,noreferrer'); }).catch(showError); }); term.open(node); terminal.current = term; fit.current = addon;
     function apply(state: TerminalState) {
       setControl(state);
       term.options.disableStdin = !state.canControl || state.connection !== 'connected';
@@ -106,6 +110,15 @@ export function PhoneTerminal({ client, session, connected, onResume, onRefresh 
       setDraft('');
     } catch (cause) { showError(cause); } finally { setBusy(false); }
   }
+  async function upload(file: File) {
+    if (!handle.current || !canControl) return;
+    setBusy(true); setError('');
+    try {
+      const png = await imagePayload(file);
+      const path = await client.request<string>('image:upload', handle.current, png);
+      setDraft((value) => `${value}${value ? ' ' : ''}${JSON.stringify(path)}`);
+    } catch (cause) { showError(cause); } finally { setBusy(false); }
+  }
   const matches: number[] = [];
   if (query && history) {
     const text = history.text.toLowerCase(), needle = query.toLowerCase();
@@ -122,12 +135,15 @@ export function PhoneTerminal({ client, session, connected, onResume, onRefresh 
       {session.canInterrupt ? <button disabled={!canControl || busy} onClick={() => void action('interrupt')}>Interrupt</button> : null}
       {session.canStop ? <button className="danger-text" disabled={!connected || !control?.canControl || busy || session.stale} onClick={() => void action('stop')}>Stop</button> : null}
     </div>
+    <div className="phone-actions"><label className="phone-image-picker">Attach image<input aria-label="Upload image" type="file" accept="image/*" disabled={!canControl || busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(file); event.target.value = ''; }} /></label><button disabled={!canControl || busy} onClick={() => void readPhoneClipboard().then((text) => setDraft((value) => value + text)).catch(showError)}>Paste text</button><button disabled={!terminal.current?.hasSelection()} onClick={() => void writePhoneClipboard(terminal.current!.getSelection()).catch(showError)}>Copy selection</button></div>
     {error ? <p className="phone-error" role="alert">{error}</p> : null}
     {session.canAttach && attached ? <div className="phone-terminal-scroll"><div className="phone-terminal" style={control && !canControl ? { width: Math.ceil(control.cols * 7.3 + 28) } : undefined} ref={element} aria-label="Remote terminal" /></div> : <div className="phone-empty">{session.kind === 'unmanaged' ? 'This process is read-only. Resume its saved conversation to create a managed session.' : session.canResume ? 'Resume this conversation to continue.' : 'Terminal detached. Remote sessions keep running.'}</div>}
     {session.canAttach && attached ? <>
       <div className="phone-keys" aria-label="Terminal keys">{keys.map(([label, value]) => <button key={label} aria-label={label} disabled={!canControl || busy} onClick={() => { if (handle.current) void client.request('terminal:write', handle.current, value).catch(showError); }}>{label}</button>)}</div>
       <form className="phone-composer" onSubmit={(event) => { event.preventDefault(); void send(); }}><label htmlFor="prompt">{session.provider === 'terminal' ? 'Command' : 'Prompt or reply'}</label><textarea id="prompt" rows={3} value={draft} maxLength={20000} onChange={(event) => setDraft(event.target.value)} placeholder={canControl ? session.provider === 'terminal' ? 'Enter a shell command…' : 'Write instructions for this agent…' : 'Take control to send input'} /><button className="button-primary" disabled={!canControl || busy || !draft.trim()} type="submit">{busy ? 'Sending…' : 'Send'}</button></form>
     </> : null}
+    {previewLink ? <a className="phone-preview-link" href={previewLink} target="_blank" rel="noopener noreferrer">Open development preview</a> : null}
+    <PhoneDevUrls client={client} sessionKey={session.key} target={handle.current} connected={connected} />
     {history ? <div className="phone-history" role="dialog" aria-label="Terminal history"><div className="phone-section-heading"><h2>Retained history</h2><button onClick={() => setHistory(null)}>Close history</button></div><p>{history.truncated ? 'Most recent 4 million characters.' : 'Snapshot of up to 50,000 retained lines.'}</p><input aria-label="Find in history" value={query} onChange={(e) => { setQuery(e.target.value); setMatch(0); }} placeholder="Find text…" /><div className="phone-actions"><span>{matches.length ? `${match % matches.length + 1} of ${matches.length}` : query ? 'No matches' : 'Enter text to search'}</span><button disabled={!matches.length} onClick={() => setMatch((value) => (value - 1 + matches.length) % matches.length)}>Previous</button><button disabled={!matches.length} onClick={() => setMatch((value) => value + 1)}>Next</button><button onClick={() => { if (handle.current) void client.request<{ text: string; truncated: boolean }>('terminal:history', handle.current).then(setHistory).catch(showError); }}>Reload</button></div><pre>{position < 0 ? history.text.slice(-20000) : <>{history.text.slice(Math.max(0, position - 1500), position)}<mark>{history.text.slice(position, position + query.length)}</mark>{history.text.slice(position + query.length, position + query.length + 1500)}</>}</pre></div> : null}
   </section>;
 }

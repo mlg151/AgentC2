@@ -756,6 +756,106 @@
       "id": "chat-codex-boundaries-python",
       "file": "tests/chat-codex-boundaries.py",
       "group": "linux-python"
+    },
+    {
+      "id": "companion-api",
+      "file": "tests/companion-api.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "companion-capabilities",
+      "file": "tests/companion-capabilities.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "companion-clipboard",
+      "file": "tests/companion-clipboard.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "companion-components",
+      "file": "tests/companion-components.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "companion-foreground",
+      "file": "tests/companion-foreground.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "companion-identifiers",
+      "file": "tests/companion-identifiers.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "companion-image-ui",
+      "file": "tests/companion-image-ui.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "companion-image",
+      "file": "tests/companion-image.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "companion-metadata",
+      "file": "tests/companion-metadata.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "companion-operations",
+      "file": "tests/companion-operations.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "companion-panels",
+      "file": "tests/companion-panels.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "companion-preview",
+      "file": "tests/companion-preview.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "companion-remote-ui",
+      "file": "tests/companion-remote-ui.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "companion-terminal-ui",
+      "file": "tests/companion-terminal-ui.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "companion-workflows.e2e",
+      "file": "tests/companion-workflows.e2e.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "coverage-release",
+      "file": "tests/coverage-release.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "coverage",
+      "file": "tests/coverage.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "desktop-components",
+      "file": "tests/desktop-components.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "gateway-parity",
+      "file": "tests/gateway-parity.cjs",
+      "group": "linux-web"
+    },
+    {
+      "id": "metadata-bridge",
+      "file": "tests/metadata-bridge.cjs",
+      "group": "linux-web"
     }
   ],
   "nested": {

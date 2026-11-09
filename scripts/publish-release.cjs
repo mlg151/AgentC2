@@ -27,7 +27,7 @@ async function publishRelease({ repository, sha, ref, version, directory, api = 
   if (latest && latest.tag_name !== tag && nextVersion(latest.tag_name.replace(/^v/, ''), version) !== version) throw Error('Refusing to replace the latest release with an older version');
   if (!existingTag) await api(`${root}/git/refs`, 'POST', { ref: `refs/tags/${tag}`, sha });
   const common = ['--repo', repository];
-  if (!existing) await execute(['release', 'create', tag, ...common, '--verify-tag', '--draft', '--title', `AgentC2 ${tag}`, '--generate-notes', '--notes', 'Windows x64, Linux AppImage/DEB, and macOS Intel/Apple Silicon packages are attached. Update feeds and SHA256SUMS.txt are included. See the signing reports and docs/platforms.md for installation details.']);
+  if (!existing) await execute(['release', 'create', tag, ...common, '--verify-tag', '--draft', '--title', `AgentC2 ${tag}`, '--generate-notes', '--notes', 'Windows x64, Linux AppImage/DEB, and macOS Intel/Apple Silicon packages and a signed Android companion APK are attached. Update feeds and SHA256SUMS.txt are included. See the signing reports and docs/platforms.md for installation details.']);
   const files = fs.readdirSync(directory).sort().map((name) => path.join(directory, name));
   if (!files.length) throw Error('No release assets');
   await execute(['release', 'upload', tag, ...common, ...files, '--clobber']);

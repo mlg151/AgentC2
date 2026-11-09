@@ -28,6 +28,7 @@ function installAppBridge({ settings, commander }) {
       if (qa.created && --qa.visibilityDelay <= 0) { qa.units.push(qa.created); qa.created = null; }
       return qa.inventory();
     },
+    updateSessionMetadata: (key, patch) => { qa.workspace.metadata[key] = { pinned: false, project: '', notes: '', ...qa.workspace.metadata[key], ...clone(patch) }; return clone(qa.workspace.metadata[key]); },
     saveWorkspace: (value) => { qa.workspace = clone(value); return clone(value); },
     saveSettings: (value) => { qa.settings = clone(value); return clone(value); },
     setSessionPinned: (key, pinned) => qa.emit('onSessionPinned', key, pinned),

@@ -12,7 +12,7 @@ const { TmuxControl } = require('./tmux-control.cjs');
 const { Terminals } = require('./terminals.cjs');
 const { scrollTerminal } = require('./terminal-scroll.cjs');
 const { createCleanup } = require('./cleanup.cjs');
-const { uploadPng } = require('./image-upload.cjs');
+const { uploadPng, validatePng } = require('./image-upload.cjs');
 const { Tunnels } = require('./tunnels.cjs');
 const { createExercises } = require('./exercises.cjs');
 const { LoopBreaker } = require('./loop-breaker.cjs');
@@ -485,7 +485,7 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
     return result;
   }
   async function deleteSession(client, key, commander = false) {
-    if (client.closed || (client.id !== 'desktop' && !(commander && client.id === 'centcom-commander')) || typeof key !== 'string' || !/^[A-Za-z0-9_-]{1,80}\/tmux:hq-[a-f0-9]{12}$/.test(key)) throw new Error('Invalid managed session deletion');
+    if (client.closed || (client.id !== 'desktop' && client.admin !== true && !(commander && client.id === 'centcom-commander')) || typeof key !== 'string' || !/^[A-Za-z0-9_-]{1,80}\/tmux:hq-[a-f0-9]{12}$/.test(key)) throw new Error('Invalid managed session deletion');
     if (deletionFlights.has(key) || renameFlights.has(key)) throw new Error('Session deletion or renaming is already in progress');
     deletionFlights.add(key);
     let release;
@@ -578,6 +578,12 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
     terminals.assertOwner(client, record);
     return remotePath;
   }
+  function uploadCompanionImage(client, id, base64) {
+    if (typeof base64 !== 'string' || !base64.length || base64.length > 1048576 || base64.length % 4 || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) throw new Error('Select a PNG image no larger than 768 KiB');
+    const png = Buffer.from(base64, 'base64');
+    validatePng(png);
+    return uploadClipboardImage(client, id, png);
+  }
   function devUrls(sessionKey) {
     if (typeof sessionKey !== 'string' || sessionKey.length > 300) throw new Error('Invalid session key');
     return tunnels.list(sessionKey);
@@ -602,6 +608,17 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
     const result = store.saveWorkspace(input);
     events.emit('state:updated');
     return result;
+  }
+  function updateMetadata(key, patch) {
+    validateSessionPin(key, false);
+    if (!patch || Array.isArray(patch) || typeof patch !== 'object' || Object.entries(patch).some(([field, value]) => !['project', 'notes'].includes(field) || typeof value !== 'string' || value.includes('\0') || value.length > (field === 'project' ? 100 : 20000))) throw new Error('Invalid session metadata');
+    if (!Object.hasOwn(store.data.workspace.metadata, key)) setSessionPinned(key, false);
+    const workspace = store.data.workspace;
+    if (store.data.deletedSessions.includes(key)) throw new Error('Session unavailable; refresh inventory');
+    const metadata = { ...workspace.metadata, [key]: { ...workspace.metadata[key], ...patch } };
+    store.save('workspace', { ...workspace, metadata });
+    events.emit('state:updated');
+    return metadata[key];
   }
   function setSessionPinned(key, pinned) {
     const hostId = validateSessionPin(key, pinned);
@@ -725,6 +742,6 @@ function createService({ directory, home, specopsDirectory, centcomDirectory }) 
   routeCommanderCommands(chats, centcom);
   events.on('commander:chat-evidence', (record, chatEvents) => { void centcom.observeChat(record, chatEvents).catch((error) => console.error('CENTCOM chat observation failed:', error.message)); });
   events.on('inventory:updated', (snapshot) => { void centcom.observe(snapshot)?.catch((error) => console.error('CENTCOM observation failed:', error.message)); });
-  return { centcom, specops, github, store, events, terminals, chats, tunnels, cleanup, exercises, inventory, health, create, worktrees, flashQueue, flashDecide, archiveWorktree, diffRequest, previewSitrep, launchSitrep, action, deleteSession, interruptFaults, resetFault, renameSession, loopBreaker, uploadClipboardImage, devUrls, openDevUrl, saveSettings, previewOpOrder, enrollOpOrder, saveWorkspace, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
+  return { centcom, specops, github, store, events, terminals, chats, tunnels, cleanup, exercises, inventory, health, create, worktrees, flashQueue, flashDecide, archiveWorktree, diffRequest, previewSitrep, launchSitrep, action, deleteSession, interruptFaults, resetFault, renameSession, loopBreaker, uploadClipboardImage, uploadCompanionImage, devUrls, openDevUrl, saveSettings, previewOpOrder, enrollOpOrder, saveWorkspace, updateMetadata, setSessionPinned, acknowledge, terminalPreviews, searchHistory, hostId: (id) => getHost(id).id };
 }
 module.exports = { createService };

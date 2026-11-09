@@ -1,6 +1,6 @@
 {
   "name": "agentc2",
-  "version": "0.4.16",
+  "version": "0.4.17",
   "private": true,
   "description": "Desktop SSH manager for Codex, Claude, and Antigravity CLI sessions",
   "main": "electron/main.cjs",
@@ -45,7 +45,13 @@
     "test:centcom": "node tests/centcom.cjs && node tests/centcom-operations.cjs && node tests/centcom-schema.cjs && node tests/centcom-doctrine.cjs && node tests/centcom-support.cjs && node tests/centcom-history.cjs && node tests/centcom-missions.cjs && node tests/centcom-launch.cjs && node tests/centcom-evidence.cjs && node tests/centcom-turn.cjs && node tests/centcom-automations.cjs && node tests/centcom-bindings.cjs",
     "test:inventory": "node scripts/run-tests.cjs --validate",
     "test:coverage": "cross-env AGENTC2_COVERAGE=1 AGENTC2_SOURCE_COVERAGE=1 npm run build && node scripts/coverage.cjs",
-    "test:coverage:report": "node scripts/coverage.cjs report"
+    "test:coverage:report": "node scripts/coverage.cjs report",
+    "coverage:collect": "node scripts/coverage-collect.cjs -- npm run test:coverage:suite",
+    "coverage:check": "node scripts/coverage-check.cjs",
+    "test:coverage-tools": "node tests/coverage.cjs && node tests/coverage-release.cjs",
+    "test:companion:workflows": "node tests/companion-workflows.e2e.cjs",
+    "test:companion:unit": "node tests/companion-operations.cjs && node tests/companion-metadata.cjs && node tests/companion-image.cjs && node tests/companion-api.cjs && node tests/companion-identifiers.cjs && node tests/companion-image-ui.cjs && node tests/companion-preview.cjs && node tests/companion-capabilities.cjs && node tests/companion-clipboard.cjs && node tests/gateway-parity.cjs && node tests/companion-components.cjs && node tests/companion-panels.cjs && node tests/companion-terminal-ui.cjs && node tests/metadata-bridge.cjs && node tests/companion-foreground.cjs && node tests/companion-remote-ui.cjs && node tests/desktop-components.cjs",
+    "test:coverage:suite": "npm run build && node tests/productivity.cjs && node tests/remote-control.cjs && node tests/ci-policy.cjs && node tests/main-contract.cjs && node tests/auto-version.cjs && npm run test:coverage-tools && npm run test:companion:unit && npm run test:companion:workflows && npm run test:desktop:sessions && npm run test:desktop"
   },
   "dependencies": {
     "@xterm/addon-fit": "0.11.0",
@@ -81,7 +87,9 @@
     "playwright-core": "^1.64.1",
     "typescript": "^5.7.2",
     "vite": "^6.0.5",
-    "wait-on": "^8.0.1"
+    "wait-on": "^8.0.1",
+    "istanbul-lib-coverage": "^3.2.2",
+    "v8-to-istanbul": "^9.3.0"
   },
   "build": {
     "appId": "com.agentc2.desktop",

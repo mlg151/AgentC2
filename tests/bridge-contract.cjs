@@ -20,7 +20,7 @@ const commands = {
   listExercises: 'exercise:list', exerciseCapabilities: 'exercise:capabilities', createExercise: 'exercise:create', retryExercise: 'exercise:retry', cancelExercise: 'exercise:cancel',
   markExerciseComplete: 'exercise:complete', inspectExercise: 'exercise:inspect', previewExercisePromotion: 'exercise:preview', promoteExercise: 'exercise:promote',
   listFlashTraffic: 'flash:list', decideFlashTraffic: 'flash:decide', interruptFaults: 'fault:interrupt-all', resetFault: 'fault:reset',
-  saveWorkspace: 'workspace:save', setSessionPinned: 'session:pin', previewCleanup: 'cleanup:preview', executeCleanup: 'cleanup:execute', cleanupState: 'cleanup:state',
+  updateSessionMetadata: 'metadata:update', saveWorkspace: 'workspace:save', setSessionPinned: 'session:pin', previewCleanup: 'cleanup:preview', executeCleanup: 'cleanup:execute', cleanupState: 'cleanup:state',
   terminalPreviews: 'terminal:previews', searchHistory: 'terminal:search', renameSession: 'session:rename', acknowledge: 'attention:ack', inventory: 'inventory', health: 'health', create: 'create',
   chatCapabilities: 'chat:capabilities', openChat: 'chat:open', readyChat: 'chat:ready', chatHistory: 'chat:history', takeChat: 'chat:take', submitChat: 'chat:submit',
   chatReceipt: 'chat:receipt', pruneChat: 'chat:prune', closeChat: 'chat:close', listWorktrees: 'worktrees:list', archiveWorktree: 'worktrees:archive',
@@ -31,6 +31,7 @@ const commands = {
   readClipboard: 'clipboard:read', readClipboardForTerminal: 'clipboard:for-terminal', devUrls: 'tunnel:list', openDevUrl: 'tunnel:open', writeClipboard: 'clipboard:write', terminalMenu: 'terminal:menu',
 };
 const events = {
+  onSharedState: ['state:updated', 1],
   onPeerSyncStatus: ['peer-sync:status', 1], onPeerSyncApplied: ['peer-sync:applied', 1], onUpdateState: ['updates:state', 1],
   onOverwatchWindowState: ['overwatch:window-state', 1], onOverwatchSelect: ['overwatch:selected', 1], onOverwatchWorkspace: ['overwatch:workspace', 1],
   onCentcomState: ['centcom:updated', 1], onSessionsDeleted: ['sessions:deleted', 1], onSessionPinned: ['session:pinned', 2], onHealth: ['health:updated', 1],

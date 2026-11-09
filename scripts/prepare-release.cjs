@@ -8,6 +8,8 @@ const { prepareUpdateManifests } = require('./update-manifests.cjs');
 const version = checkVersion();
 const directory = path.resolve(process.argv[2] || 'release-assets');
 const required = [
+  `AgentC2-${version}-android.apk`,
+  `AgentC2-${version}-android-signing.txt`,
   `AgentC2-${version}-win-x64-setup.exe`,
   `AgentC2-${version}-linux-x86_64.AppImage`,
   `AgentC2-${version.replace('-', '~')}-linux-amd64.deb`,

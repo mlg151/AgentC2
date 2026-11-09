@@ -1,8 +1,9 @@
+import { randomIdentifier } from '../companion/identifier';
 import { useState } from 'react';
 import type { OpOrder, OpOrderPreview, Settings } from '../types';
 
 const emptyOrder = (hostId: string): OpOrder => ({
-  version: 1, id: crypto.randomUUID(), hostId, repository: '', enabled: false,
+  version: 1, id: randomIdentifier(), hostId, repository: '', enabled: false,
   instructions: '', overrides: { codex: '', claude: '', antigravity: '' }, mcp: [],
 });
 

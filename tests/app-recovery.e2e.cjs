@@ -36,7 +36,8 @@ async function key(chord) { await page.evaluate(() => document.activeElement?.bl
     await page.goto(url + '?scenario=single'); await page.locator('.session-row').waitFor();
     await key('Alt+L'); await page.locator('.command-feedback').filter({ hasText: 'This viewport has no unit' }).waitFor();
     await key('Alt+J'); await key('Alt+K');
-    assert.equal(await page.getByRole('tab').count(), 1, 'Cycling a one-unit fleet must not invent a target');
+    await until(() => window.qa.workspace.tabs.length === 1 && window.qa.workspace.situation.anchorKey === window.qa.units[0].key && window.qa.workspace.situation.targetKey === null);
+    assert.equal(await page.getByRole('tablist', { name: 'Open sessions' }).count(), 0, 'Session navigation must remain free of top tabs');
     await page.getByRole('button', { name: 'Unpin anchor', exact: true }).click();
     await until(() => window.qa.workspace.situation.anchorKey === null && window.qa.workspace.situation.targetKey === window.qa.units[0].key);
     await key('Alt+H'); await page.locator('.command-feedback').filter({ hasText: 'This viewport has no unit' }).waitFor();
@@ -70,7 +71,8 @@ async function key(chord) { await page.evaluate(() => document.activeElement?.bl
     await deleted(2); await until(() => window.qa.workspace.situation.anchorKey === window.qa.units[0].key && window.qa.workspace.situation.targetKey === null);
     await deleted(0); await until(() => window.qa.workspace.situation.anchorKey === window.qa.units[0].key);
     await deleted(0); await page.getByRole('heading', { name: 'Select a session', exact: true }).waitFor();
-    assert.equal(await page.getByRole('tab').count(), 0);
+    await until(() => window.qa.workspace.tabs.length === 0);
+    assert.equal(await page.locator('.session-pane').count(), 0);
     assert.deepEqual(await page.evaluate(() => window.qa.workspace.metadata), {});
 
     await page.goto(url + '?scenario=capacity'); await page.locator('.roster-heading').filter({ hasText: '(120)' }).waitFor();

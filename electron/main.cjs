@@ -9,6 +9,7 @@ const { PeerSync } = require('./peer-sync.cjs');
 const { readClipboardPng } = require('./clipboard-image.cjs');
 const { assertWindowSender } = require('./window-sender.cjs');
 
+const desktopHandlers = new Map();
 const desktop = { id: 'desktop', name: 'Desktop' };
 let mainWindow, overwatchWindow, service, gateway, peerSync, tray, monitor, healthMonitor, cleanupMonitor;
 let peerEpoch = 0;
@@ -17,6 +18,7 @@ let startupError = '';
 const icon = path.join(__dirname, '..', 'assets', process.platform === 'win32' ? 'app-icon.ico' : 'app-icon.png');
 const overwatchEvents = new Set(['inventory:updated', 'session:pinned', 'sessions:deleted', 'overwatch:workspace']);
 function send(event, ...args) {
+  if (['peer-sync:status', 'peer-sync:applied', 'updates:state', 'overwatch:window-state', 'overwatch:selected', 'overwatch:workspace', 'centcom:updated'].includes(event)) gateway?.broadcast(event, args[0]);
   if (overwatchEvents.has(event) && overwatchWindow && !overwatchWindow.isDestroyed()) overwatchWindow.webContents.send(event, ...args);
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(event, ...args);
 }
@@ -131,7 +133,7 @@ app.whenReady().then(async () => {
   if (!app.isPackaged && process.env.NODE_ENV !== 'development' && !process.argv.includes('--no-source-update') && require('./source-updater.cjs').resumeSourceUpdate({ directory: path.join(directory, 'source-updates'), revision: buildInfo.revision, app })) return;
   try {
     service = createService({ directory, home: app.getPath('home'), specopsDirectory: process.env.AGENTC2_DATA_DIR || process.env.AGENT_HQ_DATA_DIR ? undefined : path.join(app.getPath('home'), '.agentc2', 'specops'), centcomDirectory: process.env.AGENTC2_DATA_DIR || process.env.AGENT_HQ_DATA_DIR ? undefined : path.join(app.getPath('home'), '.agentc2', 'centcom') });
-    gateway = new Gateway({ directory, assets: path.join(__dirname, '..', 'dist'), service });
+    gateway = new Gateway({ directory, assets: path.join(__dirname, '..', 'dist'), service, desktopHandlers });
     peerSync = new PeerSync({ directory, service });
     peerSync.on('status', (value) => send('peer-sync:status', value));
     peerSync.on('applied', (value) => { send('peer-sync:applied', { ...value, peerEpoch: ++peerEpoch }); send('overwatch:workspace', value.workspace); });
@@ -158,13 +160,15 @@ app.whenReady().then(async () => {
     service.events.on('health:updated', (value) => send('health:updated', value));
     service.events.on('session:pinned', (key, pinned) => send('session:pinned', key, pinned));
     service.events.on('sessions:deleted', (keys) => send('sessions:deleted', keys));
+    service.events.on('remote:updated', (value) => { updateTray(); send('remote:updated', value); });
+    service.events.on('state:updated', () => { const { settings, workspace, attention } = service.store.data; send('state:updated', { settings, metadata: workspace.metadata, attention }); });
     service.events.on('centcom:updated', (value) => send('centcom:updated', value));
     for (const item of service.store.data.attention) notified.add(item.id);
     if (gateway.data.enabled) await gateway.start().catch((error) => { gateway.error = error.message; });
     updateTray();
   } catch (error) { startupError = `Could not open saved configuration in ${directory}: ${error.message}`; }
   const overwatchReads = new Set(['state:get', 'inventory', 'terminal:previews', 'overwatch:state', 'overwatch:dock', 'overwatch:select']);
-  function handle(name, fn) { ipcMain.handle(name, (event, ...args) => { assertSender(event, overwatchReads.has(name)); return fn(...args); }); }
+  function handle(name, fn) { desktopHandlers.set(name, fn); ipcMain.handle(name, (event, ...args) => { assertSender(event, overwatchReads.has(name)); return fn(...args); }); }
   handle('overwatch:state', overwatchState);
   handle('overwatch:undock', undockOverwatch);
   handle('overwatch:dock', () => { closeOverwatchWindow(); showWindow(); const state = { ...overwatchState(), dockOpen: true }; send('overwatch:window-state', state); return state; });
@@ -218,6 +222,7 @@ app.whenReady().then(async () => {
   handle('fault:interrupt-all', () => service.interruptFaults(desktop));
   handle('fault:reset', (key) => service.resetFault(key));
   handle('workspace:save', (input, epoch) => { assertPeerEpoch(epoch); const result = service.saveWorkspace(input); send('overwatch:workspace', result); return result; });
+  handle('metadata:update', (key, patch) => service.updateMetadata(key, patch));
   handle('session:pin', (key, pinned) => service.setSessionPinned(key, pinned));
   const updater = !app.isPackaged
     ? new (require('./source-updater.cjs').SourceUpdater)({ revision: buildInfo.revision, directory: path.join(directory, 'source-updates'), app })

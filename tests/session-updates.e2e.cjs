@@ -32,7 +32,7 @@ const path = require('node:path');
         getState: async () => ({ settings, workspace, attention: [] }), inventory: async () => { if (window.qa.holdInventory) await new Promise((resolve) => { window.qa.finishInventory = resolve; }); return inventory(); },
         create: async (input) => { window.qa.lastCreate = input; throw new Error('The working directory does not exist'); },
         saveWorkspace: async (value) => { workspace = value; return value; },
-        onInventory: off, onSessionPinned: off, onSessionsDeleted: off, onAttentionOpen: off, onHealth: off,
+        onSharedState: off, onInventory: off, onSessionPinned: off, onSessionsDeleted: off, onAttentionOpen: off, onHealth: off,
         onDevUrls: off, onTerminalExit: off, onTerminalData: off, onTerminalState: off,
         listFlashTraffic: async () => [], health: async () => [], devUrls: async () => [],
         renameSession: async (key, title) => { if (window.qa.failRename) throw new Error('Rename fixture refused'); if (key !== session.key) throw new Error('Wrong target'); session = { ...session, title }; localStorage.setItem('title', title); return title; },

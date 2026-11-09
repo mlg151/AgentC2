@@ -23,7 +23,7 @@ async function mainFixture(options = {}) {
       return target[key] = (...args) => record(prefix + '.' + key, args);
     } });
   }
-  const data = { settings: { notifications: true }, attention: [{ id: 'old' }] };
+  const data = { workspace: { metadata: {} }, settings: { notifications: true }, attention: [{ id: 'old' }] };
   state.record = {};
   const service = methods('service', { events: new EventEmitter(), store: { data }, ...Object.fromEntries(['terminals', 'chats', 'cleanup', 'specops', 'centcom', 'exercises', 'tunnels'].map((key) => [key, methods('service.' + key, { handles: new Map() })])) });
   state.service = service;

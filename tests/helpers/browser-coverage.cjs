@@ -3,6 +3,7 @@ const path = require('node:path');
 const { fileURLToPath, pathToFileURL } = require('node:url');
 const root = path.resolve(__dirname, '../..');
 let sequence = 0;
+const contexts = new WeakSet();
 
 function localFile(url) {
   if (path.isAbsolute(url)) return path.resolve(url);
@@ -42,6 +43,7 @@ function normalize(entries) {
 }
 
 async function instrumentCoverage(context) {
+  contexts.add(context);
   const saveSource = process.env.AGENTC2_SOURCE_COVERAGE === '1' ? await require('./source-browser-coverage.cjs').instrumentSourceCoverage(context) : null;
   const pending = new Map();
   function attach(page) {
@@ -75,4 +77,4 @@ async function instrumentCoverage(context) {
   await Promise.all(context.pages().map((page) => attach(page).started));
   return async () => { await saveSource?.(); for (const record of pending.values()) await record.save(); };
 }
-module.exports = { instrumentCoverage, normalize, localFile };
+module.exports = { instrumentCoverage, normalize, localFile, isInstrumented: (context) => contexts.has(context) };

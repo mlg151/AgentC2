@@ -5,6 +5,7 @@ const a = { argument: 'a' }, b = { argument: 'b' }, c = { argument: 'c' };
 
 // Public IPC contract independent of the implementation's registration loop.
 const routes = [
+  ['metadata:update', 'service.updateMetadata', [a, b]],
   ['peer-sync:status', 'peer.status', []], ['peer-sync:save', 'peer.configure', [a]], ['peer-sync:pair', 'peer.pair', []], ['peer-sync:connect', 'peer.connect', [a]], ['peer-sync:revoke', 'peer.revoke', [a]], ['peer-sync:pull-tabs', 'peer.pullTabs', [a]],
   ['oporder:preview', 'service.previewOpOrder', [a]], ['oporder:enroll', 'service.enrollOpOrder', [a, b]], ['sitrep:preview', 'service.previewSitrep', [a], [desktop, a]], ['sitrep:launch', 'service.launchSitrep', [a], [desktop, a]], ['github:request', 'service.github', [a]],
   ['specops:list', 'service.specops.list', []], ['specops:definition', 'service.specops.definition', []], ['specops:configure', 'service.specops.configure', [a]], ['specops:launch', 'service.specops.launch', [a]], ['specops:control', 'service.specops.control', [a, b]],
@@ -86,6 +87,9 @@ async function windowsAndEvents() {
   const length = f.calls.length; f.service.events.emit('client', 'phone', 'terminal:data', {}); assert.equal(f.calls.length, length);
   f.service.events.emit('tunnel:updated', { sessionKey: 'unit', urls: ['url'] });
   f.peer.emit('status', a); f.updateOptions.notify(a);
+  assert.ok(f.calls.some(([name, channel, value]) => name === 'gateway.broadcast' && channel === 'updates:state' && value === a));
+  f.service.events.emit('state:updated');
+  assert.ok(f.calls.some(([name, channel, value]) => name === 'window.send' && channel === 'state:updated' && value.metadata === f.service.store.data.workspace.metadata));
   for (const event of ['health:updated', 'session:pinned', 'sessions:deleted', 'centcom:updated']) f.service.events.emit(event, a, b);
   const inventory = { attention: [{ id: 'old', kind: 'input', title: 'Old', sessionKey: 'old' }, { id: 'new', kind: 'input', title: 'New', sessionKey: 'new' }, { id: 'failed', kind: 'failed', title: 'Failed' }, { id: 'ack', acknowledged: true }] };
   f.service.events.emit('inventory:updated', inventory); f.service.events.emit('inventory:updated', inventory);
@@ -127,7 +131,7 @@ async function platformStartup() {
   const unavailableTray = await mainFixture({ remoteEnabled: true, trayFailure: true }); assert.equal(unavailableTray.trays.length, 0); assert.ok(unavailableTray.calls.some(([name]) => name === 'console.warn')); unavailableTray.app.emit('before-quit');
   const partialTray = await mainFixture({ remoteEnabled: true, tooltipFailure: true }); assert.equal(partialTray.trays[0].destroyed, true); partialTray.app.emit('before-quit');
   const failedStart = await mainFixture({ rejectBackground: true, remoteEnabled: true }); assert.equal(failedStart.peer.error, 'Fixture unavailable'); assert.equal(failedStart.gateway.error, 'Fixture unavailable'); failedStart.app.emit('before-quit');
-  const broken = await mainFixture({ startupFailure: true, missingBuild: true }); assert.throws(() => broken.invoke('state:get'), /Could not open saved configuration.*Invalid saved settings/); assert.equal(broken.timers.length, 0); broken.app.emit('before-quit');
+  const broken = await mainFixture({ startupFailure: true, missingBuild: true }); assert.throws(() => broken.invoke('state:get'), /Could not open saved configuration.*Invalid saved settings/); assert.equal(broken.timers.length, 0); assert.doesNotThrow(() => broken.updateOptions.notify(a), 'Startup recovery must tolerate updates before gateway construction'); broken.app.emit('before-quit');
   const resumed = await mainFixture({ resumeUpdate: true, allowResume: true }); assert.equal(resumed.windows.length, 0); resumed.app.emit('before-quit');
   for (const [env, existing, directory] of [[{ AGENTC2_DATA_DIR: '/explicit' }, [], '/explicit'], [{ AGENT_HQ_DATA_DIR: '/legacy-env' }, [], '/legacy-env'], [{}, ['/fixture/userData/workspace.json'], '/fixture/userData'], [{}, ['/fixture/appData/agent-hq/workspace.json'], '/fixture/appData/agent-hq']]) {
     const f = await mainFixture({ env, existing }); assert.equal(require('node:path').normalize(f.serviceOptions.directory), require('node:path').normalize(directory)); f.app.emit('before-quit');
