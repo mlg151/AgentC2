@@ -57,6 +57,44 @@ class JournalTests(unittest.TestCase):
     def response(self, **extra):
         return command("respond", dict(requestId="request-one", turnId="turn-one", itemId="item-one", **extra), self.identifier)
 
+    def test_model_change_is_idle_only_and_blocks_competing_sends(self):
+        submission = command("model", dict(model="fixture-next"), self.identifier)
+        receipt, fresh = self.journal.accept(submission)
+        self.assertTrue(fresh)
+        self.assertEqual(self.journal.accept(submission), (receipt, False))
+        with self.assertRaisesRegex(ValueError, "model change"):
+            self.send()
+        with self.assertRaises(ValueError):
+            self.journal.accept(command("model", dict(model="competing"), self.identifier))
+        self.journal.command_state(submission["commandId"], "dispatching")
+        self.journal.set_model(self.identifier, "fixture-next")
+        self.journal.command_state(submission["commandId"], "completed", dict(model="fixture-next"))
+        self.assertEqual(self.journal.history(self.identifier)["session"]["model"], "fixture-next")
+        self.send()
+        with self.assertRaisesRegex(ValueError, "current turn"):
+            self.journal.accept(command("model", dict(model="too-late"), self.identifier))
+        self.journal.close()
+        self.journal = Journal(self.directory)
+        self.assertEqual(self.journal.history(self.identifier)["session"]["model"], "fixture-next")
+
+    def test_managed_title_rename_survives_restart_without_changing_activity(self):
+        creation = command("create", dict(provider="codex", cwd="/tmp/repo", title="Managed title", roeProfile="full", managedName="hq-123456abcdef"))
+        receipt, _ = self.journal.accept(creation, capabilities())
+        identifier = receipt["sessionId"]
+        before = self.journal.history(identifier)["session"]
+        with self.assertRaisesRegex(ValueError, "Managed session changed"):
+            self.journal.rename(identifier, "hq-000000000000", "Wrong target")
+        for title in ["", "\n", "\t", "x" * 101]:
+            with self.assertRaisesRegex(ValueError, "Invalid session title"):
+                self.journal.rename(identifier, "hq-123456abcdef", title)
+        self.journal.rename(identifier, "hq-123456abcdef", "Updated title")
+        self.journal.close()
+        self.journal = Journal(self.directory)
+        after = self.journal.history(identifier)["session"]
+        self.assertEqual(after["title"], "Updated title")
+        self.assertEqual(after["updatedAt"], before["updatedAt"])
+        self.assertEqual(after["providerSessionId"], before["providerSessionId"])
+
     def test_lost_acknowledgement_returns_same_receipt_after_reopen(self):
         submission, first = self.send()
         self.journal.close()

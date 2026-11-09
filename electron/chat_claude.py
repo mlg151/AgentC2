@@ -105,7 +105,7 @@ class ClaudeAdapter:
         environment["CLAUDE_CODE_OAUTH_TOKEN"] = ""
         environment["CLAUDE_AGENT_SDK_CLIENT_APP"] = "agentc2/0.4.1"
         return self.sdk.ClaudeAgentOptions(
-            cwd=self.session["cwd"], cli_path=cli_binary(),
+            cwd=self.session["cwd"], cli_path=cli_binary(), model=self.session.get("model"),
             system_prompt=dict(type="preset", preset="claude_code"),
             setting_sources=["user", "project", "local"],
             include_partial_messages=True, permission_mode="bypassPermissions" if profile == "full" else "default" if profile == "gated" else None,
@@ -125,13 +125,7 @@ class ClaudeAdapter:
         # The pinned public history helpers resolve CLAUDE_CONFIG_DIR from the
         # process environment, unlike ClaudeAgentOptions.env. Read in a short
         # subprocess so concurrent profiles never mutate the worker's globals.
-        source = """import json,sys
-from claude_agent_sdk import get_session_info,get_session_messages
-identifier,directory=sys.argv[1:]
-info=get_session_info(identifier,directory=directory)
-print(json.dumps(None if info is None else [dict(uuid=m.uuid,type=m.type,message=m.message) for m in get_session_messages(identifier,directory=directory)]))
-"""
-        result = subprocess.run([sys.executable, "-c", source, self.native_id, self.session["cwd"]], env={**os.environ, **self.env}, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=self.timeout, check=True)
+        result = subprocess.run([sys.executable, str(Path(__file__).with_name("chat_claude_history.py")), self.native_id, self.session["cwd"]], env={**os.environ, **self.env}, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=self.timeout, check=True)
         messages = json.loads(result.stdout)
         return None if messages is None else [SimpleNamespace(**message) for message in messages]
 
@@ -190,6 +184,17 @@ print(json.dumps(None if info is None else [dict(uuid=m.uuid,type=m.type,message
             operation.close()
             raise ProviderRejected("Claude SDK client is disconnected")
         return asyncio.run_coroutine_threadsafe(operation, self.loop).result(timeout=self.timeout)
+
+    def set_model(self, model):
+        async def change():
+            if self.active is not None:
+                raise ProviderRejected("Wait for the current Claude turn before changing the model")
+            if not callable(getattr(self.client, "set_model", None)):
+                raise ProviderRejected("The installed Claude SDK cannot change models")
+            await self.client.set_model(model)
+            self.session["model"] = model
+            return dict(model=model, providerSessionId=self.native_id)
+        return self.call(change())
 
     def send(self, text, command_id):
         async def submit():

@@ -5,6 +5,8 @@ import { SessionPane } from './components/SessionPane';
 import { CreateDialog } from './components/CreateDialog';
 import { SettingsDialog } from './components/SettingsDialog';
 import { SitRepDialog } from './components/SitRepDialog';
+import { SpecopsDialog } from './components/SpecopsDialog';
+import { CentcomDialog } from './components/CentcomDialog';
 import { ExerciseDialog } from './components/ExerciseDialog';
 import { FlashTraffic } from './components/FlashTraffic';
 import { SessionCleanupDialog } from './components/SessionCleanupDialog';
@@ -19,7 +21,7 @@ import { useCommandKeys } from './useCommandKeys';
 import { HostMonitor } from './components/HostMonitor';
 import { fleetReadiness } from './readiness';
 import { assignCallsigns, closeWorkspaceTab, emptyMetadata, isManagedSession, openInPane, projectFor, situationFor, unitState, updateSituation } from './workspace';
-import type { AttentionItem, CreateInput, FlashRequest, Inventory, Session, Settings, SituationWorkspace, Workspace } from './types';
+import type { AttentionItem, CentcomState, CreateInput, FlashRequest, Inventory, Session, Settings, SituationWorkspace, Workspace } from './types';
 
 const emptyWorkspace: Workspace = { tabs: [], selectedKey: null, splitKey: null, metadata: {} };
 function applyPin(workspace: Workspace, key: string, pinned: boolean): Workspace {
@@ -48,6 +50,9 @@ export default function App() {
   const [showAcknowledged, setShowAcknowledged] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [sitrepSource, setSitrepSource] = useState<Session | null>(null);
+  const [showSpecops, setShowSpecops] = useState(false);
+  const [showCentcom, setShowCentcom] = useState(false);
+  const [centcomState, setCentcomState] = useState<CentcomState | null>(null);
   const [showExercises, setShowExercises] = useState(false);
   const [flashRequests, setFlashRequests] = useState<FlashRequest[]>([]);
   const [flashSelectedId, setFlashSelectedId] = useState('');
@@ -59,6 +64,7 @@ export default function App() {
   const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
   const [showSwitcher, setShowSwitcher] = useState(false);
   const [showOverwatch, setShowOverwatch] = useState(false);
+  const [overwatchUndocked, setOverwatchUndocked] = useState(false);
   const [diffOpenKey, setDiffOpenKey] = useState<string | null>(null);
   const [showKeyboardHelp, setShowKeyboardHelp] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
@@ -66,6 +72,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [createError, setCreateError] = useState('');
   const [pinning, setPinning] = useState<Set<string>>(() => new Set());
   const initialized = useRef(false);
   const choseInitial = useRef(false);
@@ -75,14 +82,16 @@ export default function App() {
   const situation = situationFor(workspace);
   const unread = attention.filter((a) => !a.acknowledged);
   const readiness = useMemo(() => fleetReadiness(inventory, flashRequests), [inventory, flashRequests]);
+  const centcomPendingCount = useMemo(() => (centcomState?.directives || []).filter((d) => d.state === 'pending').length, [centcomState]);
 
   const acceptInventory = useCallback((next: Inventory) => {
     setInventory(next); setAttention(next.attention);
+    const internal = new Set(next.internalSessionKeys || []);
     const external = new Set(next.sessions.filter((session) => !isManagedSession(session) && session.kind !== 'conversation').map((session) => session.key));
-    setWorkspace((current) => current.tabs.reduce((result, key) => external.has(key) ? closeWorkspaceTab(result, key) : result, current));
+    setWorkspace((current) => current.tabs.reduce((result, key) => external.has(key) || internal.has(key) ? closeWorkspaceTab(result, key) : result, current));
     setKnown((current) => {
       const keys = new Set(next.sessions.map((s) => s.key));
-      const stale = Object.fromEntries(Object.entries(current).map(([key, s]) => [key, keys.has(key) ? s : { ...s, stale: true, missing: true }]));
+      const stale = Object.fromEntries(Object.entries(current).filter(([key]) => !internal.has(key)).map(([key, s]) => [key, keys.has(key) ? s : { ...s, stale: true, missing: true }]));
       return { ...stale, ...Object.fromEntries(next.sessions.map((s) => [s.key, s])) };
     });
   }, []);
@@ -107,6 +116,10 @@ export default function App() {
       setWorkspace((current) => withoutSessions(current, new Set(keys)));
       setKnown((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !deleted.has(key))));
     });
+    const offPeerSync = window.agentHQ.onPeerSyncApplied?.((state) => {
+      setSettings(state.settings); setWorkspace(state.workspace); setAttention(state.attention);
+      void refresh();
+    });
     const offPins = window.agentHQ.onSessionPinned((key, pinned) => {
       pins.set(key, pinned);
       setWorkspace((current) => applyPin(current, key, pinned));
@@ -120,7 +133,7 @@ export default function App() {
       await refresh();
     }).catch((cause) => { if (!cancelled) setError(String(cause)); });
     const off = window.agentHQ.onInventory(acceptInventory);
-    return () => { cancelled = true; off(); offPins(); offDeleted(); offShared(); };
+    return () => { cancelled = true; off(); offPins(); offDeleted(); offPeerSync?.(); offShared(); };
   }, [acceptInventory, refresh]);
   useEffect(() => {
     if (initialized.current) void window.agentHQ?.saveWorkspace(workspace).catch((cause) => setError(`Could not save workspace: ${String(cause)}`));
@@ -138,6 +151,13 @@ export default function App() {
     void poll();
     const timer = setInterval(() => void poll(), 5000);
     return () => { current = false; clearInterval(timer); };
+  }, []);
+  useEffect(() => {
+    if (!window.agentHQ?.centcomState) return;
+    let active = true;
+    void window.agentHQ.centcomState().then((s) => { if (active) setCentcomState(s); }).catch(() => {});
+    const off = window.agentHQ.onCentcomState?.((s) => { if (active) setCentcomState(s); });
+    return () => { active = false; off?.(); };
   }, []);
   useEffect(() => {
     if (choseInitial.current || !managedSessions.length || !initialized.current) return;
@@ -193,6 +213,7 @@ export default function App() {
   async function create(input: CreateInput) {
     if (!window.agentHQ) return;
     setBusy(true);
+    setCreateError('');
     let started = false;
     try {
       const result = await window.agentHQ.create(input);
@@ -208,7 +229,7 @@ export default function App() {
       }
       if (session) openSession(session);
       else setError('The session started but has not appeared in inventory. Refresh to find it.');
-    } catch (cause) { setError(String(cause)); }
+    } catch (cause) { if (started) setError(String(cause)); else setCreateError(String(cause)); }
     finally { if (started) setDialog(undefined); setBusy(false); }
   }
   async function saveSettings(next: Settings) {
@@ -221,11 +242,34 @@ export default function App() {
     try { const next = await window.agentHQ?.acknowledge(id); if (next) setAttention(next); }
     catch (cause) { setError(String(cause)); }
   }
-  const closeCreate = useCallback(() => { if (!busy) setDialog(undefined); }, [busy]);
+  const closeCreate = useCallback(() => { if (!busy) { setDialog(undefined); setCreateError(''); } }, [busy]);
   const closeSettings = useCallback(() => setShowSettings(false), []);
   const closeCleanup = useCallback(() => setCleanupTarget(undefined), []);
   const closeDelete = useCallback(() => setDeleteTarget(null), []);
   const closeSwitcher = useCallback(() => setShowSwitcher(false), []);
+  const openSessionRef = useRef(openSession);
+  openSessionRef.current = openSession;
+  const knownRef = useRef(known); knownRef.current = known;
+  useEffect(() => {
+    const api = window.agentHQ;
+    if (!api?.overwatchWindowState) return;
+    let cancelled = false, observed = false;
+    const offState = api.onOverwatchWindowState((state) => {
+      observed = true; setOverwatchUndocked(state.undocked);
+      if (state.undocked) setShowOverwatch(false);
+      else if (state.dockOpen) setShowOverwatch(true);
+    });
+    const offSelect = api.onOverwatchSelect((key) => {
+      const session = knownRef.current[key];
+      if (session) { openSessionRef.current(session); requestFocus(key); }
+    });
+    void api.overwatchWindowState().then((state) => { if (!cancelled && !observed) setOverwatchUndocked(state.undocked); }).catch((cause) => { if (!cancelled) setError(String(cause)); });
+    return () => { cancelled = true; offState(); offSelect(); };
+  }, []);
+  function showOverwatchView(toggle = false) {
+    if (overwatchUndocked) void window.agentHQ?.undockOverwatch().catch((cause) => setError(String(cause)));
+    else setShowOverwatch((current) => toggle ? !current : true);
+  }
   const closeOverwatch = useCallback(() => setShowOverwatch(false), []);
   const closeKeyboardHelp = useCallback(() => setShowKeyboardHelp(false), []);
   function requestFocus(key: string | null) {
@@ -272,7 +316,7 @@ export default function App() {
     else setFlashError('The target unit is not in inventory. Refresh its host.');
   }
   const commands: CommandActions = {
-    search: { run: () => setShowSwitcher((value) => !value) }, overwatch: { run: () => setShowOverwatch((value) => !value) },
+    search: { run: () => setShowSwitcher((value) => !value) }, overwatch: { run: () => showOverwatchView(true) },
     cycleNext: { run: () => cycleTarget(1) }, cyclePrevious: { run: () => cycleTarget(-1) },
     focusAnchor: { run: () => focusPane('anchor') }, focusTarget: { run: () => focusPane('target') },
     promote: { run: promoteTarget, available: Boolean(situation.targetKey), reason: 'Pane B is empty' },
@@ -282,6 +326,7 @@ export default function App() {
     deny: { run: () => { void decideFlash('deny'); }, available: Boolean(flashSelected?.state === 'pending' && flashSelected.connected && !flashBusy), reason: 'No connected verified permission request' },
     jumpRequest: { run: jumpFlash, available: Boolean(flashSelected), reason: 'No verified permission request' },
     diff: { run: () => { if (selected) toggleDiff(selected.key); }, available: Boolean(selected?.worktreeOperation && selected.kind === 'managed'), reason: 'Select an owned worktree unit' },
+    centcom: { run: () => setShowCentcom((value) => !value), available: Boolean(window.agentHQ?.centcomState), reason: 'CENTCOM unavailable' },
     exercise: { run: () => setShowExercises(true) },
     handoff: { run: () => { if (selected) setSitrepSource(selected); }, available: Boolean(selected?.worktreeOperation && selected.kind === 'managed' && !selected.stale), reason: 'Select a connected owned worktree unit' },
     faultStop: { run: () => { void window.agentHQ?.interruptFaults().then((results) => { setFaultResult(results.map((item) => `${item.sessionKey}: ${item.status}${item.result ? ` (${item.result})` : ''}`).join('\n')); return refresh(); }).catch((cause) => setFaultResult(String(cause))); }, available: Boolean(inventory?.faults?.some((item) => ['review', 'failed', 'unknown'].includes(item.status))), reason: 'No eligible confirmed faults' },
@@ -293,8 +338,10 @@ export default function App() {
   } });
 
   return <div className={`app-shell situation-room${situation.rosterCollapsed || situation.zen ? ' roster-hidden' : ''}${situation.zen ? ' is-zen' : ''}${situation.ligatures ? ' font-ligatures' : ''}`}>
-    <SituationHeader inventory={inventory} readiness={readiness} missionStartedAt={situation.missionStartedAt} hosts={settings?.hosts || []} hostFilter={hostFilter} onHostFilter={setHostFilter} onSearch={() => setShowSwitcher(true)} onSettings={() => setShowSettings(true)} onNew={() => setDialog(null)} collapsed={situation.rosterCollapsed || situation.zen} onToggleRoster={() => changeSituation({ rosterCollapsed: !situation.rosterCollapsed, zen: false })} />
-    <div className="workspace" inert={showOverwatch}>
+    {(inventory?.missions || []).filter((r) => r.state === 'halted').length ? <button className="specops-escalation" onClick={() => setShowSpecops(true)}>Immediate Flash Traffic · [!HALT] {(inventory?.missions || []).filter((r) => r.state === 'halted').length} SPECOPS missions require arbitration</button> : null}
+    <SituationHeader onCentcom={window.agentHQ?.centcomState ? () => setShowCentcom(true) : undefined} centcomPendingCount={centcomPendingCount} onSpecops={() => setShowSpecops(true)} inventory={inventory} readiness={readiness} missionStartedAt={situation.missionStartedAt} hosts={settings?.hosts || []} hostFilter={hostFilter} onHostFilter={setHostFilter} onSearch={() => setShowSwitcher(true)} onSettings={() => setShowSettings(true)} onNew={() => setDialog(null)} collapsed={situation.rosterCollapsed || situation.zen} onToggleRoster={() => changeSituation({ rosterCollapsed: !situation.rosterCollapsed, zen: false })} />
+    {inventory?.missions?.some((r) => !['completed', 'cancelled'].includes(r.state)) ? <nav className="specops-progress" aria-label="SPECOPS stage progress">{inventory.missions.filter((r) => !['completed', 'cancelled'].includes(r.state)).map((r) => <button key={r.id} onClick={() => setShowSpecops(true)}><strong>{r.repo}</strong> {r.workflow.stages.map((s) => s.id === r.stage ? `[*${s.id}*]` : `[${s.id}]`).join(' → ')}</button>)}</nav> : null}
+    <div className="workspace" inert={showOverwatch && !overwatchUndocked}>
       <SessionList sessions={scoped} selectedKey={workspace.selectedKey} onSelect={openSession} providerFilter={providerFilter} onProviderFilter={setProviderFilter} stateFilter={stateFilter} onStateFilter={setStateFilter} onRefresh={() => void refresh()} onNew={() => setDialog(null)} loading={loading} metadata={workspace.metadata} pinning={pinning} onPin={(session) => void togglePin(session)} situation={situation} onSituation={changeSituation} attention={attention} projects={projects} projectFilter={projectFilter} onProjectFilter={setProjectFilter} pinnedOnly={pinnedOnly} onPinnedOnly={() => setPinnedOnly((value) => !value)} onInbox={() => setInbox((value) => !value)} onCleanup={() => setCleanupTarget(null)} onSettings={() => setShowSettings(true)} />
       <main className="detail-panel">
         {inventory?.hosts.some((h) => !h.connected) ? <div className="host-errors" role="status">{inventory.hosts.filter((h) => !h.connected).map((h) => <span key={h.id} title={h.error}>{h.name}: {h.error}</span>)}<button className="text-button" onClick={() => void refresh()}>Retry</button></div> : null}
@@ -311,17 +358,19 @@ export default function App() {
       </main>
     </div>
     {settings ? <HostMonitor hosts={settings.hosts} /> : null}
-    <footer className="statusbar"><span><span className={`connection-dot${inventory?.hosts.some((h) => !h.connected) || error ? ' offline' : ''}`} />{inventory ? `${inventory.hosts.filter((h) => h.connected).length}/${inventory.hosts.length} hosts connected` : 'Connecting…'}</span><span>{managedSessions.length.toLocaleString()} managed · {managedSessions.filter((s) => s.state === 'live' && !s.stale).length} live</span><span className="command-feedback" role="status" aria-live="polite">{commandKeys.prefix !== null ? `COMMAND: ${commandKeys.prefix || "_"} · Esc cancels` : commandKeys.status}</span><span className="status-fill" /><button className="text-button" onClick={() => setShowFlash((value) => !value)}>FLASH TRAFFIC {flashPending.filter((item) => item.state === 'pending').length}</button><button className="text-button" onClick={() => setShowKeyboardHelp(true)}><kbd>{commandBinding('commandMode', situation.shortcuts) || 'F1'}</kbd> COMMANDS</button><button className="text-button" onClick={() => cycleTarget(1)}><kbd>{commandBinding('cycleNext', situation.shortcuts)}</kbd> CYCLE B</button><button className="text-button" onClick={() => setShowOverwatch(true)}><kbd>{commandBinding('overwatch', situation.shortcuts)}</kbd> OVERWATCH</button></footer>
+    <footer className="statusbar"><span><span className={`connection-dot${inventory?.hosts.some((h) => !h.connected) || error ? ' offline' : ''}`} />{inventory ? `${inventory.hosts.filter((h) => h.connected).length}/${inventory.hosts.length} hosts connected` : 'Connecting…'}</span><span>{managedSessions.length.toLocaleString()} managed · {managedSessions.filter((s) => s.state === 'live' && !s.stale).length} live</span><span className="command-feedback" role="status" aria-live="polite">{commandKeys.prefix !== null ? `COMMAND: ${commandKeys.prefix || "_"} · Esc cancels` : commandKeys.status}</span><span className="status-fill" /><button className="text-button" onClick={() => setShowFlash((value) => !value)}>FLASH TRAFFIC {flashPending.filter((item) => item.state === 'pending').length}</button><button className="text-button" onClick={() => setShowKeyboardHelp(true)}><kbd>{commandBinding('commandMode', situation.shortcuts) || 'F1'}</kbd> COMMANDS</button><button className="text-button" onClick={() => cycleTarget(1)}><kbd>{commandBinding('cycleNext', situation.shortcuts)}</kbd> CYCLE B</button><button className="text-button" onClick={() => showOverwatchView()}><kbd>{commandBinding('overwatch', situation.shortcuts)}</kbd> OVERWATCH</button></footer>
     {error ? <div className="error-banner" role="alert"><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError('')}><X size={15} /></button></div> : null}
-    {settings && dialog !== undefined ? <CreateDialog resume={dialog} settings={settings} hostId={hostFilter === 'all' ? settings.hosts.find((h) => h.enabled)?.id || '' : hostFilter} onClose={closeCreate} onSubmit={(input) => void create(input)} busy={busy} error={error} /> : null}
-    {settings && showSettings ? <SettingsDialog settings={settings} onSave={saveSettings} onExternalSettings={(updated) => { setSettings(updated); void refresh(); }} onClose={closeSettings} /> : null}
+    {settings && dialog !== undefined ? <CreateDialog resume={dialog} settings={settings} hostId={hostFilter === 'all' ? settings.hosts.find((h) => h.enabled)?.id || '' : hostFilter} onClose={closeCreate} onSubmit={(input) => void create(input)} busy={busy} error={createError} /> : null}
+    {settings && showSettings ? <SettingsDialog onSpecops={() => { setShowSettings(false); setShowSpecops(true); }} settings={settings} onSave={saveSettings} onExternalSettings={(updated) => { setSettings(updated); void refresh(); }} onClose={closeSettings} /> : null}
     {settings && sitrepSource ? <SitRepDialog source={sitrepSource} settings={settings} initialSummary={workspace.metadata[sitrepSource.key]?.notes || ''} onLaunched={async (name, hostId) => { if (!window.agentHQ) throw new Error('Desktop bridge unavailable'); for (let attempt = 0; attempt < 6; attempt++) { const next = await window.agentHQ.inventory(); acceptInventory(next); const unit = next.sessions.find((item) => item.id === name && item.hostId === hostId); if (unit) { openSession(unit); return; } await new Promise((resolve) => setTimeout(resolve, 350)); } throw new Error('Recipient launched but has not appeared in inventory; refresh to find it.'); }} onClose={() => setSitrepSource(null)} /> : null}
+    {settings && showSpecops ? <SpecopsDialog settings={settings} onClose={() => setShowSpecops(false)} /> : null}
+    {settings && showCentcom ? <CentcomDialog settings={settings} onClose={() => setShowCentcom(false)} /> : null}
     {settings && showExercises ? <ExerciseDialog settings={settings} hostId={hostFilter === 'all' ? settings.hosts.find((host) => host.enabled)?.id || '' : hostFilter} onLaunched={() => void refresh()} onClose={() => setShowExercises(false)} /> : null}
     {showFlash ? <FlashTraffic requests={flashPending} selectedId={flashSelectedId} busy={flashBusy} error={flashError} onSelect={setFlashSelectedId} onDecide={(decision) => void decideFlash(decision)} onJump={jumpFlash} onClose={() => setShowFlash(false)} /> : null}
     {settings && cleanupTarget !== undefined ? <SessionCleanupDialog settings={settings} target={cleanupTarget} onSave={saveSettings} onClose={closeCleanup} /> : null}
     {deleteTarget ? <DeleteSessionDialog session={deleteTarget} onClose={closeDelete} onDeleted={() => { const keys = new Set([deleteTarget.key]); setWorkspace((current) => withoutSessions(current, keys)); setKnown((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !keys.has(key)))); setDeleteTarget(null); void refresh(); }} /> : null}
     {showSwitcher ? <QuickSwitcher sessions={sessions.filter((s) => isManagedSession(s) || s.kind === 'conversation' && s.canResume).map((s) => ({ ...s, cwd: `${s.cwd} ${projectFor(s, workspace.metadata)}` }))} callsigns={situation.callsigns} actions={commands} overrides={situation.shortcuts} onSelect={(s) => { openSession(known[s.key] || s); requestFocus(s.key); }} onSettings={() => setShowSettings(true)} onInbox={() => setInbox(true)} onClose={closeSwitcher} /> : null}
     {showKeyboardHelp ? <KeyboardHelp overrides={situation.shortcuts} actions={commands} onSave={(shortcuts) => changeSituation({ shortcuts })} onClose={closeKeyboardHelp} /> : null}
-    {showOverwatch ? <Overwatch sessions={managedSessions} situation={situation} attention={attention} onSelect={(session) => { setShowOverwatch(false); openSession(session); requestFocus(session.key); }} onClose={closeOverwatch} /> : null}
+    {showOverwatch && !overwatchUndocked ? <Overwatch onUndock={() => { void window.agentHQ?.undockOverwatch().catch((cause) => setError(String(cause))); }} sessions={managedSessions} situation={situation} attention={attention} onSelect={(session) => { setShowOverwatch(false); openSession(session); requestFocus(session.key); }} onClose={closeOverwatch} /> : null}
   </div>;
 }

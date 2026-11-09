@@ -22,6 +22,7 @@ const { phoneComponent } = require('./fixtures/phone-component.cjs');
   const view = phoneComponent('PhoneTerminal.tsx', props, { element: { clientWidth: 390, clientHeight: 400 }, globals: { ResizeObserver }, window: { open: (...args) => opened.push(args) }, modules: {
     '@xterm/xterm': { Terminal }, '@xterm/addon-fit': { FitAddon: class { fit() {} } },
     '../terminalLinks': { enableTerminalLinks: (_terminal, callback) => { links = callback; } },
+    '../terminalTouch': { enableTerminalTouchScroll: () => () => calls.push(['touchDisposed']) },
     './image': { imagePayload: async () => 'PNGDATA' },
     './clipboard': { readPhoneClipboard: async () => { if (clipboardFailure) throw clipboardFailure; return 'phone clipboard'; }, writePhoneClipboard: async (value) => { if (clipboardFailure) throw clipboardFailure; copied.push(value); } },
   } });
@@ -38,6 +39,6 @@ const { phoneComponent } = require('./fixtures/phone-component.cjs');
   clipboardFailure = new Error('Clipboard unavailable'); view.button('Paste text').props.onClick(); await view.flush(); assert.match(view.text(view.tree), /Clipboard unavailable/); view.button('Copy selection').props.onClick(); await view.flush();
   links('http://localhost:5173'); await view.flush(); assert.deepEqual(opened.pop(), ['https://desktop.ts.net:8443/handoff/once', '_blank', 'noopener,noreferrer']); assert.equal(view.find((node) => node.type === 'a').props.href, 'https://desktop.ts.net:8443/handoff/once');
   listeners.get('terminal:state')({ ...state, canControl: false }); view.render(); assert.equal(image().props.disabled, true); const previousUploads = calls.filter(([name]) => name === 'image:upload').length; image().props.onChange({ target: { files: [{}], value: 'chosen' } }); await view.flush(); assert.equal(calls.filter(([name]) => name === 'image:upload').length, previousUploads);
-  view.close();
+  view.close(); assert.ok(calls.some(([name]) => name === 'touchDisposed'));
   console.log('PASS phone terminal image receipts/failures, local clipboard controls, and development preview routing');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -94,13 +94,18 @@ const { PreviewGateway } = require('../electron/companion-preview.cjs');
 
     const edge = create(); edge.data.port = 65535; edge.data.url = 'https://desktop.ts.net:8443';
     const start = PreviewGateway.prototype.start;
-    PreviewGateway.prototype.start = async function() { assert.equal(this.port,65534); };
+    PreviewGateway.prototype.start = async function() { assert.equal(this.port,65533); };
     try {
       const edgeLink = await edge.previewUrl({client:{id:'web:edge'},device:{id:'phone'}},'terminal',target);
       assert.equal(new URL(edgeLink).origin,'https://desktop.ts.net:9443');
     } finally { PreviewGateway.prototype.start = start; await edge.dispose(); }
 
-    const blocked = create(); blocked.data.port = upstream.address().port - 1;
+    const coexist = create(); coexist.data.port = upstream.address().port - 1;
+    await coexist.previewUrl({client:{id:'web:coexist'},device:{id:'phone'}},'terminal',target);
+    assert.equal(coexist.preview.port, upstream.address().port + 1, 'Preview must coexist with the listener at gateway+1 used by desktop sync');
+    await coexist.dispose();
+
+    const blocked = create(); blocked.data.port = upstream.address().port - 2;
     const failedStart = blocked.previewUrl({client:{id:'web:blocked'},device:{id:'phone'}},'terminal',target);
     const failedAssertion = assert.rejects(failedStart,/Preview endpoint unavailable:.*Tailscale Serve endpoint/);
     await Promise.resolve();

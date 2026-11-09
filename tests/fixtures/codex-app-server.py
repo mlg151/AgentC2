@@ -13,6 +13,7 @@ if "--version" in sys.argv:
 root = Path(os.environ["AGENTC2_CODEX_FIXTURE_DIR"])
 settings = json.loads((root / "settings.json").read_text())
 thread_id = "native-thread"
+thread_cwd = root
 turn_id = None
 turn_number = 0
 interactive = {}
@@ -75,7 +76,9 @@ for line in sys.stdin:
     elif method == "account/read":
         reply(message, dict(account=None if settings.get("noAuth") else dict(type="apiKey"), requiresOpenaiAuth=True))
     elif method in ("thread/start", "thread/resume"):
+        time.sleep(settings.get("threadStartDelay", 0))
         thread_id = params.get("threadId", "native-thread")
+        thread_cwd = Path(params.get("cwd") or root)
         full = params.get("sandbox") == "danger-full-access" or settings.get("wrongRoe")
         metadata = dict(id=thread_id, sessionId="fixture-session", cliVersion="0.163.0", createdAt=0, updatedAt=0, cwd=str(root), ephemeral=False, modelProvider="fixture", preview="", projectId=None, source="appServer", status=dict(type="idle"), turns=[])
         reply(message, dict(thread=metadata, approvalPolicy="never" if full else params.get("approvalPolicy", "on-request"), approvalsReviewer="user", cwd=str(root), model="fixture", modelProvider="fixture", sandbox=dict(type="dangerFullAccess" if full else "readOnly")))
@@ -95,7 +98,23 @@ for line in sys.stdin:
         reply(message, dict(turn=turn()))
         notify("turn/started", dict(threadId=thread_id, turn=turn()))
         item_event(dict(id="user-" + turn_id, type="userMessage", content=[dict(type="text", text=text)]), True)
-        if text in ("approval", "question", "secret"):
+        if settings.get("centcomHoldDoctrine") and text.startswith("# CENTCOM control doctrine"):
+            pass  # Expose startup races hidden by an instantly completed bootstrap prompt.
+        elif settings.get("centcom") and text.startswith("<UNTRUSTED_FLEET_EVIDENCE>"):
+            plan_file = root / "centcom-plan.json"
+            responses = json.loads(plan_file.read_text()) if plan_file.exists() else []
+            answer = responses.pop(0) if responses else "Fixture observed the correlated result."
+            plan_file.write_text(json.dumps(responses))
+            with (root / "centcom-prompts.jsonl").open("a") as log:
+                log.write(json.dumps(text) + "\n")
+            finish(text=answer)
+        elif settings.get("specopsHold") and text.startswith("Mission "):
+            pass
+        elif settings.get("centcom") and text == "write-reviewed-artifact":
+            assert thread_cwd.resolve().is_relative_to(root.resolve())
+            (thread_cwd / "evidence.txt").write_text("Reviewed bridge artifact\n")
+            finish(text="Fixture wrote evidence.txt")
+        elif text in ("approval", "question", "secret"):
             if text == "approval":
                 item_event(dict(id="tool-" + turn_id, type="commandExecution", command="fixture write", cwd=str(root), commandActions=[], status="inProgress"))
                 interactive[100 + turn_number * 2] = "approval"

@@ -14,6 +14,7 @@ import time
 import unittest
 import uuid
 import warnings
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "electron"))
 from chat_adapters import ProviderRejected
@@ -42,6 +43,16 @@ class FixtureAdapter:
         self.journal.set_provider_session(self.session["id"], "native-" + self.session["id"])
         self.event("session.updated", dict(state="idle", detail="Fixture ready"))
         return dict(pid=self.process.pid)
+
+    def set_model(self, model):
+        if model == "rejected-model":
+            raise ProviderRejected("Fixture rejected model")
+        if model == "uncertain-model":
+            raise TimeoutError("Fixture model acknowledgement lost")
+        with (self.journal.directory / "models.txt").open("a") as stream:
+            stream.write(model + "\n")
+        self.session["model"] = model
+        return dict(model=model)
 
     def send(self, text, command_id):
         if text == "reject":
@@ -160,13 +171,31 @@ class WorkerProcessTests(unittest.TestCase):
             try:
                 return rpc(self.root, request("receipt", commandId=value["commandId"]))
             except ValueError as error:
-                # A client that deliberately disconnects without reading an ACK
-                # can race the worker's acceptance on another socket. Keep the
-                # same command ID and wait; never resubmit the command.
-                if str(error) == "Command receipt is unavailable; do not automatically resubmit":
-                    return None
-                raise
+                # A fire-and-forget command and this query use separate socket
+                # handlers. The query can arrive before durable acceptance.
+                if str(error) != "Command receipt is unavailable; do not automatically resubmit":
+                    raise
+                return None
         return poll(receipt, lambda value: value is not None and value["state"] in ("completed", "failed", "unknown"))
+
+    def test_model_command_receipt_idempotency_rejection_and_uncertainty(self):
+        identifier, _ = self.create()
+        value = command("model", dict(model="fixture-next"), identifier)
+        rpc(self.root, request("command", command=value))
+        self.assertEqual(self.wait_receipt(value)["state"], "completed")
+        rpc(self.root, request("command", command=value))
+        self.assertEqual((self.root / "models.txt").read_text().splitlines(), ["fixture-next"])
+        page = rpc(self.root, request("history", sessionId=identifier))
+        self.assertEqual(page["session"]["model"], "fixture-next")
+        native = page["session"]["providerSessionId"]
+        for model, expected in (("rejected-model", "failed"), ("uncertain-model", "unknown")):
+            value = command("model", dict(model=model), identifier)
+            rpc(self.root, request("command", command=value))
+            self.assertEqual(self.wait_receipt(value)["state"], expected)
+            page = rpc(self.root, request("history", sessionId=identifier))
+            self.assertEqual(page["session"]["model"], "fixture-next")
+            self.assertEqual(page["session"]["providerSessionId"], native)
+        self.assertEqual(page["session"]["state"], "unknown")
 
     def test_client_disconnect_does_not_kill_worker_or_owned_provider(self):
         identifier, created = self.create()
@@ -297,7 +326,7 @@ class BootstrapTests(unittest.TestCase):
                     location = Path(temporary) / ".cache" / "agentc2" / "chat-v1" / "worker.sock"
                     poll(lambda: not location.exists())
 
-    def test_detached_bootstrap_reconnect_and_version_conflict(self):
+    def test_detached_bootstrap_reconnect_and_compatible_upgrade(self):
         with tempfile.TemporaryDirectory(prefix="a2-bootstrap-") as temporary:
             root = Path(temporary) / "worker"
             source = Path(__file__).resolve().parents[1] / "electron"
@@ -306,11 +335,21 @@ class BootstrapTests(unittest.TestCase):
             payload = dict(chatFiles=files, request=request("health"))
             health = None
             try:
-                with warnings.catch_warnings():
+                launches = []
+                original_run = subprocess.run
+                def counted_run(args, **kwargs):
+                    if len(args) > 1 and Path(args[1]).name == "chat_launcher.py":
+                        launches.append(args)
+                        time.sleep(0.1)  # Let competing helpers reach bootstrap.
+                    return original_run(args, **kwargs)
+                with warnings.catch_warnings(), patch.object(subprocess, "run", side_effect=counted_run):
                     warnings.simplefilter("ignore", ResourceWarning)
                     with ThreadPoolExecutor(max_workers=4) as pool:
                         results = list(pool.map(lambda _: chat_remote(payload, root), range(4)))
                 health = results[0]
+                self.assertEqual(len(launches), 1, "Concurrent helpers must not leave delayed duplicate launchers")
+                self.assertEqual(Path(launches[0][1]), root / health["sourceDigest"] / "chat_launcher.py")
+                self.assertEqual(Path(launches[0][3]), root / health["sourceDigest"] / "chat_worker.py")
                 self.assertEqual(len({result["pid"] for result in results}), 1)
                 self.assertEqual(len({result["bootId"] for result in results}), 1)
                 self.assertEqual(chat_remote(payload, root), health)
@@ -318,17 +357,22 @@ class BootstrapTests(unittest.TestCase):
                 self.assertEqual(chat_remote(dict(payload, request=request("list")), root), [])
                 changed = dict(files)
                 changed["chat_adapters.py"] += "\n# upgrade fixture\n"
-                with self.assertRaisesRegex(ValueError, "different worker version"):
-                    chat_remote(dict(payload, chatFiles=changed), root)
+                self.assertEqual(chat_remote(dict(payload, chatFiles=changed), root), health)
                 self.assertEqual(chat_remote(payload, root), health)
                 self.assertEqual(root.stat().st_mode & 0o777, 0o700)
                 self.assertEqual((root / "worker.sock").stat().st_mode & 0o777, 0o600)
-                upgraded = chat_remote(dict(payload, chatFiles=changed, allowUpgrade=True), root)
+                with ThreadPoolExecutor(max_workers=4) as pool:
+                    upgrades = list(pool.map(lambda _: chat_remote(dict(payload, chatFiles=changed, allowUpgrade=True), root), range(4)))
+                upgraded = upgrades[0]
+                self.assertEqual(len({result["bootId"] for result in upgrades}), 1)
                 self.assertNotEqual(upgraded["bootId"], health["bootId"])
                 health = upgraded
             finally:
                 if health is not None:
-                    os.kill(health["pid"], signal.SIGTERM)
+                    try:
+                        os.kill(health["pid"], signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
                     poll(lambda: not (root / "worker.sock").exists())
                     try:
                         os.waitpid(health["pid"], 0)

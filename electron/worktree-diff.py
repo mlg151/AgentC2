@@ -3,11 +3,56 @@
 import hashlib
 import os
 import selectors
+import stat
 import subprocess
 import time
 
 DIFF_LIMIT = 512_000
 DIFF_FILES_LIMIT = 100
+
+
+def artifact_read(payload):
+    record = worktree_load(payload.get("operationId"))
+    if not record or not worktree_state(record, False)["owned"]:
+        raise ValueError("Artifact inspection requires an owned managed worktree")
+    relative = payload.get("path")
+    if not isinstance(relative, str) or not relative or len(relative) > 4096 or relative.startswith("/") or "\\" in relative or "\0" in relative:
+        raise ValueError("Artifact path must be relative to the owned worktree")
+    parts = relative.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        raise ValueError("Artifact path cannot traverse directories")
+    if any(part.lower().startswith((".env", "id_rsa", "id_ed25519")) or part.lower() in (".git", ".ssh", ".aws", ".npmrc", ".netrc") or "credential" in part.lower() or "secret" in part.lower() for part in parts):
+        raise ValueError("Credential and internal Git files are excluded from artifact inspection")
+    descriptors = []
+    try:
+        directory = os.open(record["path"], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        descriptors.append(directory)
+        for part in parts[:-1]:
+            directory = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+            descriptors.append(directory)
+        fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+        descriptors.append(fd)
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode) or before.st_size > 256000:
+            raise ValueError("Artifact must be a regular text file at most 256000 bytes")
+        data = bytearray()
+        while len(data) <= 256000:
+            chunk = os.read(fd, 16384)
+            if not chunk:
+                break
+            data.extend(chunk)
+        after = os.fstat(fd)
+        if len(data) > 256000 or (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+            raise ValueError("Artifact changed while reading; refresh and retry")
+        if b"\0" in data:
+            raise ValueError("Binary artifacts are unsupported")
+        revision = hashlib.sha256(data).hexdigest()
+        if payload.get("revision") and payload["revision"] != revision:
+            raise ValueError("Artifact revision changed; refresh before continuing")
+        return {"path": relative, "revision": revision, "sizeBytes": len(data), "text": data.decode("utf-8", "strict")}
+    finally:
+        for fd in reversed(descriptors):
+            os.close(fd)
 
 
 def diff_git(record, args, data=None, limit=DIFF_LIMIT):

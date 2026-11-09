@@ -11,6 +11,7 @@ const { phoneComponent } = require('./fixtures/phone-component.cjs');
   const view = phoneComponent('PhoneTools.tsx', props, { window: { agentHQ: api, confirm: () => true } });
   async function click(label) { const button = view.button(label); button.props.onClick(); await view.flush(); }
   async function open(label, name) { await click('Tools'); await click(label); return view.component(name); }
+  for (const [label, component] of [['CENTCOM', 'CentcomDialog'], ['SPECOPS', 'SpecopsDialog']]) { const dialog = await open(label, component); dialog.props.onClose(); view.render(); }
   assert.equal(view.button('Session tools').props['aria-expanded'], false);
   await click('Session tools');
   const inputs = view.all().filter((node) => ['input', 'textarea'].includes(node.type));
@@ -26,7 +27,7 @@ const { phoneComponent } = require('./fixtures/phone-component.cjs');
   assert.deepEqual(view.all().filter((node) => ['input', 'textarea'].includes(node.type)).map((node) => node.props.value), ['New external project', 'New handoff']);
   responses.set('metadata:update', new Error('Lost connection')); await click('Save notes & project'); assert.match(view.text(view.tree), /Lost connection/);
   await click('Reset fault baseline'); assert.ok(calls.some(([name, key]) => name === 'resetFault' && key === session.key));
-  let dialog = await open('Settings & remote access', 'SettingsDialog'); responses.set('saveSettings', { updated: true }); await dialog.props.onSave({ draft: true }); assert.deepEqual(settingsApplied.pop(), { updated: true }); dialog.props.onExternalSettings({ external: true }); assert.deepEqual(settingsApplied.pop(), { external: true }); dialog.props.onClose(); view.render();
+  let dialog = await open('Settings & remote access', 'SettingsDialog'); responses.set('saveSettings', { updated: true }); await dialog.props.onSave({ draft: true }); assert.deepEqual(settingsApplied.pop(), { updated: true }); dialog.props.onSpecops(); view.render(); view.component('SpecopsDialog').props.onClose(); view.render(); dialog.props.onExternalSettings({ external: true }); assert.deepEqual(settingsApplied.pop(), { external: true }); dialog.props.onClose(); view.render();
   dialog = await open('Joint Exercises', 'ExerciseDialog'); assert.equal(dialog.props.hostId, 'default'); dialog.props.onLaunched(); dialog.props.onClose(); view.render();
   dialog = await open('Search history', 'PhoneHistory'); dialog.props.onSelect(session); assert.equal(selected.pop(), session); view.render();
   dialog = await open('Clean up history', 'SessionCleanupDialog'); assert.equal(dialog.props.target, session); await dialog.props.onSave({ cleanup: true }); dialog.props.onClose(); view.render();

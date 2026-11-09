@@ -2,14 +2,15 @@
 import base64
 import os
 from pathlib import Path
+from helpers.python_sources import exec_sources
 import subprocess
 import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 scope = {"__name__": "agentc2_sitrep_test"}
-exec((ROOT / "electron" / "worktree-diff.py").read_text(), scope)
-exec((ROOT / "electron" / "sitrep.py").read_text(), scope)
+exec_sources(scope, (ROOT / "electron" / "worktree-diff.py"))
+exec_sources(scope, (ROOT / "electron" / "sitrep.py"))
 
 
 class SitRep(unittest.TestCase):

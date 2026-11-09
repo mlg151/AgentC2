@@ -76,7 +76,11 @@ class NativeTests(unittest.TestCase):
                     output, kind = b'{"input_tokens":20}', "application/json"
                 elif self.path.startswith("/v1/messages"):
                     fixture.requests.append(payload)
-                    output, kind = response(payload["model"], len(fixture.requests), fixture.question, fixture.parallel), "text/event-stream"
+                    if not payload.get("stream"):
+                        output = json.dumps(dict(id="msg_model_validation", type="message", role="assistant", model=payload["model"], content=[dict(type="text", text="Validated")], stop_reason="end_turn", stop_sequence=None, usage=dict(input_tokens=2, output_tokens=1))).encode()
+                        kind = "application/json"
+                    else:
+                        output, kind = response(payload["model"], len(fixture.requests), fixture.question, fixture.parallel), "text/event-stream"
                 else:
                     self.send_error(404)
                     return
@@ -130,6 +134,17 @@ class NativeTests(unittest.TestCase):
         self.journal.accept(dict(protocolVersion=1, commandId=str(uuid.uuid4()), operation="respond", sessionId=self.identifier, payload=payload))
         self.adapter.respond(payload)
         return self.poll(lambda page: page["session"]["state"] == "idle")
+
+    def test_model_change_between_native_turns_preserves_context(self):
+        self.start(profile="full", prompt="MODEL_CONTEXT_MARKER")
+        self.poll(lambda page: page["session"]["state"] == "idle")
+        native = self.adapter.native_id
+        self.adapter.set_model("claude-fixture-second")
+        self.adapter.send("Continue after model switch", str(uuid.uuid4()))
+        self.poll(lambda page: sum(event["type"] == "turn.completed" for event in page["events"]) == 2)
+        self.assertEqual(self.adapter.native_id, native)
+        self.assertEqual(self.requests[-1]["model"], "claude-fixture-second")
+        self.assertIn("MODEL_CONTEXT_MARKER", json.dumps(self.requests[-1]))
 
     def test_gated_allow_executes_the_exact_owned_fixture_write(self):
         self.start()

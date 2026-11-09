@@ -8,6 +8,7 @@ const os = require('node:os');
 const net = require('node:net');
 const crypto = require('node:crypto');
 const { createService } = require('../electron/service.cjs');
+const { stopFixtureProcess } = require('./helpers/stop-fixture-process.cjs');
 const root = path.resolve(__dirname, '..');
 const quote = (value) => "'" + String(value).replaceAll("'", "'\\''") + "'";
 async function poll(check, label) { for(let i=0;i<100;i++){const result=await check();if(result)return result;await new Promise((resolve)=>setTimeout(resolve,100));}throw new Error(label); }
@@ -25,7 +26,8 @@ async function poll(check, label) { for(let i=0;i<100;i++){const result=await ch
     const key=path.join(directory,'client-key'), hostKey=path.join(directory,'host-key');
     for(const file of [key,hostKey])execFileSync('ssh-keygen',['-q','-t','ed25519','-N','','-f',file]);
     const knownHosts=path.join(directory,'known-hosts');fs.writeFileSync(knownHosts,`[127.0.0.1]:${port} ${fs.readFileSync(hostKey+'.pub','utf8')}`);
-    const tmuxSocket=path.join(directory,'tmux.sock');script(path.join(remoteBin,'tmux'),`exec /usr/bin/tmux -S ${quote(tmuxSocket)} "$@"`);
+    // Exercise tty startup that discards input queued before attachment is ready.
+    const tmuxSocket=path.join(directory,'tmux.sock');script(path.join(remoteBin,'tmux'),`if [ "$1" = attach-session ]; then python3 -c 'import termios,time; time.sleep(0.2); termios.tcflush(0, termios.TCIFLUSH)'; fi\nexec /usr/bin/tmux -S ${quote(tmuxSocket)} "$@"`);
     fs.copyFileSync(path.join(root,'tests/fixtures/codex-app-server.py'),path.join(remoteBin,'codex'));fs.chmodSync(path.join(remoteBin,'codex'),0o700);fs.writeFileSync(path.join(home,'settings.json'),'{}');
     const force=path.join(directory,'remote-command');script(force,`export HOME=${quote(home)}\nexport PATH=${quote(remoteBin+':/usr/local/bin:/usr/bin:/bin')}\nexport AGENTC2_CODEX_FIXTURE_DIR=${quote(home)}\nexec /bin/bash -c "$SSH_ORIGINAL_COMMAND"`);
     const config=path.join(directory,'sshd_config');fs.writeFileSync(config,`Port ${port}\nListenAddress 127.0.0.1\nHostKey ${hostKey}\nPidFile ${directory}/sshd.pid\nAuthorizedKeysFile ${key}.pub\nStrictModes no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nUsePAM no\nAllowUsers ${os.userInfo().username}\nForceCommand ${force}\n`);
@@ -48,6 +50,10 @@ async function poll(check, label) { for(let i=0;i<100;i++){const result=await ch
     let page=await poll(async()=>{const value=await service.chats.history(desktop,handle,0);return value.events.some((event)=>event.type==='turn.completed')&&value;},'Initial instructions were not executed');
     assert.equal(page.events.filter((event)=>event.type==='message.completed'&&event.data.role==='user').length,1,'Create retry duplicated initial instructions');
     const inventory=await service.inventory();const unit=inventory.sessions.find((item)=>item.id===first.name);assert.equal(unit.transport,'chat');assert.equal(unit.chatSessionId,first.chatSessionId);assert.equal(unit.providerSessionId,'native-thread');assert.equal(unit.telemetry.totalTokens,150);
+    assert.equal(await service.renameSession(unit.key,'Reviewed structured title'),'Reviewed structured title');
+    assert.equal((await service.inventory()).sessions.find((item)=>item.key===unit.key).title,'Reviewed structured title');
+    assert.equal((await service.chats.history(desktop,handle,0)).session.title,'Reviewed structured title');
+    await service.renameSession(unit.key,launch.title);
     service.chats.close(desktop,handle); // No viewers remain; work must continue.
     const second=await service.chats.open(desktop,first.chatSessionId,'default');await service.chats.ready(desktop,second,0);
     await service.chats.submit(desktop,second,{protocolVersion:1,commandId:crypto.randomUUID(),operation:'send',sessionId:first.chatSessionId,payload:{text:'approval'}});
@@ -194,17 +200,32 @@ async function poll(check, label) { for(let i=0;i<100;i++){const result=await ch
     assert.equal((await service.inventory()).sessions.some((item)=>item.key===unit.key),false,'Stopped chat was not deleted');
     console.log('PASS managed deletion: ownership, unknown stop receipts, confirmed live/stopped removal, persistent tombstones, and stale-save protection');
     if(local){
+      // The disposable Linux login shell gets a visible readiness marker.
+      // A spawned tmux client is not yet an acknowledgement that input is safe.
+      fs.writeFileSync(path.join(home,'.bash_profile'),"PS1='AGENTC2_LOCAL_READY> '\n");
       const shell=await service.create({provider:'terminal',hostId:'default',cwd:repo,title:'Local terminal fixture'});
-      const terminal=await service.terminals.open(desktop,shell.name,'default',100,30);service.terminals.ready(desktop,terminal);
+      const terminal=await service.terminals.open(desktop,shell.name,'default',100,30);
+      const record=service.terminals.sessions.get('default/'+shell.name);
+      // This service-only viewer must answer VT queries as a real xterm does.
+      const replies=record.mirror.onData((data)=>record.terminal.write(data));
+      await service.terminals.ready(desktop,terminal);
+      await poll(async()=>record.serializer.serialize().includes('AGENTC2_LOCAL_READY>'),'Local login shell did not become ready');
       await service.terminals.write(desktop,terminal,'printf \'LOCAL_PTY_WITNESS\\n\'; for i in $(seq 1 80); do echo local-scroll-$i; done\r');
       await poll(async()=>service.terminals.sessions.get('default/'+shell.name)?.serializer.serialize().includes('local-scroll-80'),'Local terminal input/output not attached');
       const uploaded=await service.uploadClipboardImage(desktop,terminal,fs.readFileSync(path.join(root,'assets/app-icon.png')));
       assert.ok(uploaded.startsWith(home+'/'));assert.equal(fs.statSync(uploaded).mode&0o777,0o600);
       await service.terminals.scrollRemote(desktop,terminal,'up',20);
-      service.terminals.close(desktop,terminal);
-      const reattached=await service.terminals.open(desktop,shell.name,'default',100,30);service.terminals.ready(desktop,reattached);
+      await service.terminals.scrollRemote(desktop,terminal,'latest',1);
+      replies.dispose();service.terminals.close(desktop,terminal);
+      const reattached=await service.terminals.open(desktop,shell.name,'default',100,30);
+      const reattachedRecord=service.terminals.sessions.get('default/'+shell.name);
+      const reattachedReplies=reattachedRecord.mirror.onData((data)=>reattachedRecord.terminal.write(data));
+      await service.terminals.ready(desktop,reattached);
+      await poll(()=>service.terminals.state(desktop,reattached).connection==='connected','Reattached tmux never acknowledged startup');
+      await service.terminals.write(desktop,reattached,"printf 'REATTACH_%s\\n' 'INPUT_RETAINED'\r");
+      await poll(()=>reattachedRecord.serializer.serialize().includes('REATTACH_INPUT_RETAINED'),'First command after reattach was lost during tty startup');
       await poll(async()=>(await service.terminals.retained(desktop,reattached)).text.includes('LOCAL_PTY_WITNESS'),'Local terminal history lost after detach');
-      await service.deleteSession(desktop,'default/tmux:'+shell.name);service.terminals.close(desktop,reattached);
+      await service.deleteSession(desktop,'default/tmux:'+shell.name);reattachedReplies.dispose();service.terminals.close(desktop,reattached);
       assert.equal((await service.inventory()).sessions.some((item)=>item.id===shell.name),false,'Deleted terminal returned to inventory');
       const health=await service.health();assert.equal(health[0].connected,true);assert.ok(health[0].memoryTotal>0);
     }
@@ -214,10 +235,17 @@ async function poll(check, label) { for(let i=0;i<100;i++){const result=await ch
     if(phoneProxy){await phoneProxy.page.screenshot({path:path.join(os.tmpdir(),'agentc2-chat-phone-failure.png'),fullPage:true}).catch(()=>{});console.error('Phone fixture state:',await phoneProxy.page.locator('.phone-main').innerText().catch(()=>''));}
     throw error;
   }finally{
-    await phoneProxy?.close().catch(()=>{});await browser?.close().catch(()=>{});await app?.close().catch(()=>{});service?.chats.closeAll();service?.terminals.closeAll();
-    if(workerPid){try{process.kill(workerPid,'SIGTERM');}catch{}}
+    await phoneProxy?.close().catch(()=>{});await browser?.close().catch(()=>{});await app?.close().catch(()=>{});
+    service?.centcom.dispose();service?.specops.dispose();
+    const records=service?[...service.chats.sessions.values()]:[];
+    service?.chats.closeAll();service?.terminals.closeAll();
+    await Promise.allSettled(records.flatMap(record=>[record.flight,record.queue]));
+    // Finish inventory/observer requests before stopping the worker they use.
+    if(service&&workerPid){await service.inventory();await service.flashQueue();}
+    if(workerPid)await stopFixtureProcess(workerPid);
     try{execFileSync('/usr/bin/tmux',['-S',path.join(directory,'tmux.sock'),'kill-server'],{stdio:'ignore'});}catch{}
     service?.tunnels.closeAll();fixtureServer?.closeAllConnections();if(fixtureServer)await new Promise((resolve)=>fixtureServer.close(resolve));
-    daemon?.kill();process.env.PATH=originalPath;if(originalHome===undefined)delete process.env.HOME;else process.env.HOME=originalHome;if(originalFixture===undefined)delete process.env.AGENTC2_CODEX_FIXTURE_DIR;else process.env.AGENTC2_CODEX_FIXTURE_DIR=originalFixture;fs.rmSync(directory,{recursive:true,force:true});
+    if(daemon?.pid)await stopFixtureProcess(daemon.pid);
+    process.env.PATH=originalPath;if(originalHome===undefined)delete process.env.HOME;else process.env.HOME=originalHome;if(originalFixture===undefined)delete process.env.AGENTC2_CODEX_FIXTURE_DIR;else process.env.AGENTC2_CODEX_FIXTURE_DIR=originalFixture;fs.rmSync(directory,{recursive:true,force:true});
   }
 })().catch((error)=>{console.error(error);process.exitCode=1;});

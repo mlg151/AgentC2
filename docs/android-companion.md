@@ -17,13 +17,13 @@ Clipboard operations use the phone clipboard. On private HTTP, browsers without 
 Development websites run on a separate origin from the companion. For the default gateway port 43127, configure an extra tailnet-only listener:
 
 ```sh
-tailscale serve --bg --https=8443 http://127.0.0.1:43128
+tailscale serve --bg --https=8443 http://127.0.0.1:43129
 ```
 
-The local preview port is the gateway port plus one (65534 when the gateway uses 65535). If the companion already uses HTTPS 8443, use HTTPS 9443 for previews. Private-IP deployments instead forward tailnet TCP 8443 to the same local preview port:
+The local preview port is the gateway port plus two (minus two for gateway ports 65534–65535), keeping the default preview port separate from desktop sync. If the companion already uses HTTPS 8443, use HTTPS 9443 for previews. Private-IP deployments instead forward tailnet TCP 8443 to the same local preview port:
 
 ```sh
-tailscale serve --bg --tcp=8443 tcp://127.0.0.1:43128
+tailscale serve --bg --tcp=8443 tcp://127.0.0.1:43129
 ```
 
 Do not enable Funnel. The preview listener starts when a paired device opens a development URL. Preview handoffs expire after 60 seconds and are single-use; preview sessions expire after 15 minutes and stop working when the device is revoked. One preview destination is active per browser cookie jar; opening another destination replaces it for subsequent requests. Refresh by opening the URL again from AgentC2.

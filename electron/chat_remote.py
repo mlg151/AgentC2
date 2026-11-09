@@ -1,9 +1,10 @@
 """Ephemeral helper entrypoint for the detached worker's private Unix socket."""
 
-CHAT_WORKER_FILES = ("chat_worker.py", "chat_runtime.py", "chat_protocol.py", "chat_journal.py", "chat_adapters.py", "chat-protocol.json", "chat_format.py", "chat_codex.py", "chat_codex_schema.py", "chat-codex-schema.json", "chat_antigravity.py", "chat_antigravity_cli.py", "chat_claude.py")
+CHAT_WORKER_FILES = ("chat_worker.py", "chat_runtime.py", "chat_protocol.py", "chat_journal.py", "chat_adapters.py", "chat-protocol.json", "chat_format.py", "chat_codex.py", "chat_codex_schema.py", "chat-codex-schema.json", "chat_antigravity.py", "chat_antigravity_cli.py", "chat_claude.py", "chat_claude_history.py", "chat_launcher.py", "chat_opencode.py")
 
 
 def chat_remote(payload, directory=None):
+    import fcntl
     import hashlib
     import json
     import os
@@ -28,6 +29,9 @@ def chat_remote(payload, directory=None):
         digest = payload.get("sourceDigest")
         if not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest):
             raise ValueError("Invalid remote chat worker digest")
+    request = payload.get("request")
+    if not isinstance(request, dict):
+        raise ValueError("Invalid chat request")
     root = Path(directory) if directory is not None else Path.home() / ".cache" / "agentc2" / "chat-v1"
 
     def owned_directory(location):
@@ -61,58 +65,90 @@ def chat_remote(payload, directory=None):
             return result["result"]
 
     health_request = dict(protocolVersion=1, action="health")
-    try:
-        health = rpc(health_request)
-    except (FileNotFoundError, ConnectionRefusedError):
-        health = None
-    if health is None:
-        if files is None:
-            raise ValueError("Remote chat worker is unavailable; reconnect to bootstrap it again")
-        code = root / digest
-        owned_directory(code)
-        for name, value in files.items():
-            temporary = code / (name + "." + uuid.uuid4().hex + ".tmp")
-            descriptor = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
-            try:
-                with os.fdopen(descriptor, "w", encoding="utf-8") as output:
-                    output.write(value)
-                    output.flush()
-                    os.fsync(output.fileno())
-                os.replace(temporary, code / name)
-            finally:
-                temporary.unlink(missing_ok=True)
-        log_path = root / "worker.log"
-        log = os.open(log_path, os.O_CREAT | os.O_APPEND | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+
+    def read_health():
         try:
-            info = os.fstat(log)
-            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1:
-                raise ValueError("Unsupported worker log")
-            os.fchmod(log, 0o600)
-            # Reap a short-lived launcher while the detached worker outlives the
-            # ephemeral helper, without leaving a live Popen object behind.
-            launcher = "import os,subprocess,sys; subprocess.Popen(sys.argv[1:],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=None,start_new_session=True,close_fds=True); os._exit(0)"
-            runtime = subprocess.run([sys.executable, str(code / "chat_runtime.py"), str(root)], capture_output=True, text=True, timeout=30, check=True).stdout.strip()
-            subprocess.run([sys.executable, "-c", launcher, runtime, str(code / "chat_worker.py"), "--directory", str(root), "--source-digest", digest], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log, close_fds=True, check=True)
-        finally:
-            os.close(log)
-        for _ in range(100):
+            result = rpc(health_request)
+        except (FileNotFoundError, ConnectionRefusedError):
+            return None
+        if result.get("protocolVersion") != 1:
+            raise ValueError("Unsupported chat worker protocol; active sessions have been preserved")
+        return result
+
+    def can_upgrade(health):
+        return (health is not None and health.get("sourceDigest") != digest
+                and payload.get("allowUpgrade") is True and files is not None
+                and health.get("canRetire") is True)
+
+    # A source digest identifies code, not wire compatibility. Keep serving
+    # existing sessions on their owning worker until it can retire safely.
+    # Shared locks allow concurrent RPCs (including long SDK preparations),
+    # while an exclusive lock fences the entire retirement/bootstrap handoff.
+    bootstrap_descriptor = os.open(root / "bootstrap.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(bootstrap_descriptor, "w") as bootstrap_lock:
+        info = os.fstat(bootstrap_lock.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1:
+            raise ValueError("Unsupported worker bootstrap lock")
+        fcntl.flock(bootstrap_lock, fcntl.LOCK_SH)
+        health = read_health()
+        if health is not None and not can_upgrade(health):
+            return health if request == health_request else rpc(request)
+        fcntl.flock(bootstrap_lock, fcntl.LOCK_EX)
+        # Another helper may have launched/upgraded or accepted work while we
+        # changed locks. Never act on the earlier health snapshot.
+        health = read_health()
+        if can_upgrade(health):
             try:
-                health = rpc(health_request)
-                break
-            except (FileNotFoundError, ConnectionRefusedError):
-                time.sleep(0.05)
+                rpc(dict(protocolVersion=1, action="retire"))
+            except ValueError:
+                # Older helpers only lock their health check. A command or SDK
+                # preparation can win that race; the worker remains authoritative.
+                current = read_health()
+                if current is None or current.get("bootId") != health.get("bootId") or current.get("canRetire") is not False:
+                    raise
+                health = current
+            else:
+                for _ in range(100):
+                    if not location.exists():
+                        health = None
+                        break
+                    time.sleep(0.05)
+                else:
+                    raise ValueError("Previous chat worker did not finish retiring; reconnect without resending uncertain commands")
         if health is None:
-            raise ValueError("Remote chat worker did not start; inspect its private worker.log")
-    if health.get("protocolVersion") != 1 or health.get("sourceDigest") != digest:
-        if payload.get("allowUpgrade") is True and health.get("canRetire") is True and files is not None:
-            rpc(dict(protocolVersion=1, action="retire"))
+            if files is None:
+                raise ValueError("Remote chat worker is unavailable; reconnect to bootstrap it again")
+            code = root / digest
+            owned_directory(code)
+            for name, value in files.items():
+                temporary = code / (name + "." + uuid.uuid4().hex + ".tmp")
+                descriptor = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+                try:
+                    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+                        output.write(value)
+                        output.flush()
+                        os.fsync(output.fileno())
+                    os.replace(temporary, code / name)
+                finally:
+                    temporary.unlink(missing_ok=True)
+            log_path = root / "worker.log"
+            log = os.open(log_path, os.O_CREAT | os.O_APPEND | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+            try:
+                info = os.fstat(log)
+                if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1:
+                    raise ValueError("Unsupported worker log")
+                os.fchmod(log, 0o600)
+                # Reap a short-lived launcher while the detached worker outlives the
+                # ephemeral helper, without leaving a live Popen object behind.
+                runtime = subprocess.run([sys.executable, str(code / "chat_runtime.py"), str(root)], capture_output=True, text=True, timeout=30, check=True).stdout.strip()
+                subprocess.run([sys.executable, str(code / "chat_launcher.py"), runtime, str(code / "chat_worker.py"), "--directory", str(root), "--source-digest", digest], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log, close_fds=True, check=True)
+            finally:
+                os.close(log)
             for _ in range(100):
-                if not location.exists():
-                    return chat_remote(payload, root)
+                health = read_health()
+                if health is not None:
+                    break
                 time.sleep(0.05)
-            raise ValueError("Previous chat worker did not finish retiring; reconnect without resending uncertain commands")
-        raise ValueError("A different worker version is running; stop its managed chat sessions before upgrading the worker")
-    request = payload.get("request")
-    if not isinstance(request, dict):
-        raise ValueError("Invalid chat request")
-    return health if request == health_request else rpc(request)
+            if health is None:
+                raise ValueError("Remote chat worker did not start; inspect its private worker.log")
+        return health if request == health_request else rpc(request)

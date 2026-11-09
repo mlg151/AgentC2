@@ -25,3 +25,5 @@ companion-invitation.json
 # Coverage reports and local Android build configuration.
 coverage/
 android/local.properties
+# CI suite reports and browser diagnostics.
+test-results/

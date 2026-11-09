@@ -78,8 +78,10 @@ export function reduceChatTimeline(state: ChatTimeline, page: Pick<ChatPage, 'ev
     }
   }
   for (const [id, prefix] of prefixes) {
-    const item = indexed.get(id);
-    if (item?.kind === 'message' && !item.complete) indexed.set(id, { ...item, text: prefix + item.text });
+    // Prefix keys are added only for existing messages. No event removes rows
+    // or changes a message key's kind before this synchronous flush.
+    const item = indexed.get(id) as Extract<ChatItem, { kind: 'message' }>;
+    if (!item.complete) indexed.set(id, { ...item, text: prefix + item.text });
   }
   const pending = new Map(page.pendingRequests.map((request) => [request.requestId, request.state]));
   for (const [id, item] of indexed) if (item.kind === 'request') {

@@ -114,11 +114,12 @@ export function TerminalView({ terminalId, visible, focused = true }: { terminal
       if (activeIdRef.current && controlRef.current) void window.agentHQ?.writeTerminal(activeIdRef.current, data).catch(showError);
     });
     const disposeSelection = terminal.onSelectionChange(() => setHasSelection(terminal.hasSelection()));
-    terminal.attachCustomWheelEventHandler((event) => {
+    const onWheel = (event: WheelEvent) => {
       const id = activeIdRef.current;
-      if (!controlRef.current) return true;
-      if (!id || !event.deltaY) return true;
+      if (!controlRef.current) return;
+      if (!id || !event.deltaY) return;
       event.preventDefault();
+      event.stopImmediatePropagation();
       const amount = event.deltaMode === 1 ? Math.abs(event.deltaY) : Math.ceil(Math.abs(event.deltaY) / 40);
       wheelPending.current += Math.sign(event.deltaY) * Math.max(3, Math.min(amount, 60));
       if (wheelTimer.current === null && !wheelFlight.current) {
@@ -135,8 +136,10 @@ export function TerminalView({ terminalId, visible, focused = true }: { terminal
           void flight.finally(() => { if (wheelFlight.current === flight) wheelFlight.current = null; });
         }, 35);
       }
-      return false;
-    });
+    };
+    // Capture before xterm's viewport consumes wheel events. Controlled views
+    // scroll through tmux/provider policy; observers keep local-only scrolling.
+    element.addEventListener('wheel', onWheel, { capture: true, passive: false });
     terminal.attachCustomKeyEventHandler((event) => {
       const key = event.key.toLowerCase();
       const modifier = event.ctrlKey || event.metaKey;
@@ -188,15 +191,21 @@ export function TerminalView({ terminalId, visible, focused = true }: { terminal
     });
     const offState = window.agentHQ?.onTerminalState((state) => {
       if (state.id !== activeIdRef.current) return;
+      const wasWritable = controlRef.current;
       setControl(state); controlRef.current = state.canControl && state.connection === 'connected';
       terminal.options.disableStdin = !controlRef.current;
       if (!state.canControl) terminal.resize(state.cols, state.rows);
+      else if (!wasWritable && controlRef.current && snapshotReady.current) {
+        fitRef.current?.fit();
+        void window.agentHQ?.resizeTerminal(state.id, terminal.cols, terminal.rows).catch(showError);
+      }
     });
     return () => {
       resizeObserver.disconnect();
       if (wheelTimer.current !== null) clearTimeout(wheelTimer.current);
       disposeInput.dispose();
       disposeSelection.dispose();
+      element.removeEventListener('wheel', onWheel, true);
       element.removeEventListener('paste', onPaste, true);
       element.removeEventListener('mousedown', suppressRemoteContextMenu, true);
       element.removeEventListener('mouseup', suppressRemoteContextMenu, true);
@@ -269,7 +278,7 @@ export function TerminalView({ terminalId, visible, focused = true }: { terminal
 
   return <div className={`terminal-console${visible ? '' : ' terminal-hidden'}`}>
     <div className="terminal-utilities">
-      {terminalId && control ? <><span className="control-owner">{control.connection === 'reconnecting' ? 'SSH reconnecting…' : control.canControl ? 'You control' : `${control.controller?.name || 'No device'} controls`}</span>{!control.canControl ? <button disabled={control.connection !== 'connected'} onClick={() => void window.agentHQ?.takeTerminal(terminalId).then((state) => { setControl(state); controlRef.current = true; fitRef.current?.fit(); const terminal = terminalRef.current; if (terminal) { terminal.options.disableStdin = false; void window.agentHQ?.resizeTerminal(terminalId, terminal.cols, terminal.rows).catch(showError); terminal.focus(); } }).catch(showError)}>Take control</button> : null}</> : null}
+      {terminalId && control ? <><span className="control-owner">{control.connection === 'connecting' ? 'Connecting terminal…' : control.connection === 'reconnecting' ? 'SSH reconnecting…' : control.canControl ? 'You control' : `${control.controller?.name || 'No device'} controls`}</span>{!control.canControl ? <button disabled={control.connection !== 'connected'} onClick={() => void window.agentHQ?.takeTerminal(terminalId).then((state) => { setControl(state); controlRef.current = true; fitRef.current?.fit(); const terminal = terminalRef.current; if (terminal) { terminal.options.disableStdin = false; void window.agentHQ?.resizeTerminal(terminalId, terminal.cols, terminal.rows).catch(showError); terminal.focus(); } }).catch(showError)}>Take control</button> : null}</> : null}
       <span className="terminal-hint" role="status">{feedback || 'Scroll for history · Drag to select'}</span>
       <button title={`Search retained history (${primaryModifier}+F)`} onClick={() => setSearchOpen(true)}><Search size={14} /> Find</button>
       <button title="Return to the latest output" onClick={() => void latest().catch(showError)}><ArrowDownToLine size={14} /> Latest</button>

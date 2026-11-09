@@ -1,5 +1,6 @@
 """Exit evidence must stay authoritative when tmux lacks a wait status."""
 from pathlib import Path
+from helpers.python_sources import exec_sources
 import json
 import os
 import sqlite3
@@ -12,14 +13,97 @@ from unittest.mock import patch
 
 
 scope = {"__name__": "agentc2_helper_test"}
-exec((Path(__file__).resolve().parents[1] / "electron" / "provider_telemetry.py").read_text(), scope)
-exec((Path(__file__).resolve().parents[1] / "electron" / "remote.py").read_text(), scope)
+exec_sources(scope, (Path(__file__).resolve().parents[1] / "electron" / "provider_telemetry.py"))
+exec_sources(scope, (Path(__file__).resolve().parents[1] / "electron" / "remote.py"))
+
+
+class LocalRequirements(unittest.TestCase):
+    def test_claude_native_kinds_stay_within_inventory_contract(self):
+        with tempfile.TemporaryDirectory(prefix="agentc2-claude-kinds-") as directory:
+            agents = [dict(id="fixture-" + kind, kind=kind, state="live") for kind in ("interactive", "background", "future-native-kind")]
+            response = subprocess.CompletedProcess([], 0, stdout=json.dumps(agents))
+            with patch.dict(scope, {"HOME": Path(directory), "run": lambda *args, **kwargs: response}):
+                sessions = scope["claude_sessions"]()
+            self.assertEqual([s["kind"] for s in sessions], ["conversation", "background", "background"])
+            self.assertTrue(all(s["canResume"] and not s.get("managed") and not s.get("canStop") for s in sessions))
+
+    def test_noninteractive_ssh_finds_user_local_cli_without_overriding_path(self):
+        with tempfile.TemporaryDirectory(prefix="agentc2-cli-path-") as directory:
+            home = Path(directory)
+            local_bin = home / ".local" / "bin"
+            local_bin.mkdir(parents=True)
+            binary = local_bin / "codex"
+            binary.write_text("#!/bin/sh\nexit 0\n")
+            binary.chmod(0o700)
+            with patch.dict(os.environ, {"PATH": "/usr/bin:/bin"}), patch.object(Path, "home", return_value=home):
+                helper = {"__name__": "provider_path_fixture"}
+                exec_sources(helper, (Path(__file__).resolve().parents[1] / "electron" / "remote.py"))
+                self.assertEqual(os.environ["PATH"].split(os.pathsep)[:2], ["/usr/bin", "/bin"])
+                self.assertEqual(shutil.which("codex"), str(binary))
+
+    def test_missing_tmux_fails_before_inventory_or_launch_side_effects(self):
+        with tempfile.TemporaryDirectory(prefix="agentc2-no-tmux-") as directory:
+            helper = {"__name__": "local_requirements_fixture"}
+            exec_sources(helper, (Path(__file__).resolve().parents[1] / "electron" / "remote.py"))
+            exec_sources(helper, (Path(__file__).resolve().parents[1] / "electron" / "worktrees.py"))
+            home = Path(directory)
+            with patch.dict(os.environ, {"PATH": directory}), patch.dict(helper, {"HOME": home, "HOOK_ROOT": home / ".cache" / "agent-hq"}):
+                for local in (True, False):
+                    for action, transport in (("inventory", None), ("create", "terminal"), ("create", "chat"), ("worktree_launch", "terminal")):
+                        with self.subTest(local=local, action=action, transport=transport):
+                            payload = dict(localHost=local, provider="codex", cwd=directory, transport=transport, hookSource="# fixture")
+                            with self.assertRaisesRegex(ValueError, "tmux is required.*[Ii]nstall"):
+                                helper[action](payload)
+                            self.assertFalse((home / ".cache").exists(), "Preflight must precede hooks and chat reservations")
+
+
+class CentcomWorkspace(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="agentc2-centcom-workspace-")
+        self.addCleanup(self.temporary.cleanup)
+        self.home = Path(self.temporary.name)
+        home_patch = patch.dict(scope, {"HOME": self.home})
+        home_patch.start()
+        self.addCleanup(home_patch.stop)
+        self.root = self.home / ".cache" / "agentc2" / "centcom"
+
+    def test_utf8_limit_and_atomic_replacement(self):
+        content = "😀" * 250000
+        result = scope["centcom_sync"]({"files": {"SITUATION.json": content}})
+        self.assertEqual(result, {"path": str(self.root), "written": ["SITUATION.json"]})
+        target = self.root / "SITUATION.json"
+        self.assertEqual(target.stat().st_size, 1_000_000)
+        self.assertEqual(target.read_text(), content)
+        with self.assertRaisesRegex(ValueError, "Unsupported or oversized CENTCOM file"):
+            scope["centcom_sync"]({"files": {"SITUATION.json": content + "x"}})
+        self.assertEqual(target.read_text(), content)
+        scope["centcom_sync"]({"files": {"SITUATION.json": "{}"}})
+        self.assertEqual(target.read_text(), "{}")
+        scope["centcom_sync"]({"files": {"CAPABILITIES.json": '{"version":1}'}})
+        self.assertEqual((self.root / "CAPABILITIES.json").read_text(), '{"version":1}')
+        self.assertEqual(list(self.root.glob("*.tmp")), [])
+
+    def test_file_allowlist_and_symlink_protection(self):
+        for name, content in [("../outside", "text"), ("OTHER.json", "{}"), ("SITUATION.json", {})]:
+            with self.subTest(name=name, content=content):
+                with self.assertRaisesRegex(ValueError, "Unsupported or oversized CENTCOM file"):
+                    scope["centcom_sync"]({"files": {name: content}})
+        outside = self.home / "outside"
+        outside.write_text("keep")
+        (self.root / "SITUATION.json").symlink_to(outside)
+        with self.assertRaisesRegex(ValueError, "symlink"):
+            scope["centcom_sync"]({"files": {"SITUATION.json": "{}"}})
+        self.assertEqual(outside.read_text(), "keep")
+        (self.root / "CAPABILITIES.json").symlink_to(outside)
+        with self.assertRaisesRegex(ValueError, "symlink"):
+            scope["centcom_sync"]({"files": {"CAPABILITIES.json": "{}"}})
+        self.assertEqual(outside.read_text(), "keep")
 
 
 class StructuredInventory(unittest.TestCase):
     def setUp(self):
         self.helper = {"__name__": "structured_inventory_fixture"}
-        exec((Path(__file__).resolve().parents[1] / "electron" / "remote.py").read_text(), self.helper)
+        exec_sources(self.helper, (Path(__file__).resolve().parents[1] / "electron" / "remote.py"))
 
     def test_worker_descendants_are_managed_but_unrelated_processes_remain_visible(self):
         rows = "200 1 python3 ?\n201 200 codex ?\n202 201 claude ?\n300 1 codex pts/1\n400 1 tmux:server ?\n401 400 agy ?\n"
@@ -83,6 +167,54 @@ class HostHealth(unittest.TestCase):
         finally:
             scope["run"] = original_run
 
+    def test_launch_paths_resolve_aliases_without_creating_directories(self):
+        with tempfile.TemporaryDirectory(prefix="agentc2-launch-paths-") as directory:
+            root = Path(directory)
+            actual = root / "actual"
+            actual.mkdir()
+            alias = root / "alias"
+            alias.symlink_to(actual, target_is_directory=True)
+            result = scope["launch_paths"]({"cwd": str(alias), "paths": [str(actual)]})
+            self.assertEqual(result["cwd"], result["paths"][0])
+            missing = alias / "not-created"
+            result = scope["launch_paths"]({"cwd": str(missing), "paths": []})
+            self.assertEqual(result["cwd"], str(actual / "not-created"))
+            self.assertFalse(missing.exists())
+            with self.assertRaises(ValueError):
+                scope["launch_paths"]({"cwd": str(actual), "paths": ["x"] * 201})
+
+    def test_cgroup_ancestor_limits_and_pressure(self):
+        with tempfile.TemporaryDirectory(prefix="agentc2-cgroup-") as directory:
+            root = Path(directory)
+            proc, groups = root / "proc", root / "cgroup"
+            (proc / "self").mkdir(parents=True)
+            (proc / "pressure").mkdir()
+            group = groups / "parent" / "worker"
+            group.mkdir(parents=True)
+            (groups / "cgroup.controllers").write_text("cpu memory")
+            (proc / "self" / "cgroup").write_text("0::/parent/worker\n")
+            (proc / "pressure" / "memory").write_text("some avg10=2.50 avg60=1.00 avg300=0.50 total=123\n")
+            for target, maximum, current, cpu in [(groups / "parent", "1000", "900", "50000 100000"), (group, "800", "200", "100000 100000")]:
+                (target / "memory.max").write_text(maximum)
+                (target / "memory.current").write_text(current)
+                (target / "cpu.max").write_text(cpu)
+            result = scope["resource_constraints"](proc, groups)
+            self.assertEqual(result["status"], "reported")
+            self.assertEqual(result["memoryLimitBytes"], 800)
+            self.assertEqual(result["memoryHeadroomBytes"], 100)
+            self.assertEqual(result["cpuLimitCores"], 0.5)
+            self.assertEqual(result["memoryLimitStatus"], "limited")
+            self.assertEqual(result["pressure"]["memory"]["some"]["avg10"], 2.5)
+            (group / "cpu.max").unlink()
+            partial = scope["resource_constraints"](proc, groups)
+            self.assertEqual(partial["cpuLimitStatus"], "unknown")
+            self.assertEqual(partial["cpuLimitCores"], 0.5)
+            (proc / "self" / "cgroup").write_text("0::/../../outside\n")
+            self.assertEqual(scope["resource_constraints"](proc, groups)["status"], "unknown")
+            (groups / "cgroup.controllers").unlink()
+            self.assertEqual(scope["resource_constraints"](proc, groups)["status"], "unsupported")
+
+
 
 class AntigravityInventory(unittest.TestCase):
     def test_current_sqlite_layout_and_legacy_fallback(self):
@@ -130,7 +262,7 @@ class Cleanup(unittest.TestCase):
         self.home = Path(self.temporary.name)
         self.helper = {"__name__": "cleanup_test"}
         root = Path(__file__).resolve().parents[1] / "electron"
-        exec((root / "antigravity-cleanup.py").read_text() + "\n" + (root / "session-cleanup.py").read_text() + "\n" + (root / "provider_telemetry.py").read_text() + "\n" + (root / "remote.py").read_text(), self.helper)
+        exec_sources(self.helper, *(root / name for name in ("antigravity-cleanup.py", "session-cleanup.py", "provider_telemetry.py", "remote.py")))
         self.helper["HOME"] = self.home
         environment = patch.dict(os.environ, {"CODEX_HOME": str(self.home / '.codex'), "CODEX_SQLITE_HOME": str(self.home / '.codex')})
         environment.start()

@@ -31,4 +31,10 @@ const description = [
   'Unsigned builds may be blocked by SmartScreen or Gatekeeper. See docs/platforms.md.',
 ].join('\n') + '\n';
 fs.writeFileSync(path.join(__dirname, '..', 'release', `AgentC2-${version}-${platform}-${process.arch}-signing.txt`), description);
+// Keep architecture manifests separate until release assembly; artifact merging
+// would otherwise silently overwrite one Mac's latest-mac.yml with the other.
+if (process.platform === 'darwin') {
+  const release = path.join(__dirname, '..', 'release');
+  fs.renameSync(path.join(release, 'latest-mac.yml'), path.join(release, `latest-mac-${process.arch}.yml`));
+}
 console.log(description);

@@ -1,7 +1,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { EventEmitter } = require('node:events');
 
-const PROVIDERS = ['codex', 'claude', 'antigravity'];
+const PROVIDERS = ['codex', 'claude', 'antigravity', 'opencode'];
 const ROE_PROFILES = ['', 'full', 'gated', 'provider-default'];
 const OPORDER_ID = /^[a-zA-Z0-9_-]{1,80}$/;
 const ENV_NAME = /^[A-Z_][A-Z0-9_]*$/;
@@ -12,7 +13,7 @@ function text(value, max = 4096) {
   return value;
 }
 function defaults() {
-  const presets = PROVIDERS.map((provider) => ({ id: provider, name: provider === 'antigravity' ? 'Antigravity' : provider === 'claude' ? 'Claude' : 'Codex', provider, command: provider === 'antigravity' ? 'agy' : provider, args: '', cwd: '', instructions: '', fullPermissions: true, attentionHooks: provider !== 'antigravity', hostId: '' }));
+  const presets = PROVIDERS.map((provider) => ({ id: provider, name: provider === 'antigravity' ? 'Antigravity' : provider === 'claude' ? 'Claude' : provider === 'opencode' ? 'OpenCode' : 'Codex', provider, command: provider === 'antigravity' ? 'agy' : provider, args: '', cwd: '', instructions: '', fullPermissions: true, attentionHooks: ['codex', 'claude'].includes(provider), hostId: '' }));
   presets.push({ ...presets[1], id: 'claude-openrouter', name: 'Claude (OpenRouter)', command: 'claude3' });
   return {
     hosts: [{ id: 'default', name: 'Primary server', target: process.env.AGENTC2_HOST || process.env.AGENT_HQ_HOST || 'your-ssh-host', port: 22, enabled: true }],
@@ -91,7 +92,7 @@ function validateSettings(input) {
     const servers = mcp.map((server) => {
       if (!server || !OPORDER_ID.test(server.name) || serverNames.has(server.name) || !['stdio', 'http'].includes(server.transport)) throw new Error('Invalid OpOrder MCP server');
       serverNames.add(server.name);
-      const providers = server.providers || ['codex', 'claude', 'antigravity'];
+      const providers = server.providers || ['codex', 'claude', 'antigravity', 'opencode'];
       if (!Array.isArray(providers) || !providers.length || providers.some((provider) => !PROVIDERS.includes(provider)) || new Set(providers).size !== providers.length) throw new Error('Invalid OpOrder MCP providers');
       const env = server.env || [];
       if (!Array.isArray(env) || env.length > 30 || env.some((name) => typeof name !== 'string' || !ENV_NAME.test(name)) || new Set(env).size !== env.length) throw new Error('OpOrder MCP environment values must be variable names');
@@ -141,7 +142,6 @@ function validateWorkspace(w) {
     used.add(value);
     return [text(key, 300), value];
   }));
-  if (used.size > 99) throw new Error('At most 99 callsigns can be assigned');
   const shortcuts = Object.fromEntries(Object.entries(source.shortcuts || {}).map(([key, value]) => [text(key, 60), text(value, 80)]));
   if (Object.keys(shortcuts).length > 50) throw new Error('Too many keyboard overrides');
   const focusedPane = source.focusedPane === 'target' && targetKey || !anchorKey && targetKey ? 'target' : 'anchor';
@@ -152,14 +152,18 @@ function validateWorkspace(w) {
   const situation = { version: 1, anchorKey, targetKey, focusedPane, callsigns, groupBy: source.groupBy === 'repository' ? 'repository' : 'host', collapsedGroups, urgentFirst: Boolean(source.urgentFirst), rosterCollapsed: Boolean(source.rosterCollapsed), zen: Boolean(source.zen), ligatures: Boolean(source.ligatures), shortcuts, missionStartedAt };
   return { tabs, selectedKey, splitKey, metadata, situation };
 }
+function validateSessionTitle(value) {
+  if (typeof value !== 'string' || !value.trim() || value.length > 100 || /[\x00-\x1f\x7f-\x9f\uD800-\uDFFF]/u.test(value)) throw new Error('Use a session title of 1–100 characters without control characters');
+  return value.trim();
+}
 function validateSessionPin(key, pinned) {
-  if (typeof key !== 'string' || key.length > 300 || !/^[a-zA-Z0-9_-]{1,80}\/(?:tmux|process|codex|claude|antigravity):[a-zA-Z0-9_.:-]{1,200}$/.test(key) || typeof pinned !== 'boolean') throw new Error('Invalid session pin');
+  if (typeof key !== 'string' || key.length > 300 || !/^[a-zA-Z0-9_-]{1,80}\/(?:tmux|process|codex|claude|antigravity|opencode):[a-zA-Z0-9_.:-]{1,200}$/.test(key) || typeof pinned !== 'boolean') throw new Error('Invalid session pin');
   return key.slice(0, key.indexOf('/'));
 }
 function validateCleanupState(value) {
   if (!value || !value.lastRuns || typeof value.lastRuns !== 'object' || !Array.isArray(value.results)) throw new Error('Invalid saved cleanup state');
   const lastRuns = Object.fromEntries(Object.entries(value.lastRuns).slice(-300).map(([key, at]) => {
-    if (!/^[a-zA-Z0-9_-]{1,80}\/(codex|claude|antigravity)$/.test(key) || typeof at !== 'string' || !Number.isFinite(Date.parse(at))) throw new Error('Invalid cleanup run timestamp');
+    if (!/^[a-zA-Z0-9_-]{1,80}\/(codex|claude|antigravity|opencode)$/.test(key) || typeof at !== 'string' || !Number.isFinite(Date.parse(at))) throw new Error('Invalid cleanup run timestamp');
     return [key, at];
   }));
   const results = value.results.slice(0, 100).map((item) => {
@@ -188,8 +192,9 @@ function validateCachedUnits(value) {
   }
   return cached;
 }
-class Store {
+class Store extends EventEmitter {
   constructor(directory) {
+    super();
     this.file = path.join(directory, 'workspace.json');
     fs.mkdirSync(directory, { recursive: true });
     this.data = { settings: defaults(), workspace: validateWorkspace({ tabs: [], selectedKey: null, splitKey: null, metadata: {} }), attention: [], attentionCursors: {}, deletedSessions: [], cleanupState: { lastRuns: {}, results: [] }, cachedUnits: {}, exercises: [], flashResolved: [], loopState: {}, opOrderConflicts: {} };
@@ -197,18 +202,36 @@ class Store {
       // Do not silently overwrite an unreadable user's configuration.
       const saved = JSON.parse(fs.readFileSync(this.file, 'utf8'));
       this.data = { ...this.data, settings: validateSettings(saved.settings), workspace: validateWorkspace(saved.workspace), attention: Array.isArray(saved.attention) ? saved.attention.slice(-500) : [], attentionCursors: saved.attentionCursors || {}, deletedSessions: Array.isArray(saved.deletedSessions) ? saved.deletedSessions.slice(-10000).map((key) => text(key, 300)) : [], cleanupState: validateCleanupState(saved.cleanupState || this.data.cleanupState), cachedUnits: validateCachedUnits(saved.cachedUnits || {}), exercises: Array.isArray(saved.exercises) ? saved.exercises.filter((item) => item?.version === 1 && /^[a-f0-9]{32}$/.test(item.id) && Array.isArray(item.contestants)).slice(0, 50) : [], flashResolved: Array.isArray(saved.flashResolved) ? saved.flashResolved.filter((id) => /^[a-f0-9]{32}$/.test(id)).slice(-1000) : [], loopState: saved.loopState && typeof saved.loopState === 'object' && !Array.isArray(saved.loopState) ? Object.fromEntries(Object.entries(saved.loopState).filter(([key, value]) => /^[A-Za-z0-9_-]{1,80}\/tmux:hq-[a-f0-9]{12}$/.test(key) && value && typeof value === 'object').slice(-500)) : {}, opOrderConflicts: saved.opOrderConflicts && typeof saved.opOrderConflicts === 'object' && !Array.isArray(saved.opOrderConflicts) ? Object.fromEntries(Object.entries(saved.opOrderConflicts).filter(([id, item]) => ID.test(id) && item?.id === id && ID.test(item.hostId || '') && typeof item.detail === 'string' && item.detail.length <= 300 && Number.isFinite(Date.parse(item.at || ''))).slice(-50)) : {} };
+      this.data.openCodePresetMigrated = saved.openCodePresetMigrated === true;
+      if (!this.data.openCodePresetMigrated) {
+        const presets = this.data.settings.presets;
+        const hasOpenCode = presets.some((preset) => preset.provider === 'opencode');
+        if (hasOpenCode || presets.length < 100) {
+          if (!hasOpenCode) {
+            const preset = defaults().presets.find((item) => item.provider === 'opencode');
+            const ids = new Set(presets.map((item) => item.id));
+            for (let suffix = 2; ids.has(preset.id); suffix++) preset.id = `opencode-${suffix}`;
+            this.data.settings = validateSettings({ ...this.data.settings, presets: [...presets, preset] });
+          }
+          // Persist once so removing the preset later remains a user choice.
+          this.update({ openCodePresetMigrated: true });
+        }
+      }
+    } else {
+      this.data.openCodePresetMigrated = true;
     }
   }
   save(key, value) {
     this.update({ [key]: value });
     return value;
   }
-  update(patch) {
+  update(patch, source) {
     const next = { ...this.data, ...patch };
     const temporary = this.file + '.tmp';
     fs.writeFileSync(temporary, JSON.stringify(next, null, 2), { mode: 0o600 });
     fs.renameSync(temporary, this.file);
     this.data = next;
+    this.emit('updated', source);
   }
   saveWorkspace(input) {
     const workspace = validateWorkspace(input);
@@ -217,13 +240,11 @@ class Store {
     workspace.tabs = workspace.tabs.filter((key) => !deleted.has(key));
     if (deleted.has(workspace.selectedKey)) workspace.selectedKey = workspace.tabs.at(-1) || null;
     if (deleted.has(workspace.splitKey)) workspace.splitKey = null;
-    if (workspace.situation) {
-      if (deleted.has(workspace.situation.anchorKey)) workspace.situation.anchorKey = null;
-      if (deleted.has(workspace.situation.targetKey)) workspace.situation.targetKey = null;
-      for (const key of deleted) delete workspace.situation.callsigns[key];
-    }
-    // Metadata edits use narrow APIs. Layout snapshots must never overwrite
-    // newer notes/projects/pins from desktop or another paired device.
+    // validateWorkspace always constructs the situation, including legacy input.
+    if (deleted.has(workspace.situation.anchorKey)) workspace.situation.anchorKey = null;
+    if (deleted.has(workspace.situation.targetKey)) workspace.situation.targetKey = null;
+    for (const key of deleted) delete workspace.situation.callsigns[key];
+    // Metadata mutations have their own APIs; stale layout snapshots cannot overwrite them.
     for (const [key, metadata] of Object.entries(workspace.metadata)) {
       metadata.pinned = this.data.workspace.metadata[key]?.pinned || false;
     }
@@ -277,4 +298,4 @@ class Store {
     this.update({ deletedSessions: [...deleted].slice(-10000), workspace: validateWorkspace(workspace), attention: this.data.attention.filter((item) => !deleted.has(item.sessionKey)), attentionCursors, cachedUnits, loopState });
   }
 }
-module.exports = { Store, defaults, validateSettings, resolveRoeProfile, validateRoeLaunch, validateWorkspace, validateSessionPin };
+module.exports = { Store, defaults, validateSettings, resolveRoeProfile, validateRoeLaunch, validateWorkspace, validateSessionPin, validateSessionTitle };

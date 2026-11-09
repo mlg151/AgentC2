@@ -1,4 +1,4 @@
-"""Codex 0.163.0 app-server adapter. No credentials leave the provider host."""
+"""Version-pinned Codex app-server adapter. Credentials stay on the provider host."""
 
 from concurrent.futures import Future
 import json
@@ -11,7 +11,7 @@ import threading
 import uuid
 
 from chat_adapters import ProviderRejected
-from chat_codex_schema import BUNDLE, validate_native
+from chat_codex_schema import validate_native
 from chat_format import display
 from chat_protocol import CONTRACT, identifier
 
@@ -41,6 +41,7 @@ REQUESTS = {
 class CodexAdapter:
     def __init__(self, session, journal, binary=None, timeout=30, env=None):
         self.session, self.journal = session, journal
+        self.protocol_version = session["capabilities"]["version"]
         self.binary = binary or shutil.which("codex")
         self.timeout = timeout
         self.env = env
@@ -71,7 +72,7 @@ class CodexAdapter:
             self.process.stdin.flush()
 
     def request(self, method, params):
-        validate_native(METHODS[method][0], params)
+        validate_native(METHODS[method][0], params, self.protocol_version)
         with self.lock:
             self.counter += 1
             native_id = self.counter
@@ -82,7 +83,7 @@ class CodexAdapter:
             response = future.result(timeout=self.timeout)
             if "error" in response:
                 raise ProviderRejected(str(response["error"].get("message", "Codex rejected the operation"))[:2000])
-            return validate_native(METHODS[method][1], response["result"])
+            return validate_native(METHODS[method][1], response["result"], self.protocol_version)
         finally:
             with self.lock:
                 self.pending.pop(native_id, None)
@@ -100,6 +101,8 @@ class CodexAdapter:
             if account["requiresOpenaiAuth"] and account["account"] is None:
                 raise ProviderRejected("Sign in with codex login on the selected host, then create or resume this conversation again")
             params = dict(cwd=self.session["cwd"])
+            if self.session.get("model"):
+                params["model"] = self.session["model"]
             profile = self.session["roeProfile"]
             if profile == "full":
                 params.update(approvalPolicy="never", sandbox="danger-full-access")
@@ -168,7 +171,7 @@ class CodexAdapter:
             self.provider_event(method, params)
             return
         if method in NOTIFICATIONS:
-            validate_native(NOTIFICATIONS[method], params)
+            validate_native(NOTIFICATIONS[method], params, self.protocol_version)
         turn_id = params.get("turnId")
         if method == "turn/started":
             self.turn_id = params["turn"]["id"]
@@ -239,7 +242,7 @@ class CodexAdapter:
             self.write(dict(id=native_id, error=dict(code=-32601, message="Unsupported AgentC2 provider request")))
             self.event("error", dict(code="unsupported_request", message="Provider requested an unsupported interactive operation: " + method[:200], retryable=False))
             return
-        validate_native(REQUESTS[method][0], params)
+        validate_native(REQUESTS[method][0], params, self.protocol_version)
         signature = json.dumps(native_id)
         with self.lock:
             if signature in self.seen_requests:
@@ -269,8 +272,17 @@ class CodexAdapter:
                 return
             self.event("approval.requested", dict(requestId=request_id, action=display(params.get("command") or "Review file changes", 2000), detail=detail), params["turnId"], params["itemId"])
 
+    def set_model(self, model):
+        if self.turn_id is not None:
+            raise ProviderRejected("Wait for the current Codex turn before changing the model")
+        self.session["model"] = model
+        return dict(model=model, appliesTo="next-turn")
+
     def send(self, text, command_id):
-        result = self.request("turn/start", dict(threadId=self.thread_id, input=[dict(type="text", text=text)], clientUserMessageId=command_id))
+        params = dict(threadId=self.thread_id, input=[dict(type="text", text=text)], clientUserMessageId=command_id)
+        if self.session.get("model"):
+            params["model"] = self.session["model"]
+        result = self.request("turn/start", params)
         return dict(turnId=result["turn"]["id"])
 
     def steer(self, text, expected_turn_id):
@@ -292,7 +304,7 @@ class CodexAdapter:
                 result = dict(decision="accept" if payload["decision"] == "allow" else "decline")
             else:
                 result = dict(answers={item["questionId"]: dict(answers=item["answers"]) for item in payload["answers"]})
-            validate_native(REQUESTS[request["method"]][1], result)
+            validate_native(REQUESTS[request["method"]][1], result, self.protocol_version)
             self.write(dict(id=request["id"], result=result))
             self.requests.pop(payload["requestId"])
             self.event("request.resolved", dict(requestId=payload["requestId"], state="resolved", decision=payload.get("decision", "answered")), payload["turnId"], payload["itemId"])
@@ -324,11 +336,17 @@ class CodexAdapter:
     def stop(self):
         self.stopping = True
         if self.process is not None and self.process.poll() is None:
-            os.killpg(self.process.pid, signal.SIGTERM)
+            try:
+                os.killpg(self.process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass  # The child may exit after poll; wait still confirms it.
             try:
                 self.process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                os.killpg(self.process.pid, signal.SIGKILL)
+                try:
+                    os.killpg(self.process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
                 self.process.wait(timeout=5)
         for thread in (self.reader, self.importer):
             if thread is not None and thread is not threading.current_thread():

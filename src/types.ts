@@ -1,9 +1,10 @@
 import type { ChatCapabilities, ChatSessionState, ChatClientState, ChatCommand, ChatPage, ChatReceipt, ChatSnapshot, ChatUpdate } from './chatTypes';
 export type { ChatProvider, ChatSessionState, ChatCommandState, ChatCapabilities, ChatUsage, ChatQuestion, ChatAnswer, ChatEvent, ChatCommand, ChatReceipt, ChatSession, ChatPage, ChatPendingRequest, ChatClientState, ChatSnapshot, ChatUpdate, ChatApi } from './chatTypes';
-export type Provider = 'codex' | 'claude' | 'antigravity' | 'terminal';
+export type Provider = 'codex' | 'claude' | 'antigravity' | 'opencode' | 'terminal';
 export interface ProviderTelemetry { status: 'reported' | 'stale' | 'unknown' | 'unsupported'; sampledAt: string | null; source: string | null; context: { usedTokens: number; capacityTokens: number; percent: number } | null; totalTokens: number | null; tokensPerMinute: number | null; costUsd: number | null; costBasis: string | null }
 
 export interface Session {
+  specops?: { id: string; state: string; breadcrumb: string };
   key: string;
   provider: Provider;
   id: string;
@@ -14,6 +15,8 @@ export interface Session {
   cwd: string;
   updatedAt: string | null;
   startedAt?: string | null;
+  processId?: string | null;
+  processRole?: 'terminal_wrapper' | 'unmanaged_agent' | 'unknown';
   events?: { id: string; kind: string; at: string; source?: string }[];
   state: string;
   kind: 'managed' | 'external-tmux' | 'unmanaged' | 'conversation' | 'background';
@@ -45,7 +48,16 @@ export interface Session {
   roeProfile?: RoeProfile | 'unknown';
 }
 
+export interface SpecopsProfile { id: string; name: string; provider: string; model: string; ranks: string[] }
+export interface SpecopsWorkflow { version: 1; id: string; name: string; trigger: string; stages: { id: string; profile: string; rank: string; role: string }[] }
+export interface SpecopsDefinition { profiles: SpecopsProfile[]; workflows: SpecopsWorkflow[]; yaml: string; directory: string }
+export interface SpecopsRun { launchAdmission?: { status: string; blockers: string[]; unknowns: string[] } | null; sourceLinks?: { key: string; kind: 'issue'; externalId: string; repository: string }[]; canResume: boolean; canRetry: boolean; id: string; hostId: string; repo: string; state: string; stage: string; error: string; workflow: SpecopsWorkflow; visits: { id: string; stage: string; name: string; output: string; outcome: string; turnId?: string; launchBlocked?: boolean }[]; costUsd: number; costKnown: boolean }
+export interface GithubResult { [key: string]: unknown }
+
 export interface Inventory {
+  internalSessionKeys?: string[];
+  capturedAt?: string;
+  missions?: SpecopsRun[];
   hosts: { id: string; name: string; target: string; user?: string; connected: boolean; error?: string }[];
   sessions: Session[];
   attention: AttentionItem[];
@@ -57,7 +69,8 @@ export interface FaultRecord { sessionKey: string; id: string; at: string; label
 export interface HostConfig { id: string; kind?: 'ssh' | 'local'; name: string; target: string; port: number; enabled: boolean; autoForward?: boolean }
 export type RoeProfile = 'full' | 'gated' | 'provider-default';
 export interface DevUrl { url: string; hostId: string; port: number; status: 'available' | 'opening' | 'ready' | 'failed'; localUrl: string | null; error: string | null }
-export interface HostHealth { hostId: string; name: string; connected: boolean; cpuPercent?: number | null; memoryTotal?: number; memoryUsed?: number; disks?: { path: string; total: number; used: number; free: number }[]; sampledAt?: number; sshRoundTripMs?: number; activeChannels?: number; gpu?: { status: 'reported' | 'unknown' | 'unsupported'; sampledAt: number | null; devices: { name: string; memoryTotal: number; memoryUsed: number }[] }; error?: string }
+export interface HostResourceConstraints { status: 'reported' | 'unknown' | 'unsupported'; version?: number | null; reason?: string | null; memoryLimitBytes?: number | null; memoryHeadroomBytes?: number | null; memoryLimitStatus?: 'limited' | 'unlimited' | 'unknown'; cpuLimitCores?: number | null; cpuLimitStatus?: 'limited' | 'unlimited' | 'unknown'; pressure?: Record<string, Record<string, Record<string, number>> | null>; groupPressure?: Record<string, Record<string, Record<string, number>> | null> | null }
+export interface HostHealth { resources?: HostResourceConstraints; hostId: string; name: string; connected: boolean; cpuPercent?: number | null; memoryTotal?: number; memoryUsed?: number; disks?: { path: string; total: number; used: number; free: number }[]; sampledAt?: number; sshRoundTripMs?: number; activeChannels?: number; gpu?: { status: 'reported' | 'unknown' | 'unsupported'; sampledAt: number | null; devices: { name: string; memoryTotal: number; memoryUsed: number }[] }; error?: string }
 export interface LaunchPreset { id: string; name: string; provider: Provider; command: string; args: string; cwd: string; instructions: string; fullPermissions: boolean; roeProfile?: RoeProfile | ''; attentionHooks: boolean; hostId: string; loopBreaker?: { enabled: boolean; autoInterrupt: boolean; threshold: number; windowMinutes: number; cooldownMinutes: number } }
 export interface OpOrderMcp { name: string; transport: 'stdio' | 'http'; providers: Exclude<Provider, 'terminal'>[]; command: string; args: string[]; url: string; env: string[]; headers: Record<string, string> }
 export interface OpOrder { version: 1; id: string; hostId: string; repository: string; enabled: boolean; instructions: string; overrides: { codex: string; claude: string; antigravity: string }; mcp: OpOrderMcp[] }
@@ -68,7 +81,7 @@ export interface SitrepPreview { version: 1; id: string; source: { operationId: 
 export interface SitrepLaunchInput { id: string; operationId: string; objective: string; summary: string; nextSteps: string; title: string; slug: string; provider: Exclude<Provider, 'terminal'>; presetId?: string; roeProfile?: RoeProfile }
 export interface ExerciseInput { title: string; hostId: string; repository: string; baseRef: string; prompt: string; testCommand: string; contestants: { provider: Exclude<Provider, 'terminal'>; presetId?: string; roeProfile?: RoeProfile }[] }
 export interface ExerciseTest { command: string; exitCode: number | null; timedOut: boolean; output: string; outputTruncated: boolean; durationMs: number; ranAt: number }
-export interface ExerciseContestant { id: string; provider: Exclude<Provider, 'terminal'>; presetId: string; roeProfile: string; slug: string; state: string; name: string; error: string; markedComplete: boolean; evidence: { revision: string; test: ExerciseTest | null; verifiedAt: number; explicitCompletion: boolean } | null }
+export interface ExerciseContestant { launchBlocked?: boolean; admission?: { status: string; blockers: string[]; unknowns: string[] } | null; id: string; provider: Exclude<Provider, 'terminal'>; presetId: string; roeProfile: string; slug: string; state: string; name: string; error: string; markedComplete: boolean; evidence: { revision: string; test: ExerciseTest | null; verifiedAt: number; explicitCompletion: boolean } | null }
 export interface ExerciseRecord { version: 1; id: string; title: string; hostId: string; repository: string; baseCommit: string; prompt: string; testCommand: string; contestants: ExerciseContestant[]; state: string; createdAt: number; promotion: { contestantId: string; revision: string; target: string; branch: string; patchBytes: number; at: number } | null }
 export interface ExerciseInspection { operationId: string; baseCommit: string; branch: string; path: string; active: boolean; headCommit: string; revision: string; patchBytes: number; patch: string; patchTruncated: boolean; untracked: string[]; warnings: string[]; test: ExerciseTest | null; evidence: ExerciseContestant['evidence'] }
 export interface ExercisePromotionPreview { contestantId: string; target: string; branch: string; headCommit: string; revision: string; patchBytes: number; paths: number; ready: boolean; test: ExerciseTest | null }
@@ -85,7 +98,7 @@ export interface SituationWorkspace { version: 1; anchorKey: string | null; targ
 export interface Workspace { tabs: string[]; selectedKey: string | null; splitKey: string | null; metadata: Record<string, SessionMetadata>; situation?: SituationWorkspace }
 export interface AttentionItem { id: string; sessionKey: string; hostId: string; title: string; provider: Provider; createdAt: string; acknowledged: boolean; requestId?: string; kind: 'completed' | 'failed' | 'input'; confidence: 'confirmed' | 'inferred'; detail: string; signature: string }
 
-export interface TerminalState { id: string; cols: number; rows: number; controller: { id: string; name: string } | null; canControl: boolean; exitCode: number | null; connection: 'connected' | 'reconnecting' | 'exited' }
+export interface TerminalState { id: string; cols: number; rows: number; controller: { id: string; name: string } | null; canControl: boolean; exitCode: number | null; connection: 'connecting' | 'connected' | 'reconnecting' | 'exited' }
 export interface TerminalSnapshot { text: string; sequence: number; state: TerminalState }
 export interface UnitPreview { key: string; text: string; sampledAt: number | null; error: boolean }
 export interface HistoryMatches { matches: { key: string; line: number; excerpt: string }[]; searched: number; total: number; truncated: boolean; errors: string[] }
@@ -95,6 +108,7 @@ export interface RemoteStatus extends RemoteConfig { running: boolean; error: st
 export interface CompanionState { capabilities?: string[]; settings: Settings; metadata: Record<string, SessionMetadata>; attention: AttentionItem[] }
 
 export interface CreateInput {
+  model?: string;
   launchId?: string;
   transport?: 'chat' | 'terminal';
   provider: Provider;
@@ -116,7 +130,168 @@ export interface DiffFile { id: string; path: string; staged: boolean; unstaged:
 export interface DiffHunk { id: string; text: string; actionable: boolean }
 export interface DiffDetail { revision: string; staged: DiffHunk[]; unstaged: DiffHunk[]; summary: string; binary: boolean; large: boolean }
 
+export type CentcomAuthority = 'gated' | 'autonomous';
+
+export interface CentcomTriggers {
+  onSpecopsHalt: boolean;
+  onLoopFault: boolean;
+  onFlashTraffic: boolean;
+  onUnitFailed: boolean;
+  onUnitCompleted?: boolean;
+  onDependencyChange?: boolean;
+  fallbackSeconds?: number;
+  cooldownSeconds: number;
+  maxAutoTurnsPerHour: number;
+}
+
+export interface CentcomConfig {
+  version: 1;
+  hostId: string;
+  provider: Exclude<Provider, 'terminal'>;
+  model: string;
+  authority: CentcomAuthority;
+  objective?: string;
+  triggers: CentcomTriggers;
+  maxDirectivesPerTurn: number;
+  maxBudgetUsd: number | null;
+  turnDeadlineSeconds?: number;
+  cancellationDeadlineSeconds?: number;
+}
+
+export type CentcomDirectiveKind =
+  | 'unit.create'
+  | 'unit.resume'
+  | 'unit.send'
+  | 'unit.steer'
+  | 'unit.interrupt'
+  | 'unit.stop'
+  | 'unit.rename'
+  | 'unit.pin'
+  | 'sitrep.handoff'
+  | 'specops.launch'
+  | 'specops.control'
+  | 'exercise.create'
+  | 'exercise.control'
+  | 'flash.decide'
+  | 'chat.respond'
+  | 'fault.interrupt'
+  | 'fault.reset'
+  | 'agentc2.query'
+  | 'agentc2.action';
+
+export interface CentcomOperationRequest {
+  operation: string;
+  input: Record<string, unknown>;
+}
+
+export interface CentcomDirective {
+  id: string;
+  binding?: Record<string, unknown> | null;
+  admission?: { status: string; blockers: string[]; unknowns: string[] } | null;
+  clientRequestId?: string | null;
+  turnId: string;
+  kind: CentcomDirectiveKind;
+  summary: string;
+  rationale: string;
+  preconditions?: Record<string, unknown>;
+  params: Record<string, unknown>;
+  state: 'pending' | 'executing' | 'completed' | 'denied' | 'failed' | 'uncertain';
+  trigger: string;
+  createdAt: number;
+  resolvedAt: number | null;
+  result?: unknown;
+  error?: string;
+}
+
+export interface CentcomAutomationSuggestion {
+  id: string;
+  clientRequestId?: string | null;
+  preview?: { revision: string; before: unknown; after: unknown; enrollment?: unknown };
+  result?: { artifact: unknown; revision: string; enrollment?: unknown };
+  turnId: string;
+  kind: 'specops_workflow' | 'oporder' | 'preset' | 'centcom_trigger';
+  title: string;
+  rationale: string;
+  evidence: string[];
+  payload: Record<string, unknown>;
+  state: 'proposed' | 'applying' | 'applied' | 'dismissed' | 'uncertain';
+  createdAt: number;
+  appliedAt: number | null;
+  error?: string;
+}
+
+export interface CentcomAuditEntry {
+  id: string;
+  kind: CentcomDirectiveKind;
+  summary: string;
+  outcome: 'completed' | 'denied' | 'failed' | 'uncertain';
+  result?: unknown;
+  at: number;
+  trigger: string;
+  error?: string;
+}
+
+export interface CentcomState {
+  providerTurn?: { commandId: string; turnId: string | null; status: 'submitting' | 'running' | 'cancelling' | 'uncertain'; hostId: string; sessionId: string; cursor: number } | null;
+  config: CentcomConfig;
+  session: {
+    name: string;
+    chatSessionId: string;
+    hostId: string;
+    provider: Exclude<Provider, 'terminal'>;
+    model: string;
+    state: string;
+  } | null;
+  status: 'idle' | 'starting' | 'running' | 'halted' | 'awaiting_approval' | 'paused';
+  error: string;
+  costUsd: number;
+  costKnown: boolean;
+  paused?: boolean;
+  autoTurnsLastHour: number;
+  directives: CentcomDirective[];
+  automations: CentcomAutomationSuggestion[];
+  auditLog: CentcomAuditEntry[];
+}
+
+export interface AppUpdate { status: 'idle' | 'checking' | 'current' | 'pending' | 'available' | 'downloading' | 'ready' | 'installing' | 'error'; version: string; target: string | null; percent: number | null; error: string; source: boolean; mainAhead: boolean | null }
+export interface OverwatchWindowState { undocked: boolean; dockOpen?: boolean }
+
+export interface PeerSyncConfig { enabled: boolean; bindAddress: string; port: number; deviceName: string }
+export interface SyncedPeer { id: string; name: string; url: string; direction: 'inbound' | 'outbound'; connected: boolean; lastSyncedAt: string | null; remoteTabs: string[]; error: string }
+export interface PeerSyncStatus extends PeerSyncConfig { id: string; running: boolean; address: string; error: string; peers: SyncedPeer[] }
+export interface PeerSyncApplied { settings: Settings; workspace: Workspace; attention: AttentionItem[] }
 export interface AgentHQApi {
+  overwatchWindowState(): Promise<OverwatchWindowState>;
+  undockOverwatch(): Promise<OverwatchWindowState>;
+  dockOverwatch(): Promise<OverwatchWindowState>;
+  selectOverwatchUnit(key: string): Promise<void>;
+  onOverwatchWindowState(callback: (state: OverwatchWindowState) => void): () => void;
+  onOverwatchSelect(callback: (key: string) => void): () => void;
+  onOverwatchWorkspace(callback: (workspace: Workspace) => void): () => void;
+  peerSyncStatus(): Promise<PeerSyncStatus>;
+  savePeerSync(input: PeerSyncConfig): Promise<PeerSyncStatus>;
+  issuePeerPairing(): Promise<{ code: string; url: string; expiresAt: number }>;
+  connectPeer(input: { url: string; code: string }): Promise<PeerSyncStatus>;
+  revokePeer(id: string): Promise<PeerSyncStatus>;
+  pullPeerTabs(id: string): Promise<Workspace>;
+  onPeerSyncStatus(callback: (state: PeerSyncStatus) => void): () => void;
+  onPeerSyncApplied(callback: (state: PeerSyncApplied) => void): () => void;
+  centcomState(): Promise<CentcomState>;
+  configureCentcom(config: CentcomConfig): Promise<CentcomState>;
+  startCentcom(prompt?: string): Promise<CentcomState>;
+  submitCentcom(text: string): Promise<CentcomState>;
+  interruptCentcom(): Promise<CentcomState>;
+  pauseCentcom(paused: boolean): Promise<CentcomState>;
+  resetCentcomSession(): Promise<CentcomState>;
+  decideCentcomDirective(id: string, decision: 'approve' | 'deny'): Promise<CentcomState>;
+  decideAllCentcomDirectives(decision: 'approve' | 'deny'): Promise<CentcomState>;
+  applyCentcomAutomation(id: string, decision: 'apply' | 'dismiss'): Promise<CentcomState>;
+  onCentcomState(callback: (state: CentcomState) => void): () => void;
+  checkForUpdates(): Promise<AppUpdate>;
+  updateState(): Promise<AppUpdate>;
+  downloadUpdate(): Promise<AppUpdate>;
+  installUpdate(): Promise<AppUpdate>;
+  onUpdateState(callback: (state: AppUpdate) => void): () => void;
   readonly platform: string;
   getState(): Promise<{ settings: Settings; workspace: Workspace; attention: AttentionItem[] }>;
   saveSettings(settings: Settings): Promise<Settings>;
@@ -124,6 +299,12 @@ export interface AgentHQApi {
   enrollOpOrder(order: OpOrder, revision: string): Promise<Settings>;
   previewSitrep(input: SitrepPreviewInput): Promise<SitrepPreview>;
   launchSitrep(input: SitrepLaunchInput): Promise<{ name: string; hostId: string }>;
+  githubRequest(input: Record<string, unknown>): Promise<GithubResult>;
+  listSpecops(): Promise<SpecopsRun[]>;
+  specopsDefinition(): Promise<SpecopsDefinition>;
+  configureSpecops(yaml: string): Promise<SpecopsDefinition>;
+  launchSpecops(input: Record<string, unknown>): Promise<SpecopsRun>;
+  controlSpecops(id: string, action: string): Promise<SpecopsRun>;
   listExercises(): Promise<ExerciseRecord[]>;
   exerciseCapabilities(hostId: string): Promise<Record<Exclude<Provider, 'terminal'>, boolean>>;
   createExercise(input: ExerciseInput): Promise<ExerciseRecord>;
@@ -139,6 +320,7 @@ export interface AgentHQApi {
   updateSessionMetadata(key: string, patch: Partial<Pick<SessionMetadata, 'project' | 'notes'>>): Promise<SessionMetadata>;
   onSharedState(callback: (state: CompanionState) => void): () => void;
   setSessionPinned(key: string, pinned: boolean): Promise<boolean>;
+  renameSession(key: string, title: string): Promise<string>;
   onSessionPinned(callback: (key: string, pinned: boolean) => void): () => void;
   onSessionsDeleted(callback: (keys: string[]) => void): () => void;
   previewCleanup(input: CleanupInput): Promise<CleanupPreview>;

@@ -17,22 +17,33 @@ Open the successful **Desktop CI and releases** Actions run and download `AgentC
 | macOS Intel | `AgentC2-<version>-mac-x64.dmg`, `AgentC2-<version>-mac-x64.zip` |
 | macOS Apple Silicon | `AgentC2-<version>-mac-arm64.dmg`, `AgentC2-<version>-mac-arm64.zip` |
 
-Each artifact also contains `AgentC2-<version>-<platform>-<arch>-signing.txt`, reporting whether a publisher signature was verified and, on macOS, whether a stapled notarization ticket was verified. AppImage/Debian filename architectures use the target format's conventional names. Supplementary blockmaps may also be attached. No automatic-update feed is configured.
+Each artifact also contains `AgentC2-<version>-<platform>-<arch>-signing.txt`, reporting whether a publisher signature was verified and, on macOS, whether a stapled notarization ticket was verified. AppImage/Debian filename architectures use the target format's conventional names. Supplementary blockmaps may also be attached. Updater manifests are attached for the in-app update feed.
 
 Separate `Desktop-QA-<platform>-<arch>` artifacts contain screenshots of the rendered desktop and packaged app for review. They are not attached to releases.
 
-## Publish a version
+## Automatic versions
 
-1. Update `package.json` and the lockfile together (`npm version <version> --no-git-tag-version`). Commit and merge the change. Complete the [manual platform checks](platforms.md#validation-coverage-and-manual-release-checks) for the release candidate.
-2. Tag that commit with the exact version, for example `git tag v0.4.1`, then `git push origin v0.4.1`. Use a new version for each release.
-3. The workflow rejects a tag/version mismatch and checks the lockfile versions. All builds and tests must succeed before publication. It verifies that every expected package/signing report is present, generates `SHA256SUMS.txt`, creates a draft GitHub Release, uploads all assets, and then publishes it. Publishing only runs for pushed `v*` tags, never for pull requests or manual workflow runs.
-4. Download assets from the repository's Releases page. Check the signing report and checksum before installation. Inspect workflow logs and the remaining manual checks before advertising a target as validated.
+For same-repository pull requests targeting `main`, **Assign release version** reads the current base and assigns the next patch version. A deliberate higher version (for example, `0.5.0` or `1.0.0`) is preserved. It commits only `package.json` and the two root version fields in `package-lock.json`; dependency versions are unchanged.
 
-Only the final release job has `contents: write`; build/test jobs have `contents: read`. The builder uses `--publish never`. No personal GitHub token is needed. If upload/publication fails after draft creation, inspect/delete the incomplete draft before rerunning the release job; do not silently replace a published release's assets.
+The workflow runs code from the trusted base revision, never from the PR. It skips forks and closed PRs, never force-pushes, and explicitly starts Desktop CI for its version commit. Existing branch protection still requires an up-to-date base and a passing **Quality gate**. If another PR merges first, update the branch; version assignment runs again against the new base. Fork contributors must update the version themselves.
+
+## Automatic publication
+
+After a merge, the `main` build tests and packages all platforms. Only after **Quality gate** succeeds does **Publish verified release** create `v<package version>` at that exact commit and publish the checked packages, signing reports, checksums, and updater manifests. No personal access token is required.
+
+A superseded main build does not publish. Existing tags are immutable: publication fails if a version tag points at another commit. Rerunning a successful release does not replace its assets; an incomplete draft can resume uploading. Manual matching version tags remain supported and pass the same quality gate. Releases are serialized, and an older version cannot replace the latest one.
+
+The first automatic release is **v0.4.2**. Future ordinary PRs advance to `0.4.3`, `0.4.4`, and so on. To choose a minor or major release, set that higher version in the PR; the automation preserves it.
+
+## What the update button checks
+
+Packaged apps check both their embedded Git revision against `main` and the published release feed. If `main` is newer but the installable release is still being built, the toolbar shows **New main detected** and the dialog explains that publication is pending. A published newer release offers **Download update**, followed by **Restart and install**. Missing Git metadata or a failed main check never proves that the installed code is current.
+
+Source installations build the latest main in a separate checkout. See [OpenCode and desktop updates](opencode.md) for installation behavior and the one-time bootstrap needed by older link-only builds.
 
 ## Optional signing and notarization
 
-Without signing secrets, builds are unsigned or ad hoc and are not notarized. macOS bundles always receive an ad hoc signature after packaging (including on pull requests) so changed bundle resources and native helpers can launch on Apple Silicon. Ad hoc signing uses no certificate and leaves hardened runtime off; subsequent Developer ID signing enables hardened runtime for notarization. SmartScreen and Gatekeeper may warn or block them. Signing is optional for CI; supplying credentials makes signature verification mandatory. Signing secrets are passed only to the packaging step for version-tag builds, never to pull requests or ordinary branch builds.
+Without signing secrets, builds are unsigned or ad hoc and are not notarized. macOS bundles always receive an ad hoc signature after packaging (including on pull requests) so changed bundle resources and native helpers can launch on Apple Silicon. Ad hoc signing uses no certificate and leaves hardened runtime off; subsequent Developer ID signing enables hardened runtime for notarization. SmartScreen and Gatekeeper may warn or block them. Signing is optional for CI; supplying credentials makes signature verification mandatory. Signing secrets are passed only to the packaging step for protected main pushes and version-tag builds, never to pull requests or manual workflow runs.
 
 Configure repository Actions secrets:
 

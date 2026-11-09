@@ -5,10 +5,15 @@ from pathlib import Path
 import re
 
 BUNDLE = json.loads(Path(__file__).with_name("chat-codex-schema.json").read_text())
+SUPPORTED_VERSIONS = (BUNDLE["version"], *BUNDLE.get("versions", {}))
 
 
-def validate_native(name, value):
-    root = BUNDLE["schemas"][name]
+def validate_native(name, value, version=None):
+    version = version or BUNDLE["version"]
+    if version not in SUPPORTED_VERSIONS:
+        raise ValueError("Unsupported Codex protocol version: " + str(version))
+    schemas = BUNDLE["schemas"] if version == BUNDLE["version"] else {**BUNDLE["schemas"], **BUNDLE["versions"][version]}
+    root = schemas[name]
 
     def check(schema, item, depth=0):
         if depth > 100:

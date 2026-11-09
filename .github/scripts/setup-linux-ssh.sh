@@ -4,11 +4,16 @@ set -euo pipefail
 test "${GITHUB_ACTIONS:-}" = true
 sudo apt-get update
 sudo apt-get install -y openssh-server tmux xvfb openbox libnotify4 dunst dbus-x11 libglib2.0-bin
-sudo useradd --create-home --shell /bin/bash agentc2-qa
+qa_home=${AGENTC2_CLEANUP_QA_HOME:-/home/agentc2-qa}
+if [[ -n "${AGENTC2_CLEANUP_QA_HOME:-}" ]]; then
+  [[ "$qa_home" == /tmp/agentc2-cleanup-ssh-*/remote-home ]]
+  sudo install -d -m 755 "$(dirname "$qa_home")"
+fi
+sudo useradd --create-home --home-dir "$qa_home" --shell /bin/bash agentc2-qa
 sudo usermod --password '*' agentc2-qa
 ssh-keygen -q -t ed25519 -N '' -f "$RUNNER_TEMP/agentc2-ci-key"
-sudo install -d -m 700 -o agentc2-qa -g agentc2-qa /home/agentc2-qa/.ssh
-sudo install -m 600 -o agentc2-qa -g agentc2-qa "$RUNNER_TEMP/agentc2-ci-key.pub" /home/agentc2-qa/.ssh/authorized_keys
+sudo install -d -m 700 -o agentc2-qa -g agentc2-qa "$qa_home"/.ssh
+sudo install -m 600 -o agentc2-qa -g agentc2-qa "$RUNNER_TEMP/agentc2-ci-key.pub" "$qa_home"/.ssh/authorized_keys
 mkdir -p "$HOME/.ssh"
 chmod 700 "$HOME/.ssh"
 ssh-keygen -q -t ed25519 -N '' -f "$RUNNER_TEMP/agentc2-ci-host"

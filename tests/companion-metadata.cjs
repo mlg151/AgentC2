@@ -27,5 +27,8 @@ const key = 'default/tmux:hq-123456789abc';
   service.store.data.settings.hosts = [];
   await assert.rejects(service.deleteSession({ id: 'web:paired', admin: true }, key), /Reconnect/);
   await assert.rejects(service.deleteSession({ id: 'web:untrusted' }, key), /Invalid/);
+  await assert.rejects(service.deleteSession({ id: 'centcom-commander' }, key), /Invalid/);
+  await assert.rejects(service.deleteSession({ id: 'web:untrusted' }, key, true), /Invalid/);
+  await assert.rejects(service.deleteSession({ id: 'centcom-commander' }, key, true), /Reconnect/);
   console.log('PASS phone metadata edits preserve workspace navigation and validate fields');
 } finally { fs.rmSync(directory, { recursive: true, force: true }); } })().catch((error) => { console.error(error); process.exitCode = 1; });

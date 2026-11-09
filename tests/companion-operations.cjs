@@ -10,12 +10,14 @@ async function main() {
     cleanup: { preview: () => ({ token: 'preview' }), execute: method('cleanup.execute'), state: method('cleanup.state') },
     terminals: { scrollRemote: method('scroll') },
   }, { get: (target, name) => target[name] || method(name) });
-  const gateway = { service, bootstrap: () => ({ settings: {} }), status: method('remote.status'), configure: method('remote.configure'), pair: method('remote.pair'), revoke: method('remote.revoke'), tailscale: method('tailscale'), previewUrl: method('previewUrl') };
+  const gateway = { desktopHandlers: { get: (name) => method(name) }, service, bootstrap: () => ({ settings: {} }), status: method('remote.status'), configure: method('remote.configure'), pair: method('remote.pair'), revoke: method('remote.revoke'), tailscale: method('tailscale'), previewUrl: method('previewUrl') };
   const operations = companionOperations(gateway);
   const client = { id: 'web:fixture', admin: true };
   const record = { client, device: { id: 'device' } };
   assert.equal(operations['settings:save'].run(record, ['settings']), 'saveSettings');
   assert.deepEqual(calls.pop(), ['saveSettings', 'settings']);
+  operations['settings:save'].run(record, ['settings', null, 'peer-sync']);
+  assert.deepEqual(calls.pop(), ['saveSettings', 'settings'], 'Remote arguments cannot select internal peer-sync persistence privileges');
   const ownerMethods = ['sitrep:preview', 'sitrep:launch', 'flash:decide', 'fault:interrupt-all', 'session:delete', 'diff:files', 'diff:detail', 'diff:hunk', 'terminal:scroll', 'image:upload'];
   for (const name of ownerMethods) {
     await operations[name].run(record, ['a', 'b', 'c']);

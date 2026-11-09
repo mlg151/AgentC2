@@ -1,0 +1,80 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const yaml = require('js-yaml');
+const { nextVersion, versionFiles, assignVersion } = require('../scripts/auto-version.cjs');
+const { publishRelease } = require('../scripts/publish-release.cjs');
+const repository = 'owner/app', baseSha = 'a'.repeat(40), headSha = 'b'.repeat(40), versionSha = 'c'.repeat(40);
+(async () => {
+  assert.equal(nextVersion('0.4.1', '0.4.1'), '0.4.2');
+  assert.equal(nextVersion('0.4.2', '0.4.1'), '0.4.3');
+  assert.equal(nextVersion('0.4.2', '0.5.0'), '0.5.0');
+  assert.equal(nextVersion('0.4.2', '1.0.0'), '1.0.0');
+  assert.equal(nextVersion('0.4.2', '0.4.3'), '0.4.3');
+  assert.throws(() => nextVersion('0.4.1', '0.5.0-beta'), /stable/);
+  assert.throws(() => nextVersion('garbage', '0.4.1'), /stable/);
+  const pkg = { name: 'fixture', version: '0.4.1', scripts: { build: 'unchanged' } };
+  const lock = { version: '0.4.1', packages: { '': { name: 'fixture', version: '0.4.1' }, 'node_modules/example': { version: '7.0.0', integrity: 'keep' } } };
+  const next = versionFiles('0.4.1', pkg, lock);
+  assert.equal(next.pkg.version, '0.4.2'); assert.equal(next.lock.version, '0.4.2'); assert.equal(next.lock.packages[''].version, '0.4.2');
+  assert.deepEqual(next.lock.packages['node_modules/example'], lock.packages['node_modules/example']);
+  assert.equal(pkg.version, '0.4.1');
+  const calls = [];
+  let fork = false, conflict = false, proposed = pkg;
+  const api = async (endpoint, method = 'GET', body) => {
+    calls.push({ endpoint, method, body });
+    if (endpoint.endsWith('/pulls/1')) return { state: 'open', base: { ref: 'main', sha: baseSha }, head: { ref: 'feature/update', sha: headSha, repo: { full_name: fork ? 'someone/fork' : repository } } };
+    if (endpoint.includes('/contents/')) return { type: 'file', encoding: 'base64', content: Buffer.from(JSON.stringify(endpoint.includes('package-lock') ? lock : endpoint.endsWith(baseSha) ? pkg : proposed)).toString('base64') };
+    if (endpoint.endsWith(`/git/commits/${headSha}`)) return { tree: { sha: 'base-tree' } };
+    if (endpoint.endsWith('/git/trees')) return { sha: 'new-tree' };
+    if (endpoint.endsWith('/git/commits')) return { sha: versionSha };
+    if (method === 'PATCH' && conflict) throw Error('Concurrent branch push');
+    return null;
+  };
+  assert.equal((await assignVersion({ repository, number: 1, api })).version, '0.4.2');
+  const changes = calls.find((call) => call.endpoint.endsWith('/git/trees')).body.tree;
+  assert.deepEqual(changes.map((item) => item.path), ['package.json', 'package-lock.json']);
+  assert.equal(calls.find((call) => call.method === 'PATCH').body.force, false);
+  assert.equal(calls.at(-1).endpoint.endsWith('/actions/workflows/desktop.yml/dispatches'), true);
+  assert.equal(calls.at(-1).body.ref, 'feature/update');
+  calls.length = 0; fork = true;
+  assert.equal((await assignVersion({ repository, number: 1, api })).skipped, true);
+  assert.equal(calls.length, 1, 'Never modify or execute fork code with a write token');
+  fork = false; conflict = true; calls.length = 0;
+  await assert.rejects(assignVersion({ repository, number: 1, api }), /Concurrent/);
+  assert.equal(calls.some((call) => call.endpoint.includes('dispatches')), false);
+
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agentc2-release-'));
+  try {
+    fs.writeFileSync(path.join(directory, 'fixture.exe'), 'checked package');
+    let mainSha = headSha, tagSha = null, published = false;
+    const mutations = [], commands = [];
+    const releaseApi = async (endpoint, method = 'GET', body) => {
+      if (method !== 'GET') { mutations.push(body); return {}; }
+      if (endpoint.endsWith('/git/ref/heads/main')) return { object: { sha: mainSha } };
+      if (endpoint.includes('/git/ref/tags/')) return tagSha ? { object: { type: 'commit', sha: tagSha } } : null;
+      if (endpoint.includes('/releases/tags/')) return published ? { draft: false, html_url: 'published' } : null;
+      return null;
+    };
+    const input = { repository, sha: headSha, ref: 'refs/heads/main', version: '0.4.2', directory, api: releaseApi, execute: async (args) => commands.push(args) };
+    assert.equal((await publishRelease(input)).tag, 'v0.4.2');
+    assert.deepEqual(mutations[0], { ref: 'refs/tags/v0.4.2', sha: headSha });
+    assert.ok(commands[0].includes('--draft')); assert.equal(commands[1][1], 'upload'); assert.ok(commands[2].includes('--draft=false'));
+    tagSha = versionSha;
+    await assert.rejects(publishRelease(input), /refusing to move/);
+    tagSha = headSha; published = true;
+    assert.equal((await publishRelease(input)).alreadyPublished, true);
+    mainSha = versionSha;
+    assert.match((await publishRelease(input)).skipped, /newer main/);
+    await assert.rejects(publishRelease({ ...input, ref: 'refs/heads/feature' }), /must come from main/);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+  const workflow = yaml.load(fs.readFileSync(path.join(__dirname, '../.github/workflows/desktop.yml'), 'utf8'));
+  assert.deepEqual(workflow.jobs.release.needs, ['quality-gate']);
+  assert.match(workflow.jobs.release.if, /github.event_name == 'push'/);
+  assert.match(workflow.jobs.release.if, /refs\/heads\/main/);
+  const versionWorkflow = yaml.load(fs.readFileSync(path.join(__dirname, '../.github/workflows/auto-version.yml'), 'utf8'));
+  assert.match(versionWorkflow.jobs.version.steps[0].with.ref, /base.sha/);
+  assert.equal(versionWorkflow.jobs.version.steps[0].with['persist-credentials'], false);
+  console.log('PASS automatic patch versions, intentional version bumps, lockfile preservation, trusted-base workflow, non-forced branch updates, explicit CI dispatch, tag immutability, idempotent publication, and required quality gate');
+})().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+from helpers.python_sources import exec_sources
 import subprocess
 import tempfile
 import unittest
@@ -10,8 +11,8 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 scope = {"__name__": "agentc2_oporder_test"}
-exec((ROOT / "electron" / "remote.py").read_text(), scope)
-exec((ROOT / "electron" / "oporders.py").read_text(), scope)
+exec_sources(scope, (ROOT / "electron" / "remote.py"))
+exec_sources(scope, (ROOT / "electron" / "oporders.py"))
 
 
 class OpOrders(unittest.TestCase):

@@ -29,6 +29,7 @@ class AntigravityAdapter:
         self.loop = self.agent = self.stop_event = self.thread = self.task = None
         self.active = self.response = None
         self.started = Future()
+        self.replay_history = True
         self.callbacks = {}
         self.closing = self.interrupt_requested = self.denied = self.tool_failed = False
         self.storage = private_directory(journal.directory / "antigravity-sdk")
@@ -58,10 +59,12 @@ class AntigravityAdapter:
             options["policies"] = policy.safe_defaults(handler=approve)
         # Provider defaults retain the SDK's default command-denial policy.
         base_url = self.env.get("AGENTC2_ANTIGRAVITY_BASE_URL")
+        if self.session.get("model"):
+            options["model"] = self.session["model"]
         if base_url:
-            options.update(base_url=base_url, model=self.env.get("AGENTC2_ANTIGRAVITY_MODEL"))
+            options.update(base_url=base_url, model=self.session.get("model") or self.env.get("AGENTC2_ANTIGRAVITY_MODEL"))
             return self.sdk.LocalOpenAIAgentConfig(**options)
-        if self.env.get("AGENTC2_ANTIGRAVITY_MODEL"):
+        if self.env.get("AGENTC2_ANTIGRAVITY_MODEL") and not self.session.get("model"):
             options["model"] = self.env["AGENTC2_ANTIGRAVITY_MODEL"]
         return self.sdk.LocalAgentConfig(**options)
 
@@ -88,7 +91,7 @@ class AntigravityAdapter:
             async with self.sdk.Agent(config) as agent:
                 self.agent = agent
                 self.bind_native()
-                if self.session["providerSessionId"]:
+                if self.session["providerSessionId"] and self.replay_history:
                     for index, step in enumerate(agent.conversation.history):
                         role = "user" if getattr(step.source, "value", step.source) == "USER" else "assistant"
                         if step.content and getattr(step.source, "value", step.source) in ("USER", "MODEL"):
@@ -123,6 +126,22 @@ class AntigravityAdapter:
             coroutine.close()
             raise ProviderRejected("Antigravity SDK is disconnected")
         return asyncio.run_coroutine_threadsafe(coroutine, self.loop).result(timeout=self.timeout)
+
+    def set_model(self, model):
+        if self.active is not None:
+            raise ProviderRejected("Wait for the current Antigravity turn before changing the model")
+        session = {**self.session, "providerSessionId": self.native_id, "model": model}
+        journal, sdk, env, timeout = self.journal, self.sdk, self.env, self.timeout
+        self.stop()
+        self.__init__(session, journal, sdk=sdk, env=env, timeout=timeout)
+        self.replay_history = False
+        try:
+            self.start()
+        except Exception as error:
+            # The old SDK context has closed. Never report this as a clean
+            # rejection with an idle session; recovery must inspect its state.
+            raise RuntimeError("Antigravity model change could not resume the conversation") from error
+        return dict(model=model, providerSessionId=self.native_id)
 
     def send(self, text, command_id):
         async def submit():

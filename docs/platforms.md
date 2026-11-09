@@ -17,6 +17,8 @@ Linux targets GNOME and KDE Plasma with X11 or XWayland available. Native Waylan
 
 Install the Debian package with `sudo apt install ./AgentC2-<version>-linux-amd64.deb`. Launch **AgentC2** from the applications menu or run `agentc2`.
 
+Local sessions require Python 3.10+ and tmux on Linux. On Debian/Ubuntu, run `sudo apt install python3 tmux openssh-client`; the Debian package declares these dependencies. AppImage and source installs require you to install them separately. If inventory reports a missing dependency, install it and refresh; restarting AgentC2 is unnecessary. SSH sessions need Python 3.10+ and tmux on the remote execution host.
+
 For AppImage, run `chmod +x AgentC2-<version>-linux-x86_64.AppImage`, then execute it as your normal user. AppImages need FUSE 2 (`libfuse2` on Ubuntu 22.04, `libfuse2t64` on newer Ubuntu). If FUSE is unavailable, use `--appimage-extract`, then run `squashfs-root/AppRun`. AppImage does not install its own applications-menu shortcut. The Debian package registers its launcher and PNG icon.
 
 Notifications need `libnotify4` and a running desktop notification service; see [Electron notifications](https://www.electronjs.org/docs/latest/tutorial/notifications). Install `openssh-client`; the system also needs Electron's GTK/NSS/X11 libraries (the Debian package declares runtime dependencies). In a Wayland desktop, use the XWayland compatibility session when native Wayland integration causes clipboard or input differences. Do not run AgentC2 as root or disable Chromium's sandbox to work around an installation problem. Ubuntu policies restricting unprivileged user namespaces may require administrator configuration of an AppArmor profile; use the Debian package and your distribution's Electron application guidance.
@@ -34,6 +36,14 @@ The application menu supports About, Hide, Services, and Quit; Edit provides nat
 Use ⌘K for quick switching, ⌘F for history search, ⌘C to copy terminal selection, and ⌘V to paste. Ctrl+C remains a terminal interrupt even when text is selected. Shift+PageUp/PageDown scroll history; compact keyboards may require Fn for PageUp/PageDown. Windows/Linux retain Ctrl-based shortcuts.
 
 ## SSH configuration and authentication
+
+`AGENTC2_SSH_BINARY` can select an absolute SSH executable path instead of the
+platform default. It is passed directly to process creation, never a shell.
+Use the same client to verify authentication and host keys before launching the
+app. This also allows Windows installations affected by the OpenSSH 9.5 console
+parser bug ([upstream issue](https://github.com/PowerShell/Win32-OpenSSH/issues/2275))
+to use a separately installed client containing the upstream fix.
+Keep its installation intact, and restart AgentC2 after changing the environment.
 
 First connect using the same system `ssh` binary in a normal terminal. Verify the server's host-key fingerprint through a trusted source and accept it there. AgentC2 uses `BatchMode=yes` and `StrictHostKeyChecking=yes`, so it cannot answer password, passphrase, or unknown-host prompts. Configure an SSH alias, port, and key in `~/.ssh/config`, or `%USERPROFILE%\.ssh\config` on Windows, and enter the alias in Settings → SSH hosts. Set the same port in AgentC2 if your alias uses a non-default port.
 

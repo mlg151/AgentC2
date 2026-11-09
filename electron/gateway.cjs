@@ -15,8 +15,8 @@ const MAX_MESSAGE = 1_100_000;
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
 
 class Gateway {
-  constructor({ directory, assets, service, secure = true }) {
-    Object.assign(this, { directory, assets, service, secure });
+  constructor({ directory, assets, service, secure = true, desktopHandlers = new Map() }) {
+    Object.assign(this, { directory, assets, service, secure, desktopHandlers });
     this.file = path.join(directory, 'remote-access.json');
     this.data = { enabled: false, port: 43127, url: '', transport: 'https', devices: [], requests: [] };
     if (fs.existsSync(this.file)) {
@@ -134,7 +134,7 @@ class Gateway {
     if (!this.previewFlight) {
       const origin = new URL(this.data.url);
       origin.port = origin.port === '8443' ? '9443' : '8443';
-      this.preview = new PreviewGateway({ port: this.data.port === 65535 ? 65534 : this.data.port + 1, origin: origin.origin, secure: this.secureCookie(), deviceActive: (deviceId) => this.data.devices.some((device) => device.id === deviceId && device.expiresAt > Date.now()) });
+      this.preview = new PreviewGateway({ port: this.data.port >= 65534 ? this.data.port - 2 : this.data.port + 2, origin: origin.origin, secure: this.secureCookie(), deviceActive: (deviceId) => this.data.devices.some((device) => device.id === deviceId && device.expiresAt > Date.now()) });
       this.previewFlight = this.preview.start().catch((error) => { this.previewFlight = null; throw new Error(`Preview endpoint unavailable: ${error.message}. Check the additional Tailscale Serve endpoint.`); });
     }
     await this.previewFlight;
@@ -282,6 +282,7 @@ class Gateway {
       case 'health': return service.health();
       case 'acknowledge': return service.acknowledge(args[0]);
       case 'session:pin': return service.setSessionPinned(args[0], args[1]);
+      case 'session:rename': return service.renameSession(args[0], args[1]);
       case 'create': return this.once(device, request, () => service.create(args[0], false));
       case 'chat:capabilities': return service.chats.capabilities(args[0]);
       case 'chat:open': {

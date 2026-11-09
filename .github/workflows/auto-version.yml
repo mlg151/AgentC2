@@ -1,0 +1,37 @@
+name: Assign release version
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, reopened, synchronize]
+  workflow_dispatch:
+    inputs:
+      pull_request:
+        description: Pull request number to version
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: read
+  actions: write
+
+concurrency:
+  group: version-pr-${{ github.event.pull_request.number || inputs.pull_request }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      # Never check out or execute PR code with this workflow's write token.
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha || 'main' }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: node scripts/auto-version.cjs
+        env:
+          GH_TOKEN: ${{ github.token }}

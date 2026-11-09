@@ -21,8 +21,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "electron"))
 from chat_journal import Journal
 from chat_protocol import CONTRACT
 from chat_codex import CodexAdapter
+from chat_adapters import probe_capabilities
 from chat_antigravity import AntigravityAdapter
 from chat_claude import ClaudeAdapter
+from chat_opencode import OpenCodeAdapter
 
 
 def profile_environment(command):
@@ -55,7 +57,7 @@ def wait_turn(journal, identifier, after, timeout):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--provider", required=True, choices=["codex", "claude", "antigravity"])
+    parser.add_argument("--provider", required=True, choices=CONTRACT["providers"])
     parser.add_argument("--profile", choices=["claude-ornith", "claude-sparkx"])
     parser.add_argument("--ssh", help="Explicit SSH host; uses existing known-host verification and key authentication")
     parser.add_argument("--timeout", type=int, default=120)
@@ -64,7 +66,7 @@ def main():
         parser.error("--profile requires Claude")
     if args.ssh:
         repo = Path(__file__).resolve().parents[1]
-        names = ["chat_runtime.py", "chat_antigravity_cli.py", "chat_adapters.py", "chat_antigravity.py", "chat_claude.py", "chat_codex.py", "chat_codex_schema.py", "chat-codex-schema.json", "chat_format.py", "chat_journal.py", "chat_protocol.py", "chat-protocol.json"]
+        names = ["chat_runtime.py", "chat_antigravity_cli.py", "chat_adapters.py", "chat_antigravity.py", "chat_claude.py", "chat_claude_history.py", "chat_opencode.py", "chat_codex.py", "chat_codex_schema.py", "chat-codex-schema.json", "chat_format.py", "chat_journal.py", "chat_protocol.py", "chat-protocol.json"]
         files = {"electron/" + name: (repo / "electron" / name).read_text() for name in names}
         files["tests/chat-live.py"] = Path(__file__).read_text()
         encoded = base64.b64encode(json.dumps(files).encode()).decode()
@@ -81,16 +83,20 @@ def main():
         journal = Journal(root / "journal")
         marker = "AGENTC2_SMOKE_" + uuid.uuid4().hex[:12]
         capabilities = dict(provider=args.provider, version="live-smoke", status="supported", reason=None, **{name: name in ("streaming", "resume", "interrupt") for name in CONTRACT["capabilities"]})
+        if args.provider == "codex":
+            capabilities = probe_capabilities("codex")
+            if capabilities["status"] != "supported":
+                raise RuntimeError("Installed Codex version has not been validated")
         native = None
         evidence = []
         try:
             for resumed in (False, True):
                 print(json.dumps(dict(provider=args.provider, profile=args.profile, status="turn_started", resumed=resumed)), flush=True)
-                command = dict(protocolVersion=1, commandId=str(uuid.uuid4()), operation="create", payload=dict(provider=args.provider, cwd=folder, title="AgentC2 disposable live validation", roeProfile="provider-default" if args.provider == "antigravity" else "gated", **({"providerSessionId": native} if resumed else {})))
+                command = dict(protocolVersion=1, commandId=str(uuid.uuid4()), operation="create", payload=dict(provider=args.provider, cwd=folder, title="AgentC2 disposable live validation", roeProfile="provider-default" if args.provider in ("antigravity", "opencode") else "gated", **({"providerSessionId": native} if resumed else {})))
                 receipt, _ = journal.accept(command, capabilities)
                 identifier = receipt["sessionId"]
                 session = journal.history(identifier)["session"]
-                cls = dict(codex=CodexAdapter, claude=ClaudeAdapter, antigravity=AntigravityAdapter)[args.provider]
+                cls = dict(codex=CodexAdapter, claude=ClaudeAdapter, antigravity=AntigravityAdapter, opencode=OpenCodeAdapter)[args.provider]
                 adapter = cls(session, journal, env=environment)
                 adapter.start()
                 before = journal.history(identifier)["latestCursor"]

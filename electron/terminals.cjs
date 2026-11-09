@@ -6,8 +6,8 @@ const dimensions = (cols, rows) => ({ cols: Math.floor(Math.max(20, Math.min(Num
 
 // One SSH PTY per remote session; handles belong to individual UI connections.
 class Terminals {
-  constructor({ spawn, configure, history, scroll, emit, onOutput, onDispose }) {
-    Object.assign(this, { spawn, configure, history, scroll, emit, onOutput, onDispose });
+  constructor({ spawn, configure, history, scroll, confirmInput, emit, onOutput, onDispose, platform = process.platform }) {
+    Object.assign(this, { spawn, configure, history, scroll, confirmInput, emit, onOutput, onDispose, platform });
     this.sessions = new Map();
     this.handles = new Map();
     this.opening = new Map();
@@ -46,18 +46,31 @@ class Terminals {
     const mirror = new Terminal({ ...size, scrollback: 5000, allowProposedApi: true });
     const serializer = new SerializeAddon();
     mirror.loadAddon(serializer);
-    const record = { key, name, hostId, terminal, mirror, serializer, ...size, handles: new Set(), owner: null, queue: Promise.resolve(), sequence: 0, exitCode: null, connection: 'connected', reconnectAttempts: 0, reconnectTimer: null, scrollQueue: Promise.resolve(), disposed: false, activityBuckets: new Map() };
+    const record = { key, name, hostId, terminal, mirror, serializer, ...size, handles: new Set(), owner: null, queue: Promise.resolve(), sequence: 0, exitCode: null, connection: 'connecting', reconnectAttempts: 0, reconnectTimer: null, scrollQueue: Promise.resolve(), disposed: false, activityBuckets: new Map() };
     this.sessions.set(key, record);
     this.bind(record, terminal);
   }
 
   bind(record, terminal) {
+    // TERM is fixed to xterm-256color. tmux emits smcup (alternate screen)
+    // or smkx (application keypad, also with clear-on-attach disabled) only
+    // after putting its client tty into raw mode. SSH banners/PTY creation
+    // are not readiness: input sent then can be flushed by tmux startup.
+    // Windows ConPTY consumes both sequences while re-rendering the screen.
+    // It passes through DA2 (CSI > [0] c), which tmux's tty_send_requests emits
+    // after tty_start_tty. Use that boundary on Windows, including reattach;
+    // console setup, titles, banners and arbitrary output still cannot unlock input.
+    let startupTail = '', initialized = false, ended = false;
     terminal.onData((data) => {
       if (record.disposed || record.terminal !== terminal) return;
       this.onOutput?.(record, data);
-      if (record.connection !== 'connected') {
-        record.connection = 'connected'; record.reconnectAttempts = 0;
-        this.publish(record);
+      let becameReady = false;
+      if (!initialized) {
+        const startup = startupTail + data;
+        initialized = startup.includes('\x1b[?1049h') || startup.includes('\x1b[?1h\x1b=') ||
+          this.platform === 'win32' && /\x1b\[>0?c/.test(startup);
+        startupTail = initialized ? '' : startup.slice(-16);
+        becameReady = initialized;
       }
       const bucket = Math.floor(Date.now() / 10000);
       record.activityBuckets.set(bucket, (record.activityBuckets.get(bucket) || 0) + Buffer.byteLength(data));
@@ -65,6 +78,10 @@ class Terminals {
       record.queue = record.queue.then(() => new Promise((resolve) => {
         if (record.disposed) return resolve();
         record.mirror.write(data, () => {
+          if (becameReady && !ended && !record.disposed && record.terminal === terminal && record.exitCode === null && record.connection !== 'exited') {
+            record.connection = 'connected'; record.reconnectAttempts = 0;
+            this.publish(record);
+          }
           record.sequence++;
           for (const id of record.handles) {
             const handle = this.handles.get(id);
@@ -75,6 +92,7 @@ class Terminals {
       }));
     });
     terminal.onExit(({ exitCode, signal }) => {
+      ended = true;
       if (record.disposed || record.terminal !== terminal) return;
       if (exitCode === 255 || signal === 9) {
         record.connection = 'reconnecting';
@@ -154,10 +172,24 @@ class Terminals {
     });
   }
 
-  async take(client, id) {
+  // Internal callers without a rendered Connect button must observe the same
+  // readiness boundary. This waits for attachment, never queues terminal input.
+  async waitForConnection(client, id, timeout = 10000) {
+    const deadline = Date.now() + timeout;
+    while (this.state(client, id).connection === 'connecting') {
+      if (Date.now() >= deadline) throw new Error('Terminal connection timed out');
+      await new Promise((resolve) => setTimeout(resolve, Math.min(100, Math.max(1, deadline - Date.now()))));
+    }
+    const state = this.state(client, id);
+    if (state.connection !== 'connected') throw new Error(state.exitCode !== null ? 'Terminal has exited' : 'Terminal is reconnecting');
+  }
+
+  async take(client, id, captureOwner) {
     const { record } = this.get(client, id);
+    if (record.commanderAction && record.commanderAction.ownerId !== client.id) throw new Error('CENTCOM reviewed action owns this session until dispatch settles');
     if (record.exitCode !== null) throw new Error('Terminal has exited');
-    if (record.connection !== 'connected') throw new Error('Terminal is reconnecting');
+    if (record.connection !== 'connected') throw new Error(record.connection === 'connecting' ? 'Terminal is connecting' : 'Terminal is reconnecting');
+    captureOwner?.(record.owner);
     record.owner = client;
     this.publish(record);
     // A previous desktop controller may have left tmux in copy mode. Finish
@@ -169,7 +201,7 @@ class Terminals {
   assertOwner(client, record) {
     if (record.owner?.id !== client.id) throw new Error('Take control of this session first');
     if (record.exitCode !== null) throw new Error('Terminal has exited');
-    if (record.connection !== 'connected') throw new Error('Terminal is reconnecting');
+    if (record.connection !== 'connected') throw new Error(record.connection === 'connecting' ? 'Terminal is connecting' : 'Terminal is reconnecting');
   }
 
   assertSessionOwner(client, name, hostId) {
@@ -179,7 +211,7 @@ class Terminals {
     } else if (client.id !== 'desktop') throw new Error('Open the session and take control first');
   }
 
-  async write(client, id, data) {
+  async write(client, id, data, { confirmed = false } = {}) {
     const { record } = this.get(client, id);
     this.assertOwner(client, record);
     if (typeof data !== 'string' || data.length > 1_000_000) throw new Error('Terminal input exceeds 1 MB');
@@ -187,7 +219,13 @@ class Terminals {
     if (record.historyActive) await this.scrollRemote(client, id, 'latest', 1);
     this.get(client, id);
     this.assertOwner(client, record);
-    record.terminal.write(data);
+    if (confirmed) {
+      if (!this.confirmInput) throw new Error('Acknowledged terminal input is unavailable');
+      await this.confirmInput(record, data, () => {
+        this.get(client, id);
+        this.assertOwner(client, record);
+      });
+    } else record.terminal.write(data);
   }
 
   resize(client, id, cols, rows) {

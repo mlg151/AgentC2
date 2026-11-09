@@ -7,6 +7,45 @@ const { Store, defaults, validateSettings, resolveRoeProfile, validateRoeLaunch,
 const { Attention, classify } = require('../electron/attention.cjs');
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-hq-state-test-'));
 try {
+  function legacyStore(name, presets) {
+    const location = path.join(directory, name);
+    fs.mkdirSync(location);
+    fs.writeFileSync(path.join(location, 'workspace.json'), JSON.stringify({
+      settings: { ...defaults(), presets },
+      workspace: { tabs: [], selectedKey: null, splitKey: null, metadata: {} },
+    }));
+    return location;
+  }
+  const legacyPresets = defaults().presets.filter((preset) => preset.provider !== 'opencode');
+  const customPresets = legacyPresets.map((preset) => ({ ...preset, cwd: '/srv/project', instructions: 'Keep my guidance' }));
+  const upgradePath = legacyStore('upgrade', customPresets);
+  const upgraded = new Store(upgradePath);
+  assert.deepEqual(upgraded.data.settings.presets.slice(0, customPresets.length), validateSettings({ ...defaults(), presets: customPresets }).presets, 'Upgrade preserves customized presets');
+  assert.equal(upgraded.data.settings.presets.at(-1).provider, 'opencode', 'Existing installs receive the OpenCode launch preset');
+  assert.equal(upgraded.data.settings.presets.at(-1).command, 'opencode');
+  assert.equal(new Store(upgradePath).data.settings.presets.filter((preset) => preset.provider === 'opencode').length, 1, 'Restart must not duplicate the migrated preset');
+  upgraded.save('settings', validateSettings({ ...upgraded.data.settings, presets: customPresets }));
+  assert.equal(new Store(upgradePath).data.settings.presets.some((preset) => preset.provider === 'opencode'), false, 'Intentional removal must survive restart');
+
+  const customOpenCode = { ...defaults().presets.find((preset) => preset.provider === 'opencode'), id: 'my-opencode', command: '/opt/bin/opencode', args: '--custom' };
+  const existingPath = legacyStore('existing-opencode', [...legacyPresets, customOpenCode]);
+  assert.deepEqual(new Store(existingPath).data.settings.presets, validateSettings({ ...defaults(), presets: [...legacyPresets, customOpenCode] }).presets, 'Existing OpenCode presets remain unchanged without adding another');
+
+  const collisionPath = legacyStore('id-collision', [...legacyPresets, { ...legacyPresets[0], id: 'opencode' }, { ...legacyPresets[0], id: 'opencode-2' }]);
+  assert.equal(new Store(collisionPath).data.settings.presets.at(-1).id, 'opencode-3', 'Migration must not overwrite another provider using the default ID');
+
+  const fullPresets = Array.from({ length: 100 }, (_, index) => ({ ...legacyPresets[0], id: `custom-${index}` }));
+  const fullPath = legacyStore('preset-limit', fullPresets);
+  const fullStore = new Store(fullPath);
+  assert.equal(fullStore.data.settings.presets.length, 100, 'Migration must respect the preset limit');
+  fullStore.save('settings', validateSettings({ ...fullStore.data.settings, presets: fullPresets.slice(1) }));
+  assert.equal(new Store(fullPath).data.settings.presets.at(-1).provider, 'opencode', 'Deferred migration runs when room becomes available');
+
+  const freshPath = path.join(directory, 'fresh-install');
+  const freshStore = new Store(freshPath);
+  freshStore.save('settings', validateSettings({ ...freshStore.data.settings, presets: legacyPresets }));
+  assert.equal(new Store(freshPath).data.settings.presets.some((preset) => preset.provider === 'opencode'), false, 'Fresh installs also respect intentional removal');
+
   const store = new Store(directory);
   const config = defaults();
   config.hosts[0].autoForward = true;

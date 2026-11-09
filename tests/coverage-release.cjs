@@ -25,11 +25,16 @@ try {
     ...['win-x64', 'linux-x64', 'mac-x64', 'mac-arm64'].map((target) => `AgentC2-${version}-${target}-signing.txt`),
   ];
   for (const file of required) fs.writeFileSync(path.join(directory, file), `fixture ${file}\n`);
+  const yaml = require('js-yaml');
+  for (const [name, asset] of [['latest.yml', required.find((f) => f.endsWith('.exe'))], ['latest-linux.yml', required.find((f) => f.endsWith('.AppImage'))], ...['x64', 'arm64'].map((arch) => [`latest-mac-${arch}.yml`, `AgentC2-${version}-mac-${arch}.zip`])]) {
+    const data = fs.readFileSync(path.join(directory, asset));
+    fs.writeFileSync(path.join(directory, name), yaml.dump({ version, files: [{ url: asset, sha512: crypto.createHash('sha512').update(data).digest('base64'), size: data.length }] }));
+  }
   fs.writeFileSync(path.join(directory, 'SHA256SUMS.txt'), 'old checksums');
   const result = run('prepare-release', [directory]);
   assert.equal(result.status, 0, result.stderr);
   const sums = fs.readFileSync(path.join(directory, 'SHA256SUMS.txt'), 'utf8');
-  const expected = required.sort().map((file) => `${crypto.createHash('sha256').update(fs.readFileSync(path.join(directory, file))).digest('hex')}  ${file}`).join('\n') + '\n';
+  const expected = fs.readdirSync(directory).filter((file) => file !== 'SHA256SUMS.txt').sort().map((file) => `${crypto.createHash('sha256').update(fs.readFileSync(path.join(directory, file))).digest('hex')}  ${file}`).join('\n') + '\n';
   assert.equal(sums, expected);
 } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 console.log('PASS version/tag agreement, missing release artifacts, and deterministic complete checksums');

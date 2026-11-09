@@ -29,7 +29,7 @@ Match existing code: two-space indentation, single quotes, and semicolons in Typ
 
 ## Testing Guidelines
 
-Tests are standalone `.cjs` scripts using Node assertions and Playwright where needed; `python3 tests/remote-helper.py` checks Linux helper exit-evidence parsing; no coverage threshold is configured. Live suites require local OpenSSH, key-based access, and remote Python 3/tmux; launch-mode checks also require provider CLIs. Set `AGENTC2_HOST` to the intended SSH test host; no host is hardcoded. Tests create remote sessions and clean up their fixtures. Preserve fixture isolation and terminal-test clipboard restoration. Run relevant suites for terminal, lifecycle, or launch changes and report any skipped checks.
+Tests are standalone `.cjs` scripts using Node assertions and Playwright where needed; `python3 tests/remote-helper.py` checks Linux helper exit-evidence parsing; CI enforces aggregate acceptance floors of 93% statements, 89% branches, 93% functions, and 96% lines, with all six coverage shards and no unobserved production modules. Strict local coverage commands retain the unfinished per-file 100% target; see `docs/testing-coverage.md`. Live suites require local OpenSSH, key-based access, and remote Python 3/tmux; launch-mode checks also require provider CLIs. Set `AGENTC2_HOST` to the intended SSH test host; no host is hardcoded. Tests create remote sessions and clean up their fixtures. Preserve fixture isolation and terminal-test clipboard restoration. Run relevant suites for terminal, lifecycle, or launch changes and report any skipped checks.
 
 ## Commit & Pull Request Guidelines
 
@@ -38,3 +38,13 @@ There are no commits yet, so no established message convention exists. Use conci
 ## Security & Configuration
 
 Preserve renderer isolation, narrow preload APIs, SSH host-key verification, and managed-session-only stop controls. Keep `src/types.ts` synchronized with bridge changes. Never commit credentials or private keys. New/resumed agents currently launch with full permissions; review changes to those flags explicitly.
+
+## Required CI and regression evidence
+
+PRs target `main`. The rollout configures branch protection to require the GitHub Actions `Quality gate`, an up-to-date base, and resolved review conversations, including for administrators. Self-merge is supported with zero independent approvals. Force pushes and branch deletion are blocked.
+
+Register every new executable test in `tests/suites.json`: required CI group, nested suite with its parent, or explicitly optional with a reason. Fixtures and reusable helpers belong in their named subdirectories. `npm run test:inventory` rejects omissions; `npm run test:ci` also validates inventory. Existing npm entrypoints remain available. Use Node 22 (`.nvmrc`).
+
+Required tests use isolated fixtures without provider credentials or paid model calls. Windows CI provisions Ubuntu WSL1; missing Python/tmux is a failure. Cleanup CI uses a separate disposable SSH account. Never point cleanup tests at a real user's home. Suite reports, durations, skip messages, process logs, browser traces, and screenshots are retained as CI artifacts for 14 days. Tests are not automatically retried. Bug fixes need regression evidence reproducing the original failure; UI changes need screenshots. Report skipped checks and limitations in the PR.
+
+Updates must preserve running managed sessions without requiring users to stop, recreate, or manually migrate them. Worker source changes must remain compatible with deployed workers; defer replacement while they own sessions, pending commands, or SDK preparation. Never replay uncertain commands as part of an upgrade. `npm run test:chat:upgrade` is a required Quality gate regression via the `linux-python` suite and may not be skipped or made optional. Protocol or journal changes require an explicit compatibility/migration path plus regression evidence against the deployed v1 fixtures before merge; do not simply refresh those fixtures to silence failures.

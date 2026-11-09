@@ -17,18 +17,22 @@ import subprocess
 import sys
 import stat
 import tempfile
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 import time
 import uuid
 
 
 HOME = Path.home()
-PROVIDERS = {"codex": "codex", "claude": "claude", "antigravity": "agy"}
+# Standalone provider installers use user-local directories that noninteractive
+# SSH sessions may omit. Keep explicitly configured executables first.
+os.environ["PATH"] = os.pathsep.join([os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"), str(HOME / ".local" / "bin"), str(HOME / ".opencode" / "bin")])
+PROVIDERS = {"codex": "codex", "claude": "claude", "antigravity": "agy", "opencode": "opencode"}
 SESSION_PROVIDERS = {*PROVIDERS, "terminal"}
 PERMISSION_FLAGS = {
     "codex": "--dangerously-bypass-approvals-and-sandbox",
     "claude": "--dangerously-skip-permissions",
     "antigravity": "--dangerously-skip-permissions",
+    "opencode": "--auto",
 }
 ID_RE = re.compile(r"^[a-zA-Z0-9_-]{6,100}$")
 TMUX_RE = re.compile(r"^hq-[a-f0-9]{12}$")
@@ -119,13 +123,12 @@ def codex_sessions():
         return []
     rows = []
     try:
-        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT id, title, cwd, updated_at_ms, archived FROM threads "
-            "ORDER BY updated_at_ms DESC"
-        ).fetchall()
-        conn.close()
+        with closing(sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT id, title, cwd, updated_at_ms, archived FROM threads "
+                "ORDER BY updated_at_ms DESC"
+            ).fetchall()
     except sqlite3.Error:
         return []
     return [
@@ -212,7 +215,10 @@ def claude_sessions():
                     "kind": "background", "canResume": True,
                 })
                 entry["state"] = agent.get("state") or "live"
-                entry["kind"] = agent.get("kind") or entry["kind"]
+                # Native Claude kinds are not AgentC2 inventory kinds. Keep
+                # external interactive sessions resumable without granting
+                # managed-session controls or invalidating the host cache.
+                entry["kind"] = {"interactive": "conversation", "background": "background"}.get(agent.get("kind"), entry["kind"])
                 entry["agentId"] = agent.get("id")
                 result[session_id] = entry
         except (ValueError, TypeError):
@@ -260,6 +266,32 @@ def antigravity_sessions():
     return list(result.values())
 
 
+def opencode_database():
+    return Path(os.environ.get("XDG_DATA_HOME") or HOME / ".local" / "share") / "opencode" / "opencode.db"
+
+
+def opencode_sessions():
+    database = opencode_database()
+    if not database.is_file() or database.is_symlink():
+        return []
+    try:
+        sessions = {}
+        with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=2)) as connection:
+            connection.row_factory = sqlite3.Row
+            tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            # V2 keeps the legacy table during migration. Prefer migrated IDs.
+            for table in ("session", "session_v2"):
+                if table not in tables:
+                    continue
+                rows = connection.execute(f"SELECT id, title, directory, time_updated FROM {table} WHERE parent_id IS NULL ORDER BY time_updated DESC LIMIT 400").fetchall()
+                for row in rows:
+                    if isinstance(row["id"], str) and re.fullmatch(r"ses_[A-Za-z0-9_-]{1,96}", row["id"]):
+                        sessions[row["id"]] = {"key": "opencode:" + row["id"], "id": row["id"], "provider": "opencode", "title": str(row["title"] or "OpenCode session")[:150], "cwd": row["directory"], "updatedAt": normalize_time(row["time_updated"]), "state": "saved", "kind": "conversation", "canResume": True, "canAttach": False}
+        return list(sessions.values())
+    except (OSError, sqlite3.Error, ValueError):
+        return []
+
+
 def tmux_option(name, option):
     value = run(["tmux", "show-options", "-qv", "-t", name, option], timeout=3)
     return value.stdout.strip() if value.returncode == 0 else ""
@@ -280,7 +312,7 @@ def tmux_sessions():
         name, created, attached, command, cwd = fields[:5]
         managed = bool(TMUX_RE.fullmatch(name)) and tmux_option(name, "@hq_provider") in SESSION_PROVIDERS
         provider = tmux_option(name, "@hq_provider") if managed else {
-            "agy": "antigravity", "codex": "codex", "claude": "claude"
+            "agy": "antigravity", "codex": "codex", "claude": "claude", "opencode": "opencode", "opencode.exe": "opencode"
         }.get(command)
         if provider not in SESSION_PROVIDERS:
             continue
@@ -304,6 +336,8 @@ def tmux_sessions():
             "cwd": tmux_option(name, "@hq_cwd") if managed else cwd,
             "updatedAt": iso_from_epoch(fields[7] if len(fields) > 7 else created),
             "startedAt": iso_from_epoch(created),
+            "processId": fields[8] if len(fields) > 8 and fields[8].isdigit() else None,
+            "processRole": "terminal_wrapper",
             "state": "exited" if dead else "live", "kind": "managed" if managed else "external-tmux",
             "managed": managed, "attached": attached != "0", "canAttach": True,
             "canInterrupt": managed and not dead, "canStop": managed,
@@ -344,7 +378,7 @@ def unmanaged_processes(worker_pid=None):
 
     result = []
     for pid, (_, command, tty) in processes.items():
-        provider = {"codex": "codex", "claude": "claude", "agy": "antigravity"}.get(command)
+        provider = {"codex": "codex", "claude": "claude", "agy": "antigravity", "opencode": "opencode", "opencode.exe": "opencode"}.get(command)
         if not provider or inside_tmux(pid):
             continue
         result.append({
@@ -381,10 +415,18 @@ def chat_inventory_events(journal_events, chat):
     return events
 
 
+def require_tmux(payload=None):
+    if shutil.which("tmux"):
+        return
+    location = "this computer (the default WSL distribution on Windows)" if (payload or {}).get("localHost") else "the execution host"
+    raise ValueError(f"tmux is required on {location}. Install tmux (Debian/Ubuntu: sudo apt install tmux; macOS: brew install tmux), then refresh and retry.")
+
+
 def inventory(payload=None):
+    require_tmux(payload)
     sessions = (
         tmux_sessions() + codex_sessions()
-        + claude_sessions() + antigravity_sessions()
+        + claude_sessions() + antigravity_sessions() + opencode_sessions()
     )
     worker_pid = None
     if payload and (HOME / ".cache" / "agentc2" / "chat-v1" / "worker.sock").exists():
@@ -430,6 +472,66 @@ def inventory(payload=None):
     return {"host": socket.gethostname(), "user": getpass.getuser(), "sessions": sessions}
 
 
+def resource_constraints(proc_root="/proc", cgroup_root="/sys/fs/cgroup"):
+    """Read pressure and effective cgroup-v2 ancestor limits without mutation."""
+    proc, root = Path(proc_root), Path(cgroup_root)
+    def pressure(directory):
+        result = {}
+        for resource in ("cpu", "memory", "io"):
+            source = directory / (resource + ".pressure") if directory != proc / "pressure" else directory / resource
+            try:
+                result[resource] = {parts[0]: {key: float(value) for key, value in (part.split("=", 1) for part in parts[1:])}
+                                    for parts in (line.split() for line in source.read_text().splitlines()) if parts}
+            except (OSError, ValueError, IndexError):
+                result[resource] = None
+        return result
+    result = {"status": "unknown", "version": None, "reason": None, "memoryLimitBytes": None,
+              "memoryHeadroomBytes": None, "memoryLimitStatus": "unknown", "cpuLimitCores": None,
+              "cpuLimitStatus": "unknown", "pressure": pressure(proc / "pressure"), "groupPressure": None}
+    if not (root / "cgroup.controllers").exists():
+        result.update(status="unsupported", reason="cgroup v2 is unavailable; host pressure may still be reported")
+        return result
+    try:
+        membership = next(line[3:] for line in (proc / "self" / "cgroup").read_text().splitlines() if line.startswith("0::"))
+        if not membership.startswith("/") or ".." in Path(membership).parts:
+            raise ValueError("Unresolvable cgroup membership")
+        group = root / membership.lstrip("/")
+        if not group.is_dir():
+            raise ValueError("Cgroup membership is outside the mounted hierarchy")
+        result.update(status="reported", version=2, groupPressure=pressure(group))
+        memory_limits, headrooms, cpu_limits = [], [], []
+        memory_known, cpu_known = True, True
+        # Include the mounted root, without reading limits from its parents.
+        ancestors = [group, *group.parents]
+        for ancestor in ancestors[:ancestors.index(root) + 1]:
+            try:
+                maximum = (ancestor / "memory.max").read_text().strip()
+                if maximum != "max":
+                    limit = int(maximum)
+                    memory_limits.append(limit)
+                    headrooms.append(max(0, limit - int((ancestor / "memory.current").read_text().strip())))
+            except (OSError, ValueError):
+                if ancestor != root or (ancestor / "memory.max").exists():
+                    memory_known = False
+            try:
+                quota, period = (ancestor / "cpu.max").read_text().split()
+                if quota != "max":
+                    cpu_limits.append(int(quota) / int(period))
+            except (OSError, ValueError, ZeroDivisionError):
+                if ancestor != root or (ancestor / "cpu.max").exists():
+                    cpu_known = False
+        result.update(memoryLimitBytes=min(memory_limits) if memory_limits else None,
+                      memoryHeadroomBytes=min(headrooms) if headrooms else None,
+                      memoryLimitStatus="limited" if memory_known and memory_limits else "unlimited" if memory_known else "unknown",
+                      cpuLimitCores=min(cpu_limits) if cpu_limits else None,
+                      cpuLimitStatus="limited" if cpu_known and cpu_limits else "unlimited" if cpu_known else "unknown")
+        if not memory_known or not cpu_known:
+            result["reason"] = "Some ancestor limits are unavailable; reported limits are not proof of full headroom"
+    except (OSError, ValueError, StopIteration) as error:
+        result["reason"] = str(error) or "Cgroup membership is unavailable"
+    return result
+
+
 def health(payload=None):
     # Return counters; the desktop computes CPU utilization between samples.
     # Guest ticks are already included in user/nice, so exclude them from total.
@@ -441,7 +543,7 @@ def health(payload=None):
         page_size = int(re.search(r"page size of (\d+) bytes", pages).group(1))
         free_pages = sum(int(value) for value in re.findall(r"Pages (?:free|inactive|speculative):\s+(\d+)", pages))
         usage = shutil.disk_usage(HOME)
-        return {"cpuTotal": 0, "cpuIdle": 0, "memoryTotal": total, "memoryUsed": max(0, total - free_pages * page_size), "disks": [{"path": str(HOME), "total": usage.total, "used": usage.used, "free": usage.free}], "sampledAt": time.time() * 1000, "gpu": {"status": "unsupported", "sampledAt": None, "devices": []}}
+        return {"cpuTotal": 0, "cpuIdle": 0, "memoryTotal": total, "memoryUsed": max(0, total - free_pages * page_size), "disks": [{"path": str(HOME), "total": usage.total, "used": usage.used, "free": usage.free}], "sampledAt": time.time() * 1000, "resources": {"status": "unsupported", "reason": "cgroup and Linux pressure are unsupported on macOS"}, "gpu": {"status": "unsupported", "sampledAt": None, "devices": []}}
     cpu = [int(value) for value in Path("/proc/stat").read_text().splitlines()[0].split()[1:9]]
     memory = {}
     for line in Path("/proc/meminfo").read_text().splitlines():
@@ -456,7 +558,7 @@ def health(payload=None):
     for directory in paths:
         usage = shutil.disk_usage(directory)
         disks.append({"path": str(directory), "total": usage.total, "used": usage.used, "free": usage.free})
-    result = {"cpuTotal": sum(cpu), "cpuIdle": cpu[3] + cpu[4], "memoryTotal": total, "memoryUsed": max(0, total - available), "disks": disks, "sampledAt": time.time() * 1000}
+    result = {"cpuTotal": sum(cpu), "cpuIdle": cpu[3] + cpu[4], "memoryTotal": total, "memoryUsed": max(0, total - available), "disks": disks, "sampledAt": time.time() * 1000, "resources": resource_constraints()}
     if payload and payload.get("includeGpu"):
         if not shutil.which("nvidia-smi"):
             result["gpu"] = {"status": "unsupported", "sampledAt": None, "devices": []}
@@ -475,6 +577,16 @@ def health(payload=None):
                         pass
             result["gpu"] = {"status": "reported" if devices else "unknown", "sampledAt": time.time() * 1000 if devices else None, "devices": devices}
     return result
+
+
+def launch_paths(payload):
+    """Canonical path evidence only; never create directories or launch a process."""
+    cwd, paths = payload.get("cwd", ""), payload.get("paths", [])
+    if not isinstance(cwd, str) or len(cwd) > 4096 or "\0" in cwd or not isinstance(paths, list) or len(paths) > 200:
+        raise ValueError("Invalid launch path inspection")
+    if any(not isinstance(item, str) or not item or len(item) > 4096 or "\0" in item for item in paths):
+        raise ValueError("Invalid assignment path")
+    return {"cwd": str(Path(cwd or HOME).expanduser().resolve()), "paths": [str(Path(item).expanduser().resolve()) for item in paths]}
 
 
 def agent_command(provider, conversation_id=None, agent_id=None, preset=None, instructions="", roe_profile=None):
@@ -502,14 +614,17 @@ def agent_command(provider, conversation_id=None, agent_id=None, preset=None, in
             command += ["resume", conversation_id]
         elif provider == "claude":
             command += ["--resume", conversation_id]
+        elif provider == "opencode":
+            command += ["--session", conversation_id]
         else:
             command += ["--conversation", conversation_id]
     if instructions:
-        command += ["--", instructions]
+        command += ["--prompt", instructions] if provider == "opencode" else ["--", instructions]
     return command
 
 
 def create(payload):
+    require_tmux(payload)
     provider = payload.get("provider")
     if provider not in SESSION_PROVIDERS:
         raise ValueError("Unsupported provider")
@@ -529,7 +644,7 @@ def create(payload):
     roe_profile = payload.get("roeProfile")
     if not is_terminal and roe_profile not in (None, "full", "gated", "provider-default"):
         raise ValueError("Invalid Rules of Engagement profile")
-    if roe_profile == "gated" and ((provider == "antigravity" and payload.get("transport") != "chat") or (preset and (preset.get("command") != {"antigravity": "agy"}.get(provider, provider) or any(flag in preset.get("args", "") for flag in ("--dangerously", "--sandbox", "--ask-for-approval", "--permission-mode", "--settings", "--allowedTools", "--allowed-tools", "--config", "--profile")) or re.search(r"(^|\s)-c(\s|=)", preset.get("args", ""))))):
+    if roe_profile == "gated" and ((provider in ("antigravity", "opencode") and payload.get("transport") != "chat") or (preset and (preset.get("command") != {"antigravity": "agy"}.get(provider, provider) or any(flag in preset.get("args", "") for flag in ("--dangerously", "--sandbox", "--ask-for-approval", "--permission-mode", "--settings", "--allowedTools", "--allowed-tools", "--config", "--profile")) or re.search(r"(^|\s)-c(\s|=)", preset.get("args", ""))))):
         raise ValueError("Gated mode requires a supported, unmodified provider command")
     title = " ".join(str(payload.get("title") or "").split())[:100]
     if not title:
@@ -549,7 +664,7 @@ def create(payload):
             checked(["tmux", "new-session", "-d", "-s", name, "-c", str(cwd), "printf 'AgentC2 structured chat session. Open Chat to interact.\\n'; while :; do sleep 86400; done"])
             for key, value in (("provider", provider), ("title", title), ("cwd", str(cwd)), ("preset", preset.get("name", "") if preset else ""), ("preset_id", preset.get("id", "") if preset else ""), ("worktree", payload.get("worktreeOperation") or ""), ("roe", roe_profile or "full"), ("chat_session_id", identifier)):
                 checked(["tmux", "set-option", "-t", name, "@hq_" + key, value])
-        command = {"protocolVersion": 1, "commandId": command_id, "operation": "create", "payload": {"provider": provider, "cwd": str(cwd), "title": title, "roeProfile": roe_profile or "full", "managedName": name, "instructions": payload.get("instructions") or "", **({"providerSessionId": conversation_id} if conversation_id else {})}}
+        command = {"protocolVersion": 1, "commandId": command_id, "operation": "create", "payload": {"provider": provider, "cwd": str(cwd), "title": title, "roeProfile": roe_profile or "full", "managedName": name, "instructions": payload.get("instructions") or "", **({"model": payload["model"]} if payload.get("model") else {}), **({"providerSessionId": conversation_id} if conversation_id else {})}}
         # Do not remove the reservation when acknowledgement is lost: retrying
         # this exact command checks its durable receipt without relaunching.
         receipt = chat_remote({**payload, "request": {"protocolVersion": 1, "action": "command", "command": command}})
@@ -610,6 +725,22 @@ def configure_session(payload):
     return {"name": name}
 
 
+def rename(payload):
+    name, title = payload.get("name", ""), payload.get("title", "")
+    if not isinstance(title, str) or not title.strip() or len(title.encode("utf-16-le", errors="surrogatepass")) // 2 > 100 or any(ord(char) < 32 or 127 <= ord(char) <= 159 or 0xD800 <= ord(char) <= 0xDFFF for char in title):
+        raise ValueError("Use a session title of 1–100 characters without control characters")
+    title = title.strip()
+    if not isinstance(name, str) or not TMUX_RE.fullmatch(name):
+        raise ValueError("This rename is only available for an AgentC2 managed session")
+    if payload.get("chatSessionId"):
+        chat_remote({**payload, "request": {"protocolVersion": 1, "action": "rename", "sessionId": payload["chatSessionId"], "managedName": name, "title": title}})
+    else:
+        if tmux_option(name, "@hq_provider") not in SESSION_PROVIDERS:
+            raise ValueError("This rename is only available for an AgentC2 managed session")
+        checked(["tmux", "set-option", "-t", name, "--", "@hq_title", title])
+    return {"name": name, "title": title}
+
+
 def scroll_session(payload):
     name = payload.get("name", "")
     direction = payload.get("direction")
@@ -649,6 +780,39 @@ def history(payload):
     return {"text": output[-4000000:], "truncated": len(output) > 4000000}
 
 
+def centcom_sync(payload):
+    root = HOME / ".cache" / "agentc2" / "centcom"
+    if root.is_symlink():
+        raise ValueError("CENTCOM workspace path is a symlink")
+    root.mkdir(parents=True, mode=0o700, exist_ok=True)
+    info = root.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+        raise ValueError("CENTCOM workspace is not owned safely")
+    root.chmod(0o700)
+    files = payload.get("files") or {}
+    if not isinstance(files, dict):
+        raise ValueError("Invalid CENTCOM workspace files")
+    written = []
+    for name, content in files.items():
+        if name not in ("AGENTS.md", "SITUATION.json", "CAPABILITIES.json") or not isinstance(content, str) or len(content.encode("utf-8")) > 1_000_000:
+            raise ValueError("Unsupported or oversized CENTCOM file")
+        target = root / name
+        if target.is_symlink():
+            raise ValueError(f"CENTCOM file target is a symlink: {name}")
+        temp = root / (name + "." + uuid.uuid4().hex + ".tmp")
+        fd = os.open(temp, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as out:
+                out.write(content)
+                out.flush()
+                os.fsync(out.fileno())
+            os.replace(temp, target)
+            written.append(name)
+        finally:
+            temp.unlink(missing_ok=True)
+    return {"path": str(root), "written": written}
+
+
 def managed_action(payload, action):
     name = payload.get("name", "")
     if not TMUX_RE.fullmatch(name) or tmux_option(name, "@hq_provider") not in SESSION_PROVIDERS:
@@ -672,12 +836,21 @@ def main():
         raise ValueError("Missing remote request")
     payload = json.loads(base64.b64decode(encoded).decode("utf-8"))
     action = payload.get("action")
-    if action == "inventory":
+    if action in ("inventory", "create", "worktree_launch", "configure"):
+        require_tmux(payload)
+    if action == "requirements":
+        require_tmux(payload)
+        result = {"tmux": True}
+    elif action == "inventory":
         result = inventory(payload)
+    elif action == "github":
+        result = github_request(payload)
     elif action == "chat":
         result = chat_remote(payload)
     elif action == "health":
         result = health(payload)
+    elif action == "launch_paths":
+        result = launch_paths(payload)
     elif action == "create":
         with cleanup_lock():
             result = create(payload)
@@ -715,6 +888,8 @@ def main():
         result = flash_decide(payload)
     elif action == "diff_files":
         result = diff_files(payload)
+    elif action == "artifact_read":
+        result = artifact_read(payload)
     elif action == "diff_detail":
         result = diff_detail(payload)
     elif action == "diff_hunk":
@@ -724,8 +899,13 @@ def main():
         result = cleanup_preview(payload)
     elif action == "cleanup_delete":
         result = cleanup_delete(payload)
+    elif action == "centcom_sync":
+        with cleanup_lock():
+            result = centcom_sync(payload)
     elif action == "configure":
         result = configure_session(payload)
+    elif action == "rename":
+        result = rename(payload)
     elif action == "scroll":
         result = scroll_session(payload)
     elif action == "history":

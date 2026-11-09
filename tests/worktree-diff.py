@@ -2,6 +2,7 @@
 
 import hashlib
 from pathlib import Path
+from helpers.python_sources import exec_sources
 import subprocess
 import tempfile
 import unittest
@@ -25,7 +26,7 @@ class DiffActions(unittest.TestCase):
         self.git("commit", "-qm", "Base")
         source = Path(__file__).resolve().parents[1] / "electron"
         self.scope = {"__name__": "diff_fixture"}
-        exec("\n".join((source / name).read_text() for name in ("worktrees.py", "worktree-diff.py", "provider_telemetry.py", "remote.py")), self.scope)
+        exec_sources(self.scope, *(source / name for name in ("worktrees.py", "worktree-diff.py", "provider_telemetry.py", "remote.py")))
         self.scope["WORKTREE_ROOT"] = self.root / "owned"
         self.scope["create"] = lambda payload: {"name": payload["managedName"]}
         self.operation = "a" * 32
@@ -47,6 +48,29 @@ class DiffActions(unittest.TestCase):
 
     def act(self, file, detail, hunk, operation):
         return self.scope["diff_hunk_action"]({**self.request, "fileId": file["id"], "revision": detail["revision"], "hunkId": hunk["id"], "operation": operation})
+
+    def test_readonly_artifact_revision_bounds_and_path_isolation(self):
+        target = self.worktree / "verification.txt"
+        target.write_text("PASS fixture checks\n")
+        status = self.git("status", "--porcelain", cwd=self.worktree)
+        request = {"operationId": self.operation, "path": "verification.txt"}
+        artifact = self.scope["artifact_read"](request)
+        self.assertEqual(artifact["text"], target.read_text())
+        self.assertEqual(artifact["revision"], hashlib.sha256(target.read_bytes()).hexdigest())
+        self.assertEqual(self.git("status", "--porcelain", cwd=self.worktree), status)
+        target.write_text("Changed result\n")
+        with self.assertRaisesRegex(ValueError, "revision changed"):
+            self.scope["artifact_read"]({**request, "revision": artifact["revision"]})
+        (self.worktree / "outside-link").symlink_to(self.repo / "changes.txt")
+        (self.worktree / "directory-link").symlink_to(self.repo, target_is_directory=True)
+        for name in ("../changes.txt", "/etc/passwd", ".env", ".git/config", "outside-link", "directory-link/changes.txt", "binary.bin"):
+            with self.subTest(name=name), self.assertRaises((ValueError, OSError)):
+                self.scope["artifact_read"]({**request, "path": name})
+        (self.worktree / "large.txt").write_text("x" * 256001)
+        with self.assertRaisesRegex(ValueError, "256000"):
+            self.scope["artifact_read"]({**request, "path": "large.txt"})
+        with self.assertRaisesRegex(ValueError, "owned"):
+            self.scope["artifact_read"]({**request, "operationId": "b" * 32})
 
     def test_stage_one_hunk_revert_another_and_reject_stale(self):
         path = self.worktree / "changes.txt"

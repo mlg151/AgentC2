@@ -83,6 +83,9 @@ class Journal:
         if "managed_name" not in {row[1] for row in self.db.execute("PRAGMA table_info(sessions)")}:
             self.db.execute("ALTER TABLE sessions ADD COLUMN managed_name TEXT")
 
+        if "model" not in {row[1] for row in self.db.execute("PRAGMA table_info(sessions)")}:
+            self.db.execute("ALTER TABLE sessions ADD COLUMN model TEXT")
+
     @contextmanager
     def transaction(self):
         with self.lock:
@@ -102,11 +105,29 @@ class Journal:
 
     @staticmethod
     def _view(row):
-        return dict(id=row["id"], managedName=row["managed_name"], provider=row["provider"], providerSessionId=row["provider_session_id"], title=row["title"], cwd=row["cwd"], roeProfile=row["roe_profile"], state=row["state"], activeTurnId=row["active_turn_id"], capabilities=json.loads(row["capabilities"]), createdAt=row["created_at"], updatedAt=row["updated_at"])
+        return dict(id=row["id"], model=row["model"], managedName=row["managed_name"], provider=row["provider"], providerSessionId=row["provider_session_id"], title=row["title"], cwd=row["cwd"], roeProfile=row["roe_profile"], state=row["state"], activeTurnId=row["active_turn_id"], capabilities=json.loads(row["capabilities"]), createdAt=row["created_at"], updatedAt=row["updated_at"])
 
     @staticmethod
     def _receipt(row):
         return dict(commandId=row["id"], sessionId=row["session_id"], state=row["state"], result=json.loads(row["result"]) if row["result"] is not None else None, error=row["error"])
+
+    def rename(self, identifier, managed_name, title):
+        if not isinstance(title, str) or not title.strip() or len(title.encode("utf-16-le", errors="surrogatepass")) // 2 > 100 or any(ord(char) < 32 or 127 <= ord(char) <= 159 or 0xD800 <= ord(char) <= 0xDFFF for char in title):
+            raise ValueError("Invalid session title")
+        with self.transaction():
+            row = self._session(identifier)
+            if not row["managed_name"] or row["managed_name"] != managed_name:
+                raise ValueError("Managed session changed; refresh before renaming")
+            self.db.execute("UPDATE sessions SET title=? WHERE id=?", (title.strip(), identifier))
+        return dict(title=title.strip())
+
+    def set_model(self, identifier, model):
+        from chat_protocol import model_id
+        model_id(model)
+        with self.transaction():
+            self._session(identifier)
+            self.db.execute("UPDATE sessions SET model=? WHERE id=?", (model, identifier))
+            self._append(identifier, "session.updated", dict(state="idle", detail="Model changed to " + model))
 
     def receipt(self, command_id):
         with self.lock:
@@ -135,6 +156,7 @@ class Journal:
                 at = now()
                 self.db.execute("INSERT INTO sessions(id,provider,provider_session_id,title,cwd,roe_profile,state,capabilities,created_at,updated_at) VALUES(?,?,?,?,?,?,'starting',?,?,?)", (identifier, payload["provider"], payload.get("providerSessionId"), payload["title"], payload["cwd"], payload["roeProfile"], encoded(capabilities), at, at))
                 self.db.execute("UPDATE sessions SET managed_name=? WHERE id=?", (payload.get("managedName"), identifier))
+                self.db.execute("UPDATE sessions SET model=? WHERE id=?", (payload.get("model"), identifier))
                 self._append(identifier, "session.updated", dict(state="starting", detail="Starting remote provider"))
             else:
                 identifier = command["sessionId"]
@@ -145,6 +167,12 @@ class Journal:
                 needed = dict(send="streaming", steer="steering", interrupt="interrupt").get(operation)
                 if needed and not capabilities[needed]:
                     raise ValueError("Provider does not support this operation")
+                if operation == "model" and session["state"] != "idle":
+                    raise ValueError("Wait for the current turn to finish before changing the model")
+                if operation in ("send", "model"):
+                    pending = self.db.execute("SELECT operation FROM commands WHERE session_id=? AND state IN ('accepted','dispatching')", (identifier,)).fetchall()
+                    if any(row["operation"] == "model" for row in pending) or (operation == "model" and pending):
+                        raise ValueError("Wait for the pending command or model change to finish")
                 if operation == "send" and session["state"] != "idle":
                     raise ValueError("Wait for the active turn before sending another message")
                 # Reserve the turn before acknowledgement so concurrent senders cannot

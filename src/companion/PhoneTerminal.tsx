@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { enableTerminalLinks } from '../terminalLinks';
+import { enableTerminalTouchScroll } from '../terminalTouch';
 import type { Session, TerminalSnapshot, TerminalState } from '../types';
 import { CompanionClient } from './client';
 import { imagePayload } from './image';
@@ -54,6 +55,7 @@ export function PhoneTerminal({ client, session, connected, onResume, onRefresh 
     const offState = client.on('terminal:state', (value) => { const state = value as TerminalState; if (state.id === handle.current) apply(state); });
     const offExit = client.on('terminal:exit', (value) => { const exit = value as { id: string; code: number }; if (exit.id === handle.current) { writable.current = false; setError(`Terminal connection closed (${exit.code}). Reattach to reconnect.`); onRefresh(); } });
     const input = term.onData((data) => { if (writable.current && handle.current) void client.request('terminal:write', handle.current, data).catch(showError); });
+    const disposeTouch = enableTerminalTouchScroll(term, node);
     const resize = new ResizeObserver(() => {
       if (!writable.current || !handle.current || !node?.clientWidth || !node?.clientHeight) return;
       addon.fit(); void client.request('terminal:resize', handle.current, term.cols, term.rows).catch(showError);
@@ -69,6 +71,7 @@ export function PhoneTerminal({ client, session, connected, onResume, onRefresh 
       snapshotReady = true;
     }).catch((cause) => { if (!cancelled) showError(cause); });
     return () => {
+      disposeTouch();
       cancelled = true; offData(); offState(); offExit(); input.dispose(); resize.disconnect();
       if (handle.current) void client.request('terminal:close', handle.current).catch(() => {});
       handle.current = null; terminal.current = null; fit.current = null; term.dispose();
@@ -125,7 +128,7 @@ export function PhoneTerminal({ client, session, connected, onResume, onRefresh 
   const position = matches.length ? matches[match % matches.length] : -1;
   return <section className="phone-session">
     <div className="phone-session-heading"><h1>{session.title}</h1><p>{session.hostName} · {session.provider} · {session.stale ? 'Stale — host unavailable' : session.state}</p><small>{session.cwd || 'Working directory unavailable'}</small></div>
-    <div className="phone-control"><span>{control?.connection === 'reconnecting' ? 'SSH reconnecting…' : canControl ? 'You control this session' : `Viewing · ${control?.controller?.name || 'no device'} controls`}</span>{session.canAttach ? <button className="button-primary" disabled={!connected || !control || Boolean(canControl) || control.connection !== 'connected' || control.exitCode !== null || session.stale} onClick={() => void take()}>Take control</button> : null}</div>
+    <div className="phone-control"><span>{control?.connection === 'connecting' ? 'Connecting terminal…' : control?.connection === 'reconnecting' ? 'SSH reconnecting…' : canControl ? 'You control this session' : `Viewing · ${control?.controller?.name || 'no device'} controls`}</span>{session.canAttach ? <button className="button-primary" disabled={!connected || !control || Boolean(canControl) || control.connection !== 'connected' || control.exitCode !== null || session.stale} onClick={() => void take()}>Take control</button> : null}</div>
     <div className="phone-actions">
       {session.canResume ? <button disabled={!connected || session.stale || busy} onClick={onResume}>Resume</button> : null}
       {session.canAttach ? <><button disabled={!connected} onClick={() => { setAttached(!attached); setAttempt((value) => value + 1); }}>{attached ? 'Detach' : 'Attach'}</button><button disabled={!connected || !handle.current} onClick={() => void client.request<{ text: string; truncated: boolean }>('terminal:history', handle.current).then((value) => { setHistory(value); setQuery(''); setMatch(0); }).catch(showError)}>Find history</button>{control?.exitCode !== null && control ? <button onClick={() => setAttempt((value) => value + 1)}>Reattach</button> : null}</> : null}

@@ -15,7 +15,7 @@ import uuid
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "electron"))
 from chat_adapters import ProviderRejected
 from chat_codex import CodexAdapter, display
-from chat_codex_schema import BUNDLE, validate_native
+from chat_codex_schema import validate_native
 from chat_journal import Journal
 from chat_protocol import CONTRACT
 from chat_remote import CHAT_WORKER_FILES, chat_remote
@@ -34,6 +34,7 @@ def poll(callback, predicate=lambda value: bool(value)):
 
 @unittest.skipUnless(sys.platform.startswith("linux"), "Provider execution targets remote Linux")
 class CodexTests(unittest.TestCase):
+    protocol_version = "0.163.0"
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="a2-codex-")
         self.root = Path(self.temp.name)
@@ -57,9 +58,11 @@ class CodexTests(unittest.TestCase):
             os.environ["AGENTC2_CODEX_FIXTURE_DIR"] = self.old_env
         self.temp.cleanup()
 
-    def start(self, resume=False, profile="gated"):
-        caps = dict(provider="codex", version=BUNDLE["version"], status="supported", reason=None, **{name: name not in ("attachments", "forks") for name in CONTRACT["capabilities"]})
+    def start(self, resume=False, profile="gated", model=None):
+        caps = dict(provider="codex", version=self.protocol_version, status="supported", reason=None, **{name: name not in ("attachments", "forks") for name in CONTRACT["capabilities"]})
         payload = dict(provider="codex", cwd=str(self.root), title="Codex protocol fixture", roeProfile=profile)
+        if model:
+            payload["model"] = model
         if resume:
             payload["providerSessionId"] = "saved-native-thread"
         command = dict(protocolVersion=1, commandId=str(uuid.uuid4()), operation="create", payload=payload)
@@ -86,6 +89,34 @@ class CodexTests(unittest.TestCase):
         command = dict(protocolVersion=1, commandId=str(uuid.uuid4()), operation="respond", sessionId=self.identifier, payload=payload)
         self.journal.accept(command)
         return self.adapter.respond(payload)
+
+    def test_configured_model_reaches_provider_and_survives_journal_reopen(self):
+        self.start(model="fixture-model")
+        requests = [json.loads(line) for line in (self.root / "requests.jsonl").read_text().splitlines()]
+        self.assertEqual(next(item for item in requests if item.get("method") == "thread/start")["params"]["model"], "fixture-model")
+        reopened = Journal(self.root / "journal")
+        try:
+            self.assertEqual(reopened.history(self.identifier)["session"]["model"], "fixture-model")
+        finally:
+            reopened.close()
+
+    def test_model_change_reaches_next_turn_in_same_thread(self):
+        self.start(model="fixture-first")
+        first_turn, _ = self.send("plain")
+        # The journal can still show its initial idle state after the provider
+        # acknowledges turn/start but before turn/started reaches the reader.
+        poll(self.page, lambda value: value["session"]["state"] == "idle" and any(
+            event["type"] == "turn.completed" and event["turnId"] == first_turn["turnId"]
+            for event in value["events"]
+        ))
+        native = self.adapter.thread_id
+        self.adapter.set_model("fixture-second")
+        self.send("plain")
+        poll(self.page, lambda value: sum(event["type"] == "turn.completed" for event in value["events"]) == 2)
+        requests = [json.loads(line) for line in (self.root / "requests.jsonl").read_text().splitlines()]
+        turns = [item["params"] for item in requests if item.get("method") == "turn/start"]
+        self.assertEqual([item["model"] for item in turns], ["fixture-first", "fixture-second"])
+        self.assertTrue(all(item["threadId"] == native for item in turns))
 
     def test_streamed_text_final_and_cumulative_usage(self):
         self.start()
@@ -214,7 +245,7 @@ class CodexTests(unittest.TestCase):
 
     def test_installed_cli_unauthenticated_handshake_without_model_call(self):
         binary = shutil.which("codex")
-        if binary is None or subprocess.run([binary, "--version"], capture_output=True, text=True, check=False).stdout.strip() != "codex-cli " + BUNDLE["version"]:
+        if binary is None or subprocess.run([binary, "--version"], capture_output=True, text=True, check=False).stdout.strip() != "codex-cli " + self.protocol_version:
             self.skipTest("Pinned native Codex CLI is not installed")
         self.start()
         self.adapter.stop()
@@ -226,6 +257,14 @@ class CodexTests(unittest.TestCase):
         with self.assertRaisesRegex(ProviderRejected, "Sign in with codex login"):
             self.adapter.start()
         self.assertIsNotNone(self.adapter.process.poll())
+
+
+class Codex164Tests(CodexTests):
+    protocol_version = "0.164.0"
+
+
+class Codex165Tests(CodexTests):
+    protocol_version = "0.165.0"
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 const crypto = require('node:crypto');
 
-const PROVIDERS = ['codex', 'claude', 'antigravity'];
+const PROVIDERS = ['codex', 'claude', 'antigravity', 'opencode'];
 const DAY = 86_400_000;
 
 function createCleanup({ store, events, inventory, runRemote, hostId }) {

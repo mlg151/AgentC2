@@ -1,13 +1,80 @@
 const { contextBridge, ipcRenderer } = require('electron');
+let peerEpoch = 0;
+ipcRenderer.on('peer-sync:applied', (_event, state) => { peerEpoch = Math.max(peerEpoch, state.peerEpoch); });
 
 contextBridge.exposeInMainWorld('agentHQ', {
   platform: process.platform,
-  getState: () => ipcRenderer.invoke('state:get'),
-  saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
+  peerSyncStatus: () => ipcRenderer.invoke('peer-sync:status'),
+  savePeerSync: (input) => ipcRenderer.invoke('peer-sync:save', input),
+  issuePeerPairing: () => ipcRenderer.invoke('peer-sync:pair'),
+  connectPeer: (input) => ipcRenderer.invoke('peer-sync:connect', input),
+  revokePeer: (id) => ipcRenderer.invoke('peer-sync:revoke', id),
+  pullPeerTabs: (id) => ipcRenderer.invoke('peer-sync:pull-tabs', id),
+  onPeerSyncStatus: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on('peer-sync:status', listener);
+    return () => ipcRenderer.removeListener('peer-sync:status', listener);
+  },
+  onPeerSyncApplied: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on('peer-sync:applied', listener);
+    return () => ipcRenderer.removeListener('peer-sync:applied', listener);
+  },
+  checkForUpdates: () => ipcRenderer.invoke('updates:check'),
+  updateState: () => ipcRenderer.invoke('updates:state'),
+  downloadUpdate: () => ipcRenderer.invoke('updates:download'),
+  installUpdate: () => ipcRenderer.invoke('updates:install'),
+  onUpdateState: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on('updates:state', listener);
+    return () => ipcRenderer.removeListener('updates:state', listener);
+  },
+  overwatchWindowState: () => ipcRenderer.invoke('overwatch:state'),
+  undockOverwatch: () => ipcRenderer.invoke('overwatch:undock'),
+  dockOverwatch: () => ipcRenderer.invoke('overwatch:dock'),
+  selectOverwatchUnit: (key) => ipcRenderer.invoke('overwatch:select', key),
+  onOverwatchWindowState: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on('overwatch:window-state', listener);
+    return () => ipcRenderer.removeListener('overwatch:window-state', listener);
+  },
+  onOverwatchSelect: (callback) => {
+    const listener = (_event, key) => callback(key);
+    ipcRenderer.on('overwatch:selected', listener);
+    return () => ipcRenderer.removeListener('overwatch:selected', listener);
+  },
+  onOverwatchWorkspace: (callback) => {
+    const listener = (_event, workspace) => callback(workspace);
+    ipcRenderer.on('overwatch:workspace', listener);
+    return () => ipcRenderer.removeListener('overwatch:workspace', listener);
+  },
+  getState: async () => { const state = await ipcRenderer.invoke('state:get'); peerEpoch = Math.max(peerEpoch, state.peerEpoch || 0); return state; },
+  saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings, peerEpoch),
   previewOpOrder: (order) => ipcRenderer.invoke('oporder:preview', order),
   enrollOpOrder: (order, revision) => ipcRenderer.invoke('oporder:enroll', order, revision),
   previewSitrep: (input) => ipcRenderer.invoke('sitrep:preview', input),
   launchSitrep: (input) => ipcRenderer.invoke('sitrep:launch', input),
+  githubRequest: (input) => ipcRenderer.invoke('github:request', input),
+  listSpecops: () => ipcRenderer.invoke('specops:list'),
+  specopsDefinition: () => ipcRenderer.invoke('specops:definition'),
+  configureSpecops: (yaml) => ipcRenderer.invoke('specops:configure', yaml),
+  launchSpecops: (input) => ipcRenderer.invoke('specops:launch', input),
+  controlSpecops: (id, action) => ipcRenderer.invoke('specops:control', id, action),
+  centcomState: () => ipcRenderer.invoke('centcom:state'),
+  configureCentcom: (config) => ipcRenderer.invoke('centcom:configure', config),
+  startCentcom: (prompt) => ipcRenderer.invoke('centcom:start', prompt),
+  submitCentcom: (text) => ipcRenderer.invoke('centcom:submit', text),
+  interruptCentcom: () => ipcRenderer.invoke('centcom:interrupt'),
+  pauseCentcom: (paused) => ipcRenderer.invoke('centcom:pause', paused),
+  resetCentcomSession: () => ipcRenderer.invoke('centcom:reset'),
+  decideCentcomDirective: (id, decision) => ipcRenderer.invoke('centcom:decide-directive', id, decision),
+  decideAllCentcomDirectives: (decision) => ipcRenderer.invoke('centcom:decide-all-directives', decision),
+  applyCentcomAutomation: (id, decision) => ipcRenderer.invoke('centcom:apply-automation', id, decision),
+  onCentcomState: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on('centcom:updated', listener);
+    return () => ipcRenderer.removeListener('centcom:updated', listener);
+  },
   listExercises: () => ipcRenderer.invoke('exercise:list'),
   exerciseCapabilities: (hostId) => ipcRenderer.invoke('exercise:capabilities', hostId),
   createExercise: (input) => ipcRenderer.invoke('exercise:create', input),
@@ -21,7 +88,7 @@ contextBridge.exposeInMainWorld('agentHQ', {
   decideFlashTraffic: (input) => ipcRenderer.invoke('flash:decide', input),
   interruptFaults: () => ipcRenderer.invoke('fault:interrupt-all'),
   resetFault: (key) => ipcRenderer.invoke('fault:reset', key),
-  saveWorkspace: (workspace) => ipcRenderer.invoke('workspace:save', workspace),
+  saveWorkspace: (workspace) => ipcRenderer.invoke('workspace:save', workspace, peerEpoch),
   updateSessionMetadata: (key, patch) => ipcRenderer.invoke('metadata:update', key, patch),
   onSharedState: (callback) => {
     const listener = (_event, state) => callback(state);
@@ -39,6 +106,7 @@ contextBridge.exposeInMainWorld('agentHQ', {
     ipcRenderer.on('sessions:deleted', listener);
     return () => ipcRenderer.removeListener('sessions:deleted', listener);
   },
+  renameSession: (key, title) => ipcRenderer.invoke('session:rename', key, title),
   onSessionPinned: (callback) => {
     const listener = (_event, key, pinned) => callback(key, pinned);
     ipcRenderer.on('session:pinned', listener);

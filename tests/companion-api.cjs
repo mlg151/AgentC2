@@ -26,6 +26,13 @@ assert.ok(fs.existsSync(file), 'Phone workflows need a typed companion API adapt
   const workspace = { tabs: ['phone'], metadata: {} }; assert.equal(await api.saveWorkspace(workspace), workspace);
   assert.equal(calls.some(([channel]) => channel === 'workspace:save'), false);
   const eventCases = {
+    onPeerSyncStatus: ['peer-sync:status', {}, [{}]],
+    onPeerSyncApplied: ['peer-sync:applied', {}, [{}]],
+    onUpdateState: ['updates:state', {}, [{}]],
+    onOverwatchWindowState: ['overwatch:window-state', {}, [{}]],
+    onOverwatchSelect: ['overwatch:selected', {}, [{}]],
+    onOverwatchWorkspace: ['overwatch:workspace', {}, [{}]],
+    onCentcomState: ['centcom:updated', {}, [{}]],
     onSharedState: ['state:updated', {}, [{}]],
     onSessionsDeleted: ['sessions:deleted', ['key'], [['key']]], onSessionPinned: ['session:pinned', { key: 'key', pinned: true }, ['key', true]],
     onInventory: ['inventory:updated', 'inventory', ['inventory']], onHealth: ['health:updated', [], [[]]], onAttentionOpen: ['attention:open', 'key', ['key']],

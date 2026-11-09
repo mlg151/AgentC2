@@ -1,3 +1,6 @@
+import { UpdateButton } from '../components/UpdateButton';
+import { CentcomDialog } from '../components/CentcomDialog';
+import { SpecopsDialog } from '../components/SpecopsDialog';
 import { PhoneHistory } from './PhoneHistory';
 import { useCallback, useEffect, useState } from 'react';
 import { SettingsDialog } from '../components/SettingsDialog';
@@ -12,7 +15,7 @@ import { situationFor } from '../workspace';
 import type { CompanionState, FlashRequest, Inventory, Session, Settings } from '../types';
 import type { CompanionClient } from './client';
 
-type Panel = 'history' | 'settings' | 'exercise' | 'flash' | 'cleanup' | 'overwatch' | 'sitrep' | 'diff' | 'delete' | null;
+type Panel = 'centcom' | 'specops' | 'history' | 'settings' | 'exercise' | 'flash' | 'cleanup' | 'overwatch' | 'sitrep' | 'diff' | 'delete' | null;
 
 /** Phone navigation wraps the same validated workflows as the desktop. */
 export function PhoneTools({ client, state, inventory, selected, connected, onSettings, onSelect, onRefresh }: {
@@ -59,7 +62,7 @@ export function PhoneTools({ client, state, inventory, selected, connected, onSe
   const sessions = inventory?.sessions || [];
   return <section className="phone-tools" aria-label="Companion tools">
     <div className="phone-actions"><button aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>Tools</button>{selected ? <button aria-expanded={sessionTools} onClick={() => setSessionTools(!sessionTools)}>Session tools</button> : null}</div>
-    {expanded ? <div className="phone-tool-grid"><button disabled={!connected} onClick={() => open('history')}>Search history</button><button disabled={!connected} onClick={() => open('settings')}>Settings & remote access</button><button disabled={!connected} onClick={() => open('exercise')}>Joint Exercises</button><button disabled={!connected} onClick={() => open('flash')}>Flash Traffic</button><button disabled={!connected} onClick={() => open('cleanup')}>Clean up history</button><button disabled={!connected} onClick={() => open('overwatch')}>Overwatch</button><button disabled={!connected || busy} onClick={() => { if (window.confirm('Interrupt all sessions flagged by the loop breaker?')) void perform(() => window.agentHQ!.interruptFaults()); }}>Interrupt faulty sessions</button></div> : null}
+    {expanded ? <div className="phone-tool-grid"><UpdateButton /><button disabled={!connected} onClick={() => open('centcom')}>CENTCOM</button><button disabled={!connected} onClick={() => open('specops')}>SPECOPS</button><button disabled={!connected} onClick={() => open('history')}>Search history</button><button disabled={!connected} onClick={() => open('settings')}>Settings & remote access</button><button disabled={!connected} onClick={() => open('exercise')}>Joint Exercises</button><button disabled={!connected} onClick={() => open('flash')}>Flash Traffic</button><button disabled={!connected} onClick={() => open('cleanup')}>Clean up history</button><button disabled={!connected} onClick={() => open('overwatch')}>Overwatch</button><button disabled={!connected || busy} onClick={() => { if (window.confirm('Interrupt all sessions flagged by the loop breaker?')) void perform(() => window.agentHQ!.interruptFaults()); }}>Interrupt faulty sessions</button></div> : null}
     {selected && sessionTools ? <div className="phone-session-tools">
       <label>Project<input value={project} disabled={busy} onChange={(event) => { setProject(event.target.value); setDirty((current) => ({ ...current, project: true })); }} maxLength={100} /></label>
       <label>Notes & handoff<textarea value={notes} disabled={busy} onChange={(event) => { setNotes(event.target.value); setDirty((current) => ({ ...current, notes: true })); }} rows={4} maxLength={20000} /></label>
@@ -67,8 +70,10 @@ export function PhoneTools({ client, state, inventory, selected, connected, onSe
       {inventory?.faults.filter((fault) => fault.sessionKey === selected.key).map((fault) => <p key={fault.id}>{fault.label}: {fault.detail} · {fault.status}</p>)}
     </div> : null}
     {message ? <p className="phone-tool-message" role="status">{message}</p> : null}
+    {panel === 'centcom' ? <CentcomDialog settings={state.settings} onClose={close} /> : null}
+    {panel === 'specops' ? <SpecopsDialog settings={state.settings} onClose={close} /> : null}
     {panel === 'history' ? <PhoneHistory sessions={sessions} onSelect={(session) => { onSelect(session); close(); }} onClose={close} /> : null}
-    {panel === 'settings' ? <SettingsDialog settings={state.settings} onSave={saveSettings} onExternalSettings={onSettings} onClose={close} /> : null}
+    {panel === 'settings' ? <SettingsDialog settings={state.settings} onSave={saveSettings} onExternalSettings={onSettings} onSpecops={() => open('specops')} onClose={close} /> : null}
     {panel === 'exercise' ? <ExerciseDialog settings={state.settings} hostId={selected?.hostId || ''} onLaunched={onRefresh} onClose={close} /> : null}
     {panel === 'cleanup' ? <SessionCleanupDialog settings={state.settings} target={selected} onSave={saveSettings} onClose={close} /> : null}
     {panel === 'overwatch' ? <Overwatch sessions={sessions} situation={situationFor({ tabs: [], selectedKey: null, splitKey: null, metadata: state.metadata })} attention={state.attention} onSelect={(session) => { onSelect(session); close(); }} onClose={close} /> : null}

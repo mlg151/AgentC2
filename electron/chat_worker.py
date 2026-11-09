@@ -77,6 +77,9 @@ class Worker:
             result["pendingRequests"] = self.journal.pending_requests(request["sessionId"])
             result["session"]["canStop"] = request["sessionId"] in self.adapters
             return result
+        if action == "rename":
+            fields(request, ["protocolVersion", "action", "sessionId", "managedName", "title"])
+            return self.journal.rename(request["sessionId"], request["managedName"], request["title"])
         if action == "receipt":
             fields(request, ["protocolVersion", "action", "commandId"])
             return self.journal.receipt(request["commandId"])
@@ -139,6 +142,13 @@ class Worker:
                             if tagged.returncode == 0 and tagged.stdout.strip() == identifier:
                                 subprocess.run(["tmux", "kill-session", "-t", name], capture_output=True, timeout=5, check=True)
                         self.journal.append(identifier, "session.updated", dict(state="stopped", detail="Managed provider stopped"))
+                    elif operation == "model":
+                        if session["state"] != "idle" or self.journal.pending_requests(identifier):
+                            raise ProviderRejected("Wait for the current turn to finish before changing the model")
+                        if not callable(getattr(adapter, "set_model", None)):
+                            raise ProviderRejected("This provider runtime does not support changing models")
+                        result = adapter.set_model(command["payload"]["model"])
+                        self.journal.set_model(identifier, command["payload"]["model"])
                     elif operation == "send":
                         result = adapter.send(command["payload"]["text"], command["commandId"])
                     elif operation == "steer":

@@ -376,6 +376,13 @@ async function select(index) { await page.locator('.session-row').filter({ hasTe
     created.push(completed.name);
     await refresh();
     await poll(async () => { latest = await page.evaluate(() => window.agentHQ.inventory()); return latest.attention.some((a) => a.sessionKey === `${mirror.id}/tmux:${completed.name}` && a.kind === 'completed'); }, 'Confirmed completion missing from inbox');
+    // Both host entries point to the same SSH fixture. Wait until each has
+    // observed the terminal exit before acknowledging; otherwise the other
+    // host can legitimately add a fresh completion after the acknowledgement.
+    await poll(async () => {
+      latest = await page.evaluate(() => window.agentHQ.inventory());
+      return ['default', mirror.id].every((hostId) => latest.attention.some((a) => a.sessionKey === `${hostId}/tmux:${completed.name}` && a.kind === 'completed'));
+    }, 'Both host views did not observe the completion before acknowledgement');
     await page.getByRole('button', { name: /Attention inbox/ }).click();
     assert.ok(await page.getByRole('complementary', { name: 'Live host resources' }).isVisible());
     await page.screenshot({ path: path.join(os.tmpdir(), 'agent-hq-attention.png') });
