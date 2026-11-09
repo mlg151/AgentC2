@@ -37,12 +37,12 @@ async function closeDialog(page) { await page.keyboard.press('Escape'); await pa
       window.qa.units.push(commander); window.qa.emit('onInventory', window.qa.inventory());
     });
     await page.locator('.session-row').filter({ hasText: 'CENTCOM //' }).click();
-    await page.getByRole('tab', { name: 'CENTCOM // CODEX (fixture)', exact: true }).waitFor();
+    await page.locator('.pane-heading').getByText('CENTCOM // CODEX (fixture)', { exact: true }).waitFor();
     await page.evaluate(() => {
       const internalSessionKeys = [window.qa.units.pop().key];
       window.qa.emit('onInventory', { ...window.qa.inventory(), internalSessionKeys });
     });
-    await page.getByRole('tab', { name: 'CENTCOM // CODEX (fixture)', exact: true }).waitFor({ state: 'hidden' });
+    await page.locator('.pane-heading').getByText('CENTCOM // CODEX (fixture)', { exact: true }).waitFor({ state: 'hidden' });
     assert.equal(await page.locator('.session-row').filter({ hasText: 'CENTCOM //' }).count(), 0);
     assert.equal(await page.locator('.session-row').count(), 3);
     await page.getByRole('button', { name: 'CENTCOM', exact: true }).click();
@@ -51,9 +51,12 @@ async function closeDialog(page) { await page.keyboard.press('Escape'); await pa
     await page.screenshot({ path: path.join(screenshots, 'commander-free-roster.png'), timeout: 60000 });
     await page.locator('.session-row').filter({ hasText: 'Bravo unit' }).click();
     await page.locator('.session-row').filter({ hasText: 'Charlie unit' }).click();
-    assert.equal(await page.getByRole('tab').count(), 3);
-    await page.getByRole('button', { name: 'Close tab Bravo unit', exact: true }).click();
-    assert.equal(await page.getByRole('tab', { name: 'Bravo unit', exact: true }).count(), 0);
+    await until(page, () => window.qa.workspace.tabs.length === 3);
+    assert.equal(await page.getByRole('tablist', { name: 'Open sessions' }).count(), 0);
+    await page.locator('.session-row').filter({ hasText: 'Bravo unit' }).click();
+    await page.getByRole('region', { name: 'Session Bravo unit', exact: true }).getByRole('button', { name: 'Close view', exact: true }).click();
+    await until(page, () => !window.qa.workspace.tabs.includes(window.qa.units[1].key));
+    assert.equal((await call(page, 'stop')).length, 0, 'Closing a view must preserve the running session');
     await page.locator('.session-row').filter({ hasText: 'Bravo unit' }).click();
     await page.getByRole('button', { name: 'Pin to A', exact: true }).filter({ visible: true }).click();
     await until(page, () => window.qa.workspace.situation.anchorKey === window.qa.units[1].key);
@@ -161,7 +164,7 @@ async function closeDialog(page) { await page.keyboard.press('Escape'); await pa
     await dialog.getByRole('button', { name: 'Preview SitRep and target', exact: true }).click();
     await dialog.getByRole('button', { name: 'Send and launch recipient', exact: true }).click();
     await dialog.waitFor({ state: 'hidden' });
-    await page.getByRole('tab', { name: 'SitRep recipient', exact: true }).waitFor();
+    await page.locator('.pane-heading').getByText('SitRep recipient', { exact: true }).waitFor();
     assert.equal((await call(page, 'launchSitrep')).length, 1, 'Delayed inventory must not resend an acknowledged handoff');
 
     await page.getByRole('button', { name: 'New unit', exact: true }).click();
@@ -171,7 +174,7 @@ async function closeDialog(page) { await page.keyboard.press('Escape'); await pa
     await dialog.getByRole('alert').filter({ hasText: 'Launch fixture refused' }).waitFor();
     await page.evaluate(() => { window.qa.fail = {}; });
     await dialog.getByRole('button', { name: 'Start session', exact: true }).click();
-    await dialog.waitFor({ state: 'hidden' }); await page.getByRole('tab', { name: 'Created desktop fixture', exact: true }).waitFor();
+    await dialog.waitFor({ state: 'hidden' }); await page.locator('.pane-heading').getByText('Created desktop fixture', { exact: true }).waitFor();
     assert.equal((await call(page, 'create')).length, 2, 'One rejected attempt and one acknowledged attempt must not be automatically replayed');
     await page.getByRole('button', { name: 'New unit', exact: true }).click();
     await dialog.getByLabel('Session name', { exact: true }).fill('Acknowledged hidden fixture');
@@ -196,7 +199,7 @@ async function closeDialog(page) { await page.keyboard.press('Escape'); await pa
     await dialog.getByRole('button', { name: 'SPECOPS ranks and workflows', exact: true }).click();
     await dialog.getByRole('heading', { name: 'SPECOPS / GitHub', exact: true }).waitFor(); await closeDialog(page);
     await page.locator('.session-row').filter({ hasText: 'Bravo unit' }).click();
-    await page.getByRole('tab', { name: 'Alpha unit', exact: true }).click();
+    await page.locator('.session-row').filter({ hasText: 'Alpha unit' }).click();
     await until(page, () => window.qa.workspace.selectedKey === window.qa.units[0].key);
     await page.locator('.workspace-tools').getByRole('button', { name: 'Pin', exact: true }).click();
     await page.getByRole('button', { name: 'Unpin Alpha unit', exact: true }).waitFor();
@@ -246,7 +249,11 @@ async function closeDialog(page) { await page.keyboard.press('Escape'); await pa
     await page.evaluate(() => document.activeElement?.blur()); await page.keyboard.press('Alt+Shift+Space');
     assert.equal(await page.locator('.flash-traffic [aria-selected="true"]').getAttribute('role'), 'option');
     await page.getByRole('button', { name: 'Close Flash Traffic', exact: true }).click();
-    while (await page.getByRole('tab').count()) await page.locator('.tab-strip button[aria-label^="Close tab "]').first().click();
+    while (await page.evaluate(() => window.qa.workspace.tabs.length)) {
+      const before = await page.evaluate(() => window.qa.workspace.tabs.length);
+      await page.locator('.session-pane:visible').getByRole('button', { name: 'Close view', exact: true }).first().click();
+      await page.waitForFunction((before) => window.qa.workspace.tabs.length < before, before);
+    }
     await page.getByRole('heading', { name: 'Select a session', exact: true }).waitFor();
     await page.locator('.no-selection').getByRole('button', { name: 'New session', exact: true }).click(); await closeDialog(page);
     await page.screenshot({ path: path.join(screenshots, 'app-dashboard-routes-empty-workspace.png') });
@@ -261,7 +268,8 @@ async function closeDialog(page) { await page.keyboard.press('Escape'); await pa
       window.qa.release('getState');
     });
     await page.getByRole('button', { name: 'Unpin Bravo unit', exact: true }).waitFor();
-    assert.equal(await page.getByRole('tab', { name: 'Alpha unit', exact: true }).count(), 0);
+    await until(page, () => !window.qa.workspace.tabs.includes('alpha/tmux:hq-000000000001'));
+    assert.equal(await page.getByRole('region', { name: 'Session Alpha unit', exact: true }).count(), 0);
     await page.evaluate(() => {
       const removed = window.qa.units[1].key;
       window.qa.units = window.qa.units.filter((unit) => unit.key !== removed);
@@ -301,6 +309,6 @@ async function closeDialog(page) { await page.keyboard.press('Escape'); await pa
     await page.screenshot({ path: path.join(screenshots, 'app-initial-state-failure.png') });
 
     assert.deepEqual(errors, []);
-    console.log('PASS desktop tab/pane transitions, anchor swap/release, keyboard cycling/focus/zen, notes, clipboard/workspace/pin failures, settings recovery, real dialog routing, shortcut persistence, urgent/inbox/fault/Flash decisions, delayed launch/handoff acknowledgement, and initial/peer/window event races');
+    console.log('PASS desktop roster/pane transitions, anchor swap/release, keyboard cycling/focus/zen, notes, clipboard/workspace/pin failures, settings recovery, real dialog routing, shortcut persistence, urgent/inbox/fault/Flash decisions, delayed launch/handoff acknowledgement, and initial/peer/window event races');
   } catch (error) { if (page && !page.isClosed()) { await page.screenshot({ path: path.join(screenshots, 'app-workflows-failure.png') }).catch(() => {}); fs.writeFileSync(path.join(screenshots, 'failure-body.txt'), await page.locator('body').innerText().catch(() => 'Page unavailable')); } throw error; } finally { await browser?.close(); await server?.close(); fs.rmSync(viteCache, { recursive: true, force: true }); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

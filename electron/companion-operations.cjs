@@ -35,7 +35,7 @@ function companionOperations(gateway) {
     'centcom:decide-directive': write((_, args) => gateway.desktopHandlers.get('centcom:decide-directive')(...args)),
     'centcom:decide-all-directives': write((_, args) => gateway.desktopHandlers.get('centcom:decide-all-directives')(...args)),
     'centcom:apply-automation': write((_, args) => gateway.desktopHandlers.get('centcom:apply-automation')(...args)),
-    'session:rename': write((_, args) => gateway.desktopHandlers.get('session:rename')(...args)),
+    'session:rename': write((_, args) => service.renameSession(...args)),
     'state:get': read(() => gateway.bootstrap()),
     'attention:ack': read((_, args) => service.acknowledge(...args)),
     'settings:save': write((_, [input]) => service.saveSettings(input)),
