@@ -6,8 +6,8 @@ android {
         applicationId = "com.agentc2.companion"
         minSdk = 29
         targetSdk = 36
-        versionCode = 4017
-        versionName = "0.4.17"
+        versionCode = 4018
+        versionName = "0.4.18"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
