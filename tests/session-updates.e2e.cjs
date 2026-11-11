@@ -106,6 +106,24 @@ const path = require('node:path');
     assert.equal(await page.evaluate(() => window.qa.lastCreate.model), 'provider/custom-model');
     await page.evaluate(() => { window.qa.holdInventory = false; window.qa.finishInventory(); });
     await page.waitForFunction(() => !document.querySelector('.lucide-refresh-cw.spin'));
+    // Issue #89 regression: the roster spin must stop producing frames after its bounded cycle even while loading stays stuck.
+    await page.evaluate(() => { window.qa.holdInventory = true; });
+    const spinButton = page.getByRole('button', { name: 'Refresh sessions', exact: true });
+    await spinButton.evaluate((button) => button.click());
+    await page.waitForFunction(() => Boolean(document.querySelector('.lucide-refresh-cw.spin')));
+    const spinCycleStopped = await page.evaluate(async () => {
+      const icon = document.querySelector('.lucide-refresh-cw.spin');
+      const cap = document.getAnimations().find((animation) => animation.animationName === 'spin-cap' && animation.effect.target === icon);
+      if (!cap || cap.playState !== 'running') return false;
+      await Promise.race([
+        new Promise((resolve) => { cap.finished.then(() => resolve(true)).catch(() => resolve(false)); }),
+        new Promise((resolve) => setTimeout(() => resolve(false), 4000)),
+      ]);
+      return cap.playState === 'finished';
+    });
+    assert.equal(spinCycleStopped, true, 'The stuck roster spin must stop producing frames after its bounded cycle');
+    await page.screenshot({ path: path.join(screenshots, 'spin-cycle-stops-while-loading.png') });
+    await page.evaluate(() => { window.qa.holdInventory = false; window.qa.finishInventory(); });
     assert.equal(await launchError.isVisible(), true, 'An inventory refresh must not clear a failed launch');
     await page.screenshot({ path: path.join(screenshots, 'launch-error-after-refresh.png') });
     await dialog.getByRole('button', { name: 'Close', exact: true }).click();

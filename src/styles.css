@@ -130,8 +130,10 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .resume-id{display:flex;flex-direction:column;gap:7px;color:#93a9b5;font-size:11px}
 .resume-id code{padding:10px;border:1px solid #304550;border-radius:5px;color:#cddce1;overflow-wrap:anywhere}
 .dialog-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:10px}
-.spin{animation:spin 1s linear infinite}
+/* A stuck loading flag kept the compositor producing frames forever; see issue #89. */
+.spin{animation:spin 1s linear infinite,spin-cap 3s linear forwards}
 @keyframes spin{to{transform:rotate(360deg)}}
+@keyframes spin-cap{from{opacity:1}to{opacity:0}}
 @media(max-width:1100px){.workspace{grid-template-columns:180px minmax(295px,34%) minmax(410px,1fr)}.sidebar-item{gap:9px;padding-left:15px}.detail-panel{padding:18px}.detail-heading{gap:12px}.detail-heading>.provider-mark{width:52px;height:52px;font-size:35px}.detail-state small{display:none}.toolbar{gap:7px}.toolbar-button,.button-primary{padding:0 11px}}
 @media(prefers-reduced-motion:reduce){.spin{animation:none}}
 
