@@ -24,7 +24,7 @@ jobs:
           - runner: windows-2022
             platform: win
             arch: x64
-          - runner: ubuntu-22.04
+          - runner: [self-hosted, Linux, X64, agentc2]
             platform: linux
             arch: x64
           - runner: macos-15-intel
@@ -249,7 +249,7 @@ jobs:
     name: Production coverage acceptance
     if: always()
     needs: [desktop, linux-ssh, linux-cleanup]
-    runs-on: ubuntu-22.04
+    runs-on: [self-hosted, Linux, X64, agentc2]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7.0.1
@@ -363,7 +363,7 @@ jobs:
   companion-coverage:
     name: New code 100% line and branch coverage
     needs: [android]
-    runs-on: ubuntu-22.04
+    runs-on: [self-hosted, Linux, X64, agentc2]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
@@ -403,7 +403,7 @@ jobs:
     timeout-minutes: 5
     if: always()
     needs: [desktop, linux-ssh, linux-cleanup, coverage, android, companion-coverage]
-    runs-on: ubuntu-22.04
+    runs-on: [self-hosted, Linux, X64, agentc2]
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.1.0
